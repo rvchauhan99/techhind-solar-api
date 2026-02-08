@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
 const bucketService = require("../../common/services/bucket.service.js");
+const puppeteerService = require("../../common/services/puppeteer.service.js");
 
 // Template directory paths
 const TEMPLATE_DIR = path.join(__dirname, "../../../templates/quotation");
@@ -255,16 +256,8 @@ const generateQuotationPDF = async (quotationData) => {
         fs.writeFileSync(debugHtmlPath, html);
         console.log("Debug HTML saved to:", debugHtmlPath);
 
-        // Launch Puppeteer
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        });
+        // Launch Puppeteer (Chrome/Chromium path resolved via common service)
+        browser = await puppeteer.launch(puppeteerService.getLaunchOptions());
 
         const page = await browser.newPage();
 
