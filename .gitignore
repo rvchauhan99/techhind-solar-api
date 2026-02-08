@@ -5,3 +5,4 @@ env.local
 # Certificates / keys (use env or secrets in production)
 # *.pem
 # src/config/ca.pem
+.DS_Store
