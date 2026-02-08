@@ -1,0 +1,44 @@
+{
+  "name": "express-auth-app",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "npm install & npm run db:migrate & node src/server.js",
+    "dev": "nodemon src/server.js",
+    "db:migrate": "sequelize-cli db:migrate",
+    "db:undo": "sequelize-cli db:migrate:undo",
+    "db:seed": "sequelize-cli db:seed:all",
+    "db:reset": "sequelize-cli db:migrate:undo:all && sequelize-cli db:migrate && sequelize-cli db:seed:all",
+    "db:make-migration": "sequelize-cli migration:generate --name",
+    "db:make-seeder": "sequelize-cli seed:generate --name",
+    "db:clone": "node scripts/clone-database.js",
+    "db:restore": "node scripts/restore-from-backup.js",
+    "assign-icons": "node scripts/assign-icons-to-modules.js",
+    "assign-inventory-to-superadmin": "node scripts/assign-inventory-to-superadmin-once.js"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1691.0",
+    "bcrypt": "^6.0.0",
+    "body-parser": "^2.2.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "handlebars": "^4.7.8",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "nodemailer": "^6.9.8",
+    "otplib": "^12.0.1",
+    "passport": "^0.7.0",
+    "pg": "^8.16.3",
+    "pg-hstore": "^2.3.4",
+    "puppeteer": "^24.32.1",
+    "qrcode": "^1.5.4",
+    "sequelize": "^6.37.7",
+    "sequelize-cli": "^6.6.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

@@ -1,0 +1,342 @@
+"use strict";
+
+const ExcelJS = require("exceljs");
+const db = require("../../models/index.js");
+const { Op } = require("sequelize");
+const { SERIAL_STATUS, TRANSACTION_TYPE } = require("../../common/utils/constants.js");
+const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
+
+const { Stock, StockSerial, Product, CompanyWarehouse, User } = db;
+
+// Helper function to get or create stock record
+const getOrCreateStock = async ({ product_id, warehouse_id, product, transaction }) => {
+  let stock = await Stock.findOne({
+    where: {
+      product_id,
+      warehouse_id,
+    },
+    transaction,
+  });
+
+  if (!stock) {
+    stock = await Stock.create(
+      {
+        product_id,
+        warehouse_id,
+        quantity_on_hand: 0,
+        quantity_reserved: 0,
+        quantity_available: 0,
+        tracking_type: product.tracking_type,
+        serial_required: product.serial_required,
+        min_stock_quantity: product.min_stock_quantity || 0,
+      },
+      { transaction }
+    );
+  }
+
+  return stock;
+};
+
+// Update stock quantities
+const updateStockQuantities = async ({ stock, quantity, last_updated_by, isInward = true, transaction }) => {
+  const newQuantityOnHand = isInward
+    ? stock.quantity_on_hand + quantity
+    : stock.quantity_on_hand - quantity;
+
+  const newQuantityAvailable = isInward
+    ? stock.quantity_available + quantity
+    : stock.quantity_available - quantity;
+
+  await stock.update(
+    {
+      quantity_on_hand: newQuantityOnHand,
+      quantity_available: newQuantityAvailable,
+      last_inward_at: isInward ? new Date() : stock.last_inward_at,
+      last_outward_at: !isInward ? new Date() : stock.last_outward_at,
+      last_updated_by,
+    },
+    { transaction }
+  );
+};
+
+// Create stock from PO Inward (called from poInward service)
+const createStockFromPOInward = async ({ poInward, transaction }) => {
+  const t = transaction;
+
+  for (const item of poInward.items) {
+    const product = item.product;
+    const warehouseId = poInward.warehouse_id;
+
+    // Get or create stock record
+    const stock = await getOrCreateStock({
+      product_id: item.product_id,
+      warehouse_id: warehouseId,
+      product,
+      transaction: t,
+    });
+
+    // Update stock quantities
+    await updateStockQuantities({
+      stock,
+      quantity: item.accepted_quantity,
+      last_updated_by: poInward.received_by,
+      isInward: true,
+      transaction: t,
+    });
+
+    // Create serials if serialized
+    if (product.serial_required && item.serials && item.serials.length > 0) {
+      for (const serial of item.serials) {
+        // Check if serial already exists
+        const existingSerial = await StockSerial.findOne({
+          where: {
+            serial_number: serial.serial_number,
+          },
+          transaction: t,
+        });
+
+        if (existingSerial) {
+          throw new Error(`Serial number ${serial.serial_number} already exists`);
+        }
+
+        await StockSerial.create(
+          {
+            product_id: item.product_id,
+            warehouse_id: warehouseId,
+            stock_id: stock.id,
+            serial_number: serial.serial_number,
+            status: SERIAL_STATUS.AVAILABLE,
+            source_type: TRANSACTION_TYPE.PO_INWARD,
+            source_id: poInward.id,
+            inward_date: new Date(),
+          },
+          { transaction: t }
+        );
+      }
+    }
+
+  }
+
+  // Create ledger entries after all stocks are updated
+  await inventoryLedgerService.createPOInwardLedgerEntries({
+    poInward,
+    transaction: t,
+  });
+};
+
+const listStocks = async ({
+  page = 1,
+  limit = 20,
+  warehouse_id = null,
+  product_id = null,
+  warehouse_name = null,
+  product_name = null,
+  quantity_on_hand,
+  quantity_on_hand_op,
+  quantity_on_hand_to,
+  quantity_available,
+  quantity_available_op,
+  quantity_available_to,
+  quantity_reserved,
+  quantity_reserved_op,
+  quantity_reserved_to,
+  min_stock_quantity,
+  min_stock_quantity_op,
+  min_stock_quantity_to,
+  tracking_type = null,
+  low_stock = null,
+  sortBy = "created_at",
+  sortOrder = "DESC",
+} = {}) => {
+  const offset = (page - 1) * limit;
+
+  const where = {};
+
+  if (warehouse_id) where.warehouse_id = warehouse_id;
+  if (product_id) where.product_id = product_id;
+  if (tracking_type) where.tracking_type = tracking_type;
+
+  const addNumCond = (field, val, valTo, opStr) => {
+    const v = parseFloat(val);
+    const vTo = parseFloat(valTo);
+    if (Number.isNaN(v) && Number.isNaN(vTo)) return;
+    const cond = {};
+    const op = (opStr || "").toLowerCase();
+    if (op === "between" && !Number.isNaN(v) && !Number.isNaN(vTo)) cond[Op.between] = [v, vTo];
+    else if (op === "gt" && !Number.isNaN(v)) cond[Op.gt] = v;
+    else if (op === "lt" && !Number.isNaN(v)) cond[Op.lt] = v;
+    else if (op === "gte" && !Number.isNaN(v)) cond[Op.gte] = v;
+    else if (op === "lte" && !Number.isNaN(v)) cond[Op.lte] = v;
+    else if (!Number.isNaN(v)) cond[Op.eq] = v;
+    if (Reflect.ownKeys(cond).length > 0) where[field] = cond;
+  };
+  addNumCond("quantity_on_hand", quantity_on_hand, quantity_on_hand_to, quantity_on_hand_op);
+  addNumCond("quantity_available", quantity_available, quantity_available_to, quantity_available_op);
+  addNumCond("quantity_reserved", quantity_reserved, quantity_reserved_to, quantity_reserved_op);
+  addNumCond("min_stock_quantity", min_stock_quantity, min_stock_quantity_to, min_stock_quantity_op);
+
+  if (low_stock !== undefined && low_stock !== "" && low_stock !== null) {
+    const isLow = low_stock === "true" || low_stock === true;
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push(
+      db.sequelize.literal(`(COALESCE(quantity_available, 0) < COALESCE(min_stock_quantity, 0)) = ${isLow}`)
+    );
+  }
+
+  const productInclude = {
+    model: Product,
+    as: "product",
+    attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required"],
+    required: !!product_name,
+    ...(product_name && { where: { product_name: { [Op.iLike]: `%${product_name}%` } } }),
+  };
+  const warehouseInclude = {
+    model: CompanyWarehouse,
+    as: "warehouse",
+    attributes: ["id", "name", "address"],
+    required: !!warehouse_name,
+    ...(warehouse_name && { where: { name: { [Op.iLike]: `%${warehouse_name}%` } } }),
+  };
+
+  const { count, rows } = await Stock.findAndCountAll({
+    where,
+    include: [productInclude, warehouseInclude],
+    order: [[sortBy, sortOrder]],
+    limit,
+    offset,
+    distinct: true,
+  });
+
+  const data = rows.map((stock) => {
+    const row = stock.toJSON();
+    return {
+      id: row.id,
+      product_id: row.product_id,
+      product: row.product,
+      warehouse_id: row.warehouse_id,
+      warehouse: row.warehouse,
+      quantity_on_hand: row.quantity_on_hand,
+      quantity_reserved: row.quantity_reserved,
+      quantity_available: row.quantity_available,
+      tracking_type: row.tracking_type,
+      serial_required: row.serial_required,
+      min_stock_quantity: row.min_stock_quantity,
+      last_inward_at: row.last_inward_at,
+      last_outward_at: row.last_outward_at,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  });
+
+  return {
+    data,
+    meta: {
+      page,
+      limit,
+      total: count,
+      pages: limit > 0 ? Math.ceil(count / limit) : 0,
+    },
+  };
+};
+
+const exportStocks = async (params = {}) => {
+  const { data } = await listStocks({ ...params, page: 1, limit: 10000 });
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Stocks");
+  worksheet.columns = [
+    { header: "Product", key: "product_name", width: 24 },
+    { header: "Warehouse", key: "warehouse_name", width: 22 },
+    { header: "On Hand", key: "quantity_on_hand", width: 12 },
+    { header: "Reserved", key: "quantity_reserved", width: 12 },
+    { header: "Available", key: "quantity_available", width: 12 },
+    { header: "Tracking Type", key: "tracking_type", width: 14 },
+    { header: "Min Stock", key: "min_stock_quantity", width: 12 },
+    { header: "Created At", key: "created_at", width: 22 },
+  ];
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0E0E0" } };
+  (data || []).forEach((s) => {
+    worksheet.addRow({
+      product_name: s.product?.product_name || "",
+      warehouse_name: s.warehouse?.name || "",
+      quantity_on_hand: s.quantity_on_hand != null ? s.quantity_on_hand : "",
+      quantity_reserved: s.quantity_reserved != null ? s.quantity_reserved : "",
+      quantity_available: s.quantity_available != null ? s.quantity_available : "",
+      tracking_type: s.tracking_type || "",
+      min_stock_quantity: s.min_stock_quantity != null ? s.min_stock_quantity : "",
+      created_at: s.created_at ? new Date(s.created_at).toISOString() : "",
+    });
+  });
+  const buffer = await workbook.xlsx.writeBuffer();
+  return buffer;
+};
+
+const getStockById = async ({ id } = {}) => {
+  if (!id) return null;
+
+  const stock = await Stock.findOne({
+    where: { id },
+    include: [
+      { model: Product, as: "product", attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required"] },
+      { model: CompanyWarehouse, as: "warehouse", attributes: ["id", "name", "address"] },
+      {
+        model: StockSerial,
+        as: "serials",
+        where: { status: SERIAL_STATUS.AVAILABLE },
+        required: false,
+        attributes: ["id", "serial_number", "status", "inward_date"],
+      },
+    ],
+  });
+
+  if (!stock) return null;
+
+  return stock.toJSON();
+};
+
+const getStocksByWarehouse = async ({ warehouse_id } = {}) => {
+  if (!warehouse_id) return [];
+
+  const stocks = await Stock.findAll({
+    where: { warehouse_id },
+    include: [
+      { 
+        model: Product, 
+        as: "product", 
+        attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required"] 
+      },
+    ],
+    order: [["product_id", "ASC"]],
+  });
+
+  return stocks.map((stock) => stock.toJSON());
+};
+
+const getAvailableSerials = async ({ product_id, warehouse_id } = {}) => {
+  if (!product_id || !warehouse_id) return [];
+
+  const serials = await StockSerial.findAll({
+    where: {
+      product_id: parseInt(product_id),
+      warehouse_id: parseInt(warehouse_id),
+      status: SERIAL_STATUS.AVAILABLE,
+    },
+    attributes: ["id", "serial_number", "status", "inward_date"],
+    order: [["serial_number", "ASC"]],
+  });
+
+  return serials.map((serial) => serial.toJSON());
+};
+
+module.exports = {
+  listStocks,
+  exportStocks,
+  getStockById,
+  getStocksByWarehouse,
+  getAvailableSerials,
+  createStockFromPOInward,
+  updateStockQuantities,
+  getOrCreateStock,
+};
+

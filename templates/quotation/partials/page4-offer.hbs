@@ -1,0 +1,110 @@
+<!-- Page 4: Commercial Offer Page -->
+<div class="page offer-page">
+    <!-- Header -->
+    <div class="offer-header">
+        <div>
+            <h1 class="offer-title">COMMERCIAL<br />OFFER</h1>
+        </div>
+        <img src="{{logoImage}}" alt="Solar Earth" class="offer-logo" />
+    </div>
+    <div class="offer-underline"></div>
+
+    <!-- Subtitle -->
+    <p class="offer-subtitle">
+        Price Quote & Payment schedule for <strong>{{project_capacity}} KW</strong> Grid Tie Rooftop Solar System:
+    </p>
+
+    <!-- Price Table -->
+    <table class="price-table">
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th>Amount (INR)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Per kW Rate *</td>
+                <td>{{formatCurrency price_per_kw}}</td>
+            </tr>
+            <tr>
+                <td>Rooftop ON-Grid Solar Power Plant System *</td>
+                <td>{{formatCurrency system_cost}}</td>
+            </tr>
+            <tr>
+                <td>GST @ {{gst_percent}} %</td>
+                <td>{{formatCurrency gst_amount}}</td>
+            </tr>
+            <tr>
+                <td>Net-Metering Cost</td>
+                <td>{{#if net_metering_cost}}{{formatCurrency net_metering_cost}}{{else}}As Actual{{/if}}</td>
+            </tr>
+            <tr>
+                <td>GEDA Application Amount</td>
+                <td>{{formatCurrency geda_amount}}</td>
+            </tr>
+            <tr class="total-row">
+                <td><strong>Grand Total Cost Of The Project</strong></td>
+                <td><strong>{{formatCurrency grand_total}}</strong></td>
+            </tr>
+            <tr>
+                <td>MNRE & State Subsidy</td>
+                <td>{{formatCurrency state_subsidy_amount}}</td>
+            </tr>
+            <tr class="final-row">
+                <td><strong>Final Effective Cost to Customer After Subsidy</strong></td>
+                <td><strong>{{formatCurrency final_cost}}</strong></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="gst-note">(*) Including GST</p>
+
+    <!-- Payment Terms -->
+    <div class="payment-terms">
+        <h3>Payment Terms</h3>
+        <ol>
+            {{#each payment_terms}}
+            <li>{{this}}</li>
+            {{/each}}
+        </ol>
+    </div>
+
+    <hr class="section-divider" />
+
+    <!-- Cheque Section -->
+    <div class="cheque-section">
+        <h3>Cheque (Payable to):</h3>
+        <p>{{bank.account_name}}</p>
+    </div>
+
+    <hr class="section-divider" />
+
+    <!-- Bank Details with QR Code -->
+    <div class="bank-section">
+        <div class="bank-details">
+            <h3>Bank Details</h3>
+            <p><strong>Bank Name:</strong>{{bank.name}}</p>
+            <p><strong>Name:</strong>{{bank.account_name}}</p>
+            <p><strong>Account No:</strong>{{bank.account_number}}</p>
+            <p><strong>IFSC Code:</strong>{{bank.ifsc}}</p>
+            <p><strong>Branch:</strong>{{bank.branch}}</p>
+        </div>
+        <div class="qr-section">
+            <div>
+            <img src="{{upiLogoImage}}" alt="BHIM UPI" class="upi-logo" />
+            </div>
+            <div>
+            <img src="{{qrCodeImage}}" alt="UPI QR Code" class="qr-code" />
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Icons -->
+    <div class="payment-icons">
+        <img src="{{gpayLogo}}" alt="Google Pay" />
+        <img src="{{paytmLogo}}" alt="Paytm" />
+        <img src="{{phonepeLogo}}" alt="PhonePe" />
+        <img src="{{amazonPayLogo}}" alt="Amazon Pay" />
+    </div>
+</div>

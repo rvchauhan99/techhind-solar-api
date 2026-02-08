@@ -1,0 +1,51 @@
+"use strict";
+
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/db.js");
+
+const State = sequelize.define(
+  "State",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
+      primaryKey: true,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    is_default: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    created_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    deleted_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: "states",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    paranoid: true,
+    deletedAt: "deleted_at",
+  }
+);
+
+// Optional: Define display field for reference dropdowns
+// This can also be configured in src/common/utils/modelDisplayFields.json
+// State.displayField = 'name';
+
+module.exports = State;
+

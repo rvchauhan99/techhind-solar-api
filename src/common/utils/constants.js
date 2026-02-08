@@ -1,0 +1,133 @@
+const RESPONSE_STATUS_CODES = {
+  SUCCESS: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  ACCESS_TOKEN_EXPIRED: 440,
+  INTERNAL_SERVER_ERROR: 500,
+};
+
+const USER_STATUS = {
+  ACTIVE: "active",
+  INACTIVE: "inactive",
+  DELETED: "deleted",
+};
+
+const ROLE_STATUS = {
+  ACTIVE: "active",
+  INACTIVE: "inactive",
+  DELETED: "deleted",
+};
+
+const MODULE_STATUS = {
+  ACTIVE: "active",
+  INACTIVE: "inactive",
+  DELETED: "deleted",
+};
+
+const TOKEN_EXPIRY = {
+  ACCESS_TOKEN: "15m",
+  REFRESH_TOKEN: "30d",
+  ACCESS_TOKEN_COOKIE: 15 * 60 * 1000, // 15 minutes in milliseconds
+  REFRESH_TOKEN_COOKIE: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+};
+
+const ROOF_TYPES = ["Flat", "Sloped", "Metal", "Tiled", "Concrete", "Other"];
+
+// Domain constants
+const INQUIRY_RATINGS = ["High", "Medium", "Low"];
+const INQUIRY_STATUS = {
+  NEW: "New",
+  CONNECTED: "Connected",
+  SITE_VISIT_DONE: "Site Visit Done",
+  QUOTATION: "Quotation",
+  UNDER_DISCUSSION: "Under Discussion",
+};
+const PAYMENT_TYPES = ["Direct Payment", "Loan Payment", "PDC Payment"];
+const FOLLOWUP_RATING = ["High", "Medium", "Low"];
+
+// Inventory Module Constants
+const PO_STATUS = {
+  DRAFT: "DRAFT",
+  APPROVED: "APPROVED",
+  CANCELLED: "CANCELLED",
+};
+
+const RECEIPT_STATUS = {
+  DRAFT: "DRAFT",
+  RECEIVED: "RECEIVED",
+  PARTIAL: "PARTIAL",
+  COMPLETE: "COMPLETE",
+  CANCELLED: "CANCELLED",
+};
+
+const RECEIPT_TYPE = {
+  PARTIAL: "PARTIAL",
+  COMPLETE: "COMPLETE",
+};
+
+const TRANSFER_STATUS = {
+  DRAFT: "DRAFT",
+  APPROVED: "APPROVED",
+  IN_TRANSIT: "IN_TRANSIT",
+  RECEIVED: "RECEIVED",
+  CANCELLED: "CANCELLED",
+};
+
+const ADJUSTMENT_STATUS = {
+  DRAFT: "DRAFT",
+  APPROVED: "APPROVED",
+  POSTED: "POSTED",
+  CANCELLED: "CANCELLED",
+};
+
+const ADJUSTMENT_TYPE = {
+  DAMAGE: "DAMAGE",
+  LOSS: "LOSS",
+  FOUND: "FOUND",
+  AUDIT: "AUDIT",
+};
+
+const SERIAL_STATUS = {
+  AVAILABLE: "AVAILABLE",
+  RESERVED: "RESERVED",
+  ISSUED: "ISSUED",
+  BLOCKED: "BLOCKED",
+};
+
+const TRANSACTION_TYPE = {
+  PO_INWARD: "PO_INWARD",
+  TRANSFER_OUT: "TRANSFER_OUT",
+  TRANSFER_IN: "TRANSFER_IN",
+  STOCK_ADJUSTMENT: "STOCK_ADJUSTMENT",
+};
+
+const MOVEMENT_TYPE = {
+  IN: "IN",
+  OUT: "OUT",
+  ADJUST: "ADJUST",
+};
+
+module.exports = {
+  RESPONSE_STATUS_CODES,
+  USER_STATUS,
+  ROLE_STATUS,
+  MODULE_STATUS,
+  TOKEN_EXPIRY,
+  ROOF_TYPES,
+  INQUIRY_RATINGS,
+  PAYMENT_TYPES,
+  INQUIRY_STATUS,
+  FOLLOWUP_RATING,
+  PO_STATUS,
+  RECEIPT_STATUS,
+  RECEIPT_TYPE,
+  TRANSFER_STATUS,
+  ADJUSTMENT_STATUS,
+  ADJUSTMENT_TYPE,
+  SERIAL_STATUS,
+  TRANSACTION_TYPE,
+  MOVEMENT_TYPE,
+};

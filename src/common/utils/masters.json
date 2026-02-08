@@ -1,0 +1,302 @@
+[
+    {
+        "id": 2,
+        "name": "State",
+        "model_name": "state.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 3,
+        "name": "City",
+        "model_name": "city.model",
+        "required_fields": [
+            "name",
+            "state_id"
+        ]
+    },
+    {
+        "id": 5,
+        "name": "Bank",
+        "model_name": "bank.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 6,
+        "name": "Division",
+        "model_name": "division.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 7,
+        "name": "Inquiry Source",
+        "model_name": "inquiry_source.model",
+        "required_fields": [
+            "source_name"
+        ]
+    },
+    {
+        "id": 8,
+        "name": "Media Category",
+        "model_name": "media_category.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 9,
+        "name": "Measurement Unit",
+        "model_name": "measurement_unit.model",
+        "required_fields": [
+            "unit"
+        ]
+    },
+    {
+        "id": 10,
+        "name": "Notification Template",
+        "model_name": "notification_template.model",
+        "required_fields": [
+            "notification_key",
+            "notification_header",
+            "notification_message"
+        ]
+    },
+    {
+        "id": 11,
+        "name": "Service Priority",
+        "model_name": "service_priority.model",
+        "required_fields": [
+            "priority"
+        ]
+    },
+    {
+        "id": 12,
+        "name": "SMS Template",
+        "model_name": "sms_template.model",
+        "required_fields": [
+            "template_id",
+            "key",
+            "text"
+        ]
+    },
+    {
+        "id": 13,
+        "name": "Order Document Type",
+        "model_name": "order_document_type.model",
+        "required_fields": [
+            "type"
+        ]
+    },
+    {
+        "id": 14,
+        "name": "Order Expense Category",
+        "model_name": "order_expense_category.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 15,
+        "name": "Order Type",
+        "model_name": "order_type.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 16,
+        "name": "Password Category",
+        "model_name": "password_category.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 17,
+        "name": "Payment Mode",
+        "model_name": "payment_mode.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 18,
+        "name": "Time Slot",
+        "model_name": "time_slot.model",
+        "required_fields": [
+            "time_value",
+            "display_order"
+        ]
+    },
+    {
+        "id": 19,
+        "name": "Predefine Document",
+        "model_name": "predefine_document.model",
+        "required_fields": [
+            "page_name",
+            "page_url"
+        ]
+    },
+    {
+        "id": 20,
+        "name": "Product Type",
+        "model_name": "product_type.model",
+        "required_fields": [
+            "name",
+            "display_order"
+        ]
+    },
+    {
+        "id": 21,
+        "name": "Project Scheme",
+        "model_name": "project_scheme.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 22,
+        "name": "Reason",
+        "model_name": "reason.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 23,
+        "name": "Task/Planner Category",
+        "model_name": "task_planner_category.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 24,
+        "name": "Whatsapp Template",
+        "model_name": "whatsapp_template.model",
+        "required_fields": [
+            "template_key",
+            "whatsapp_key"
+        ]
+    },
+    {
+        "id": 25,
+        "name": "Discom",
+        "model_name": "discom.model",
+        "required_fields": [
+            "name",
+            "name_value",
+            "short_name",
+            "state_id"
+        ]
+    },
+    {
+        "id": 26,
+        "name": "Product Make",
+        "model_name": "product_make.model",
+        "required_fields": [
+            "product_type_id",
+            "name",
+            "logo"
+        ],
+        "file_upload_fields": [
+            "logo"
+        ]
+    },
+    {
+        "id": 27,
+        "name": "Loan Type",
+        "model_name": "loan_type.model",
+        "required_fields": [
+            "type_name",
+            "interest_rate"
+        ],
+        "file_upload_fields": [
+            "logo"
+        ]
+    },
+    {
+        "id": 28,
+        "name": "Service Category",
+        "model_name": "service_category.model",
+        "required_fields": [
+            "name",
+            "logo"
+        ],
+        "file_upload_fields": [
+            "logo"
+        ]
+    },
+    {
+        "id": 29,
+        "name": "Service Price List",
+        "model_name": "service_price_list.model",
+        "required_fields": [
+            "description",
+            "price",
+            "unit_id",
+            "gst_percent"
+        ],
+        "file_upload_fields": [
+            "long_description"
+        ]
+    },
+    {
+        "id": 30,
+        "name": "Service Type",
+        "model_name": "service_type.model",
+        "required_fields": [
+            "name",
+            "service_category_id"
+        ]
+    },
+    {
+        "id": 31,
+        "name": "Sub-Division",
+        "model_name": "sub_division.model",
+        "required_fields": [
+            "name",
+            "division_id"
+        ]
+    },
+    {
+        "id": 32,
+        "name": "Task Priority",
+        "model_name": "task_priority.model",
+        "required_fields": [
+            "name"
+        ]
+    },
+    {
+        "id": 33,
+        "name": "Planner Auto",
+        "model_name": "planner_auto.model",
+        "required_fields": [
+            "task_category_id",
+            "task_key",
+            "title",
+            "details",
+            "task_priority_id",
+            "task_complete_days"
+        ],
+        "multiselect_fields": [
+            {
+                "name": "assign_to",
+                "reference_model": "user.model"
+            }
+        ]
+    },
+    {
+        "id": 34,
+        "name": "Project Phase",
+        "model_name": "project_phase.model",
+        "required_fields": [
+            "name"
+        ]
+    }
+]

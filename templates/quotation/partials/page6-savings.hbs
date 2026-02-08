@@ -1,0 +1,117 @@
+<!-- Page 6: Savings and Payback Period Page -->
+<div class="page savings-page">
+  <!-- Header -->
+  <div class="savings-header">
+    <div>
+      <h1 class="savings-title">SAVINGS AND<br/><span class="text-orange">PAYBACK PERIOD</span></h1>
+    </div>
+    <img src="{{logoImage}}" alt="Solar Earth" class="savings-logo" />
+  </div>
+
+  <!-- Stats Grid - Top Row -->
+  <div class="savings-stats-grid">
+    <div class="savings-stat-card">
+      <div class="savings-stat-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="60" height="60">
+          <circle cx="32" cy="32" r="28" fill="none" stroke="#e87722" stroke-width="3"/>
+          <circle cx="32" cy="32" r="20" fill="none" stroke="#e87722" stroke-width="2"/>
+          <text x="32" y="28" text-anchor="middle" font-size="12" fill="#e87722">$</text>
+          <path d="M24 38 L32 46 L40 38" fill="none" stroke="#e87722" stroke-width="2"/>
+        </svg>
+      </div>
+      <span class="savings-stat-label">Payback Period</span>
+      <span class="savings-stat-value text-orange">{{savings.payback_period}} Years</span>
+    </div>
+
+    <div class="savings-stat-card">
+      <div class="savings-stat-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="60" height="60">
+          <circle cx="32" cy="20" r="12" fill="#f4c542"/>
+          <path d="M20 24 L16 40 L48 40 L44 24" fill="none" stroke="#e87722" stroke-width="2"/>
+          <rect x="20" y="40" width="24" height="12" fill="#8b4513"/>
+          <path d="M24 52 L24 56 M40 52 L40 56" stroke="#8b4513" stroke-width="3"/>
+        </svg>
+      </div>
+      <span class="savings-stat-label">Average Yearly Generation</span>
+      <span class="savings-stat-value text-blue">{{savings.yearly_generation}} Units</span>
+    </div>
+
+    <div class="savings-stat-card">
+      <div class="savings-stat-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="60" height="60">
+          <ellipse cx="32" cy="40" rx="20" ry="12" fill="#f4c542"/>
+          <ellipse cx="32" cy="36" rx="20" ry="12" fill="#f4c542"/>
+          <ellipse cx="32" cy="32" rx="20" ry="12" fill="#f4c542"/>
+          <ellipse cx="32" cy="28" rx="20" ry="12" fill="none" stroke="#e87722" stroke-width="2"/>
+        </svg>
+      </div>
+      <span class="savings-stat-label">Average Annual Savings</span>
+      <span class="savings-stat-value text-orange">Rs. {{formatCurrency savings.annual_savings}}</span>
+    </div>
+  </div>
+
+  <!-- Stats Grid - Bottom Row -->
+  <div class="savings-stats-grid">
+    <div class="savings-stat-card">
+      <div class="savings-stat-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="60" height="60">
+          <circle cx="32" cy="32" r="24" fill="none" stroke="#e87722" stroke-width="2"/>
+          <text x="32" y="28" text-anchor="middle" font-size="10" fill="#e87722">₹</text>
+          <path d="M20 40 L32 28 L44 40" fill="none" stroke="#2ecc71" stroke-width="3"/>
+          <circle cx="32" cy="32" r="8" fill="none" stroke="#e87722" stroke-width="2"/>
+        </svg>
+      </div>
+      <span class="savings-stat-label">Project Cost</span>
+      <span class="savings-stat-value text-orange">Rs. {{formatCurrency savings.project_cost}}</span>
+    </div>
+
+    <div class="savings-stat-card">
+      <div class="savings-stat-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="60" height="60">
+          <path d="M32 56 C32 56 20 44 20 32 C20 20 32 8 32 8 C32 8 44 20 44 32 C44 44 32 56 32 56" fill="#2ecc71"/>
+          <path d="M32 20 L32 44 M24 32 C28 28 36 36 40 32" fill="none" stroke="#fff" stroke-width="2"/>
+        </svg>
+      </div>
+      <span class="savings-stat-label">Trees Saved</span>
+      <span class="savings-stat-value text-green">{{savings.trees_saved}}</span>
+    </div>
+
+    <div class="savings-stat-card">
+      <div class="savings-stat-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="60" height="60">
+          <path d="M16 40 Q24 20 40 24 Q56 28 48 44 Q40 56 24 52 Q12 48 16 40" fill="#87ceeb" opacity="0.7"/>
+          <text x="32" y="38" text-anchor="middle" font-size="8" fill="#1a3a5c">CO₂</text>
+          <path d="M44 20 L52 12 M48 16 L56 20" stroke="#e87722" stroke-width="2"/>
+        </svg>
+      </div>
+      <span class="savings-stat-label">Co2 Reduction</span>
+      <span class="savings-stat-value text-blue">{{savings.co2_reduction}} Tonnes</span>
+    </div>
+  </div>
+
+  <!-- Monthly Generation Chart -->
+  <div class="savings-chart-container">
+    <div class="savings-chart">
+      <div class="chart-y-axis">
+        <span>1000</span>
+        <span>800</span>
+        <span>600</span>
+        <span>400</span>
+        <span>200</span>
+        <span>0</span>
+      </div>
+      <div class="chart-bars">
+        {{#each monthly_generation}}
+        <div class="chart-bar-wrapper">
+          <div class="chart-bar" style="height: {{this.percentage}}%;">
+            <span class="chart-bar-value">{{this.value}}</span>
+          </div>
+          <span class="chart-bar-label">{{this.month}}</span>
+        </div>
+        {{/each}}
+      </div>
+      <div class="chart-y-label">Generation</div>
+      <div class="chart-x-label">Months</div>
+    </div>
+  </div>
+</div>

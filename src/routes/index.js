@@ -1,0 +1,72 @@
+const { Router } = require("express");
+const authRoutes = require("../modules/auth/auth.routes.js");
+const moduleMasterRoutes = require("../modules/moduleMaster/moduleMaster.routes.js");
+const roleMasterRoutes = require("../modules/roleMaster/roleMaster.routes.js");
+const roleModuleRoutes = require('../modules/roleModule/roleModule.routes.js');
+const userMasterRoutes = require('../modules/userMaster/userMaster.routes.js');
+const mastersRoutes = require('../modules/masters/masters.routes.js');
+const companyMasterRoutes = require('../modules/companyMaster/companyMaster.routes.js');
+const siteVisitRoutes = require('../modules/siteVisit/siteVisit.routes.js');
+const siteSurveyRoutes = require('../modules/siteSurvey/siteSurvey.routes.js');
+const inquiryRoutes = require('../modules/inquiry/inquiry.routes.js');
+const followupRoutes = require('../modules/followup/followup.routes.js');
+const inquiryDocumentsRoutes = require('../modules/inquiryDocuments/inquiryDocuments.routes.js');
+const orderDocumentsRoutes = require('../modules/orderDocuments/orderDocuments.routes.js');
+const orderPaymentsRoutes = require('../modules/orderPayments/orderPayments.routes.js');
+const productRoutes = require('../modules/product/product.routes.js');
+const billOfMaterialRoutes = require('../modules/billOfMaterial/billOfMaterial.routes.js');
+const projectPriceRoutes = require('../modules/project-price/projectPrice.routes.js');
+const quotationRoutes = require('../modules/quotation/quotation.routes.js');
+const orderRoutes = require('../modules/order/order.routes.js');
+const supplierRoutes = require('../modules/supplier/supplier.routes.js');
+const purchaseOrderRoutes = require('../modules/purchaseOrder/purchaseOrder.routes.js');
+const poInwardRoutes = require('../modules/poInward/poInward.routes.js');
+const stockRoutes = require('../modules/stock/stock.routes.js');
+const inventoryLedgerRoutes = require('../modules/inventoryLedger/inventoryLedger.routes.js');
+const stockTransferRoutes = require('../modules/stockTransfer/stockTransfer.routes.js');
+const stockAdjustmentRoutes = require('../modules/stockAdjustment/stockAdjustment.routes.js');
+const confirmOrdersRoutes = require('../modules/confirmOrders/confirmOrders.routes.js');
+const closedOrdersRoutes = require('../modules/closedOrders/closedOrders.routes.js');
+const challanRoutes = require('../modules/challan/challan.routes.js');
+const serializedInventoryReportRoutes = require('../modules/reports/serializedInventory/serializedInventory.routes.js');
+const router = Router();
+
+// health check API
+router.get("/health-check", (req, res) => {
+  res.send("Solar API is working ...");
+});
+
+router.use("/auth", authRoutes);
+router.use("/module-master", moduleMasterRoutes);
+router.use('/role-master', roleMasterRoutes);
+router.use('/role-module', roleModuleRoutes);
+router.use('/user-master', userMasterRoutes);
+router.use('/masters', mastersRoutes);
+router.use('/company', companyMasterRoutes);
+router.use('/site-visit', siteVisitRoutes);
+router.use('/site-survey', siteSurveyRoutes);
+router.use('/inquiry', inquiryRoutes);
+router.use('/followup', followupRoutes);
+router.use('/inquiry-documents', inquiryDocumentsRoutes);
+router.use('/order-documents', orderDocumentsRoutes);
+router.use('/order-payments', orderPaymentsRoutes);
+router.use('/product', productRoutes);
+router.use('/bill-of-material', billOfMaterialRoutes);
+router.use('/project-price', projectPriceRoutes);
+router.use('/quotation', quotationRoutes);
+router.use('/order', orderRoutes);
+router.use('/supplier', supplierRoutes);
+router.use('/purchase-orders', purchaseOrderRoutes);
+router.use('/po-inwards', poInwardRoutes);
+router.use('/stocks', stockRoutes);
+router.use('/inventory-ledger', inventoryLedgerRoutes);
+router.use('/stock-transfers', stockTransferRoutes);
+router.use('/stock-adjustments', stockAdjustmentRoutes);
+router.use('/confirm-orders', confirmOrdersRoutes);
+router.use('/closed-orders', closedOrdersRoutes);
+router.use('/challan', challanRoutes);
+router.use('/reports/serialized-inventory', serializedInventoryReportRoutes);
+
+router.get("/", (req, res) => res.send("API Running ✅"));
+
+module.exports = router;

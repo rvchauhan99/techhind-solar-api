@@ -1,0 +1,64 @@
+<!-- Page 1: Cover Page -->
+<div class="page cover-page" style="background-image: url('{{backgroundImage}}');">
+  <!-- Header with Logo -->
+  <div class="cover-header">
+    <img src="{{logoImage}}" alt="Solar Earth" class="cover-logo" />
+    <div class="cover-accent-bar"></div>
+  </div>
+
+  <!-- Content Card -->
+  <div class="cover-content">
+    <div class="cover-card">
+      <div class="cover-meta">
+        <p>Date: {{quotation_date}}</p>
+        <p>Ref No: #{{quotation_number}}</p>
+        <p>Valid Till: {{valid_till}}</p>
+      </div>
+
+      <div class="cover-capacity">
+        {{project_capacity}} <span class="unit">KW</span>
+      </div>
+      <div class="cover-title">
+        <span class="text-orange">Solar</span>
+        <span class="proposal">Proposal</span>
+      </div>
+
+      <div class="cover-details">
+        <h4>To,</h4>
+        <p>Name: {{customer_name}}</p>
+        <p>Phone: {{mobile_number}}</p>
+      </div>
+
+      <div class="cover-details cover-prepared-by">
+        <h4>Prepared By,</h4>
+        <p>Name: {{prepared_by.name}}</p>
+        <p>Contact No: {{prepared_by.phone}}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="cover-footer">
+    <div class="cover-footer-item">
+      <span class="icon">✉</span>
+      <div>
+        <span class="label">Email</span>
+        {{company.email}}
+      </div>
+    </div>
+    <div class="cover-footer-item">
+      <span class="icon">📞</span>
+      <div>
+        <span class="label">Mobile Number</span>
+        {{company.phone}}
+      </div>
+    </div>
+    <div class="cover-footer-item">
+      <span class="icon">🌐</span>
+      <div>
+        <span class="label">Website</span>
+        {{company.website}}
+      </div>
+    </div>
+  </div>
+</div>

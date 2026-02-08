@@ -1,0 +1,255 @@
+<!-- Page 5: Bill of Material Page -->
+<div class="page bom-page">
+  <!-- Header -->
+  <div class="bom-header">
+    <div>
+      <h1 class="bom-title">BILL OF<br/><span class="text-orange">MATERIAL</span></h1>
+    </div>
+    <img src="{{logoImage}}" alt="Solar Earth" class="bom-logo" />
+  </div>
+  <div class="bom-underline"></div>
+
+  <!-- Panel Section -->
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="8" y="16" width="48" height="32" rx="2" fill="#1a3a5c"/>
+        <rect x="10" y="18" width="20" height="13" fill="#3498db"/>
+        <rect x="34" y="18" width="20" height="13" fill="#3498db"/>
+        <rect x="10" y="33" width="20" height="13" fill="#3498db"/>
+        <rect x="34" y="33" width="20" height="13" fill="#3498db"/>
+        <line x1="32" y1="16" x2="32" y2="48" stroke="#1a3a5c" stroke-width="2"/>
+        <line x1="8" y1="32" x2="56" y2="32" stroke="#1a3a5c" stroke-width="2"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">Watt Peak:</span>
+          <span class="bom-value">{{panel.watt_peak}} Wp</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Panel Qty:</span>
+          <span class="bom-value">{{panel.quantity}} Nos</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Panel Type:</span>
+          <span class="bom-value">{{panel.type}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Panel Make:</span>
+          <span class="bom-value">{{panel.make}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Panel Warranty:</span>
+          <span class="bom-value">{{panel.warranty}} Year</span>
+          <span class="bom-label">Performance Warranty:</span>
+          <span class="bom-value">{{panel.performance_warranty}} Year</span>
+        </div>
+        <div class="bom-col bom-make-logos">
+          {{#if panel.make_logos.length}}
+          <div class="make-logos-container">
+            {{#each panel.make_logos}}
+            <div class="make-logo-item">
+              <img src="{{this.logo}}" alt="{{this.name}}" />
+            </div>
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+      </div>
+    </div>
+    <div class="bom-section-label">Panel</div>
+  </div>
+
+  <!-- Inverter Section -->
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="12" y="12" width="40" height="40" rx="4" fill="#1a3a5c"/>
+        <rect x="16" y="20" width="32" height="8" fill="#3498db"/>
+        <circle cx="22" cy="40" r="4" fill="#e87722"/>
+        <circle cx="32" cy="40" r="4" fill="#2ecc71"/>
+        <circle cx="42" cy="40" r="4" fill="#e74c3c"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">Inverter Size:</span>
+          <span class="bom-value">{{inverter.size}} kW</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Inverter Qty:</span>
+          <span class="bom-value">{{inverter.quantity}} Nos</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Inverter Make:</span>
+          <span class="bom-value">{{inverter.make}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Inverter Warranty:</span>
+          <span class="bom-value">{{inverter.warranty}} Year</span>
+        </div>
+        <div class="bom-col bom-make-logos">
+          {{#if inverter.make_logos.length}}
+          <div class="make-logos-container">
+            {{#each inverter.make_logos}}
+            <div class="make-logo-item">
+              <img src="{{this.logo}}" alt="{{this.name}}" />
+            </div>
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+      </div>
+    </div>
+    <div class="bom-section-label">Inverter</div>
+  </div>
+
+  <!-- Hybrid Inverter Section -->
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="12" y="12" width="40" height="40" rx="4" fill="#1a3a5c"/>
+        <path d="M20 32 L32 20 L32 28 L44 28 L32 44 L32 36 L20 36 Z" fill="#f4c542"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">HI Size:</span>
+          <span class="bom-value">{{hybrid_inverter.size}} kW</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">HI Qty:</span>
+          <span class="bom-value">{{hybrid_inverter.quantity}} Nos</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">HI Make:</span>
+          <span class="bom-value">{{hybrid_inverter.make}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">HI Warranty:</span>
+          <span class="bom-value">{{hybrid_inverter.warranty}} Year</span>
+        </div>
+        <div class="bom-col bom-make-logos">
+          {{#if hybrid_inverter.make_logos.length}}
+          <div class="make-logos-container">
+            {{#each hybrid_inverter.make_logos}}
+            <div class="make-logo-item">
+              <img src="{{this.logo}}" alt="{{this.name}}" />
+            </div>
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+      </div>
+    </div>
+    <div class="bom-section-label">Hybrid<br/>Inverter</div>
+  </div>
+
+  <!-- Battery Section -->
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="12" y="20" width="40" height="28" rx="4" fill="#1a3a5c"/>
+        <rect x="24" y="14" width="16" height="6" fill="#1a3a5c"/>
+        <rect x="16" y="24" width="8" height="20" fill="#2ecc71"/>
+        <rect x="28" y="24" width="8" height="20" fill="#2ecc71"/>
+        <rect x="40" y="24" width="8" height="20" fill="#2ecc71" opacity="0.5"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">Battery Size:</span>
+          <span class="bom-value">{{battery.size}} kW</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Battery Qty:</span>
+          <span class="bom-value">{{battery.quantity}} Nos</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Battery Type:</span>
+          <span class="bom-value">{{battery.type}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Battery Make:</span>
+          <span class="bom-value">{{battery.make}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Battery Warranty:</span>
+          <span class="bom-value">{{battery.warranty}} Year</span>
+        </div>
+        <div class="bom-col bom-make-logos">
+          {{#if battery.make_logos.length}}
+          <div class="make-logos-container">
+            {{#each battery.make_logos}}
+            <div class="make-logo-item">
+              <img src="{{this.logo}}" alt="{{this.name}}" />
+            </div>
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+      </div>
+    </div>
+    <div class="bom-section-label">Battery</div>
+  </div>
+
+  <!-- Cables Section -->
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <path d="M8 32 Q20 20 32 32 Q44 44 56 32" fill="none" stroke="#e87722" stroke-width="4"/>
+        <path d="M8 40 Q20 28 32 40 Q44 52 56 40" fill="none" stroke="#1a3a5c" stroke-width="4"/>
+        <circle cx="8" cy="32" r="4" fill="#e87722"/>
+        <circle cx="56" cy="32" r="4" fill="#e87722"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      <div class="bom-row bom-cables-row">
+        <div class="bom-col">
+          <span class="bom-label">AC Cable:</span>
+          <span class="bom-value">{{cables.ac_cable_make}}</span>
+          <span class="bom-sublabel">Qty: {{cables.ac_cable_qty}} METER</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">DC Cable:</span>
+          <span class="bom-value">{{cables.dc_cable_make}}</span>
+          <span class="bom-sublabel">Qty: {{cables.dc_cable_qty}} METER</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Earthing Cable:</span>
+          <span class="bom-sublabel">Qty: {{cables.earthing_qty}} METER</span>
+          <span class="bom-sublabel">{{cables.earthing_description}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">LA Cable:</span>
+          <span class="bom-sublabel">Qty: {{cables.la_qty}} Meter</span>
+          <span class="bom-sublabel">{{cables.la_description}}</span>
+        </div>
+      </div>
+    </div>
+    <div class="bom-section-label">Cables</div>
+  </div>
+
+  <!-- Structure Section -->
+  <div class="bom-text-section">
+    <h3 class="bom-text-title">Structure</h3>
+    <p><strong>Height Of Structure:</strong> {{structure.height}}</p>
+    <p><strong>Material:</strong> {{structure.material}}</p>
+    <p><strong>System Warranty:</strong> {{structure.warranty}} Year</p>
+  </div>
+
+  <!-- Balance of System Section -->
+  <div class="bom-text-section">
+    <h3 class="bom-text-title">Balance of System</h3>
+    <p><strong>ACDB:</strong> {{balance_of_system.acdb}}</p>
+    <p><strong>DCDB:</strong> {{balance_of_system.dcdb}}</p>
+    <p><strong>Earthing:</strong> {{balance_of_system.earthing}}</p>
+    <p><strong>Lightening Arrestor:</strong> {{balance_of_system.lightening_arrestor}}</p>
+    <p><strong>Miscellaneous Item:</strong> {{balance_of_system.miscellaneous}}</p>
+  </div>
+</div>
