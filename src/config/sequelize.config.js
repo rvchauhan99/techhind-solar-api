@@ -1,5 +1,14 @@
 const fs = require("fs");
+const path = require("path");
 require("dotenv").config();
+
+// Resolve DB_SSL_CA_PATH relative to project root so it works on Vercel (cwd may differ)
+function resolveCaPath(envPath) {
+    if (!envPath) return null;
+    if (path.isAbsolute(envPath)) return envPath;
+    const projectRoot = path.resolve(__dirname, "..", "..");
+    return path.resolve(projectRoot, envPath.replace(/^\.\//, ""));
+}
 
 // SSL options: use CA cert when DB_SSL_CA (env) or DB_SSL_CA_PATH (file) is set (rejectUnauthorized: true)
 // Prefer DB_SSL_CA for production/cloud; use DB_SSL_CA_PATH for local dev if you have ca.pem
@@ -9,7 +18,8 @@ function getDialectOptions(useSsl) {
     if (process.env.DB_SSL_CA) {
         sslCA = process.env.DB_SSL_CA.replace(/\\n/g, "\n");
     } else if (process.env.DB_SSL_CA_PATH) {
-        sslCA = fs.readFileSync(process.env.DB_SSL_CA_PATH, "utf8");
+        const caPath = resolveCaPath(process.env.DB_SSL_CA_PATH);
+        sslCA = fs.readFileSync(caPath, "utf8");
     }
     return {
         ssl: sslCA
