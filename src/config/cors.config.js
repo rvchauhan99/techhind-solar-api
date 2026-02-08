@@ -1,18 +1,17 @@
 const cors = require("cors");
 require("dotenv").config();
 
-const isDev = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
-
-// Development: no CORS restriction (allow any origin).
-// Production: if CORS_ALLOWED_ORIGINS is set, allow only those origins; otherwise allow any.
-const useAllowedOrigins = !isDev && Boolean(process.env.CORS_ALLOWED_ORIGINS);
-const allowedOrigins = useAllowedOrigins
-  ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+// Only restrict by origin when CORS_ALLOWED_ORIGINS is explicitly set (comma-separated list).
+// When not set: no CORS restriction — allow any origin (dev and production).
+const raw = process.env.CORS_ALLOWED_ORIGINS;
+const hasAllowList = typeof raw === "string" && raw.trim().length > 0;
+const allowedOrigins = hasAllowList
+  ? raw.split(",").map((o) => o.trim()).filter(Boolean)
   : [];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!useAllowedOrigins) return callback(null, true);
+    if (!hasAllowList) return callback(null, true);
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     callback(new Error("Not allowed by CORS"));
