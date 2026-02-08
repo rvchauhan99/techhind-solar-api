@@ -99,10 +99,9 @@ function normalizeUploadArgs(file, optionsOrPrefix) {
  * @param {string|object} optionsOrPrefix - prefix (string) or options { prefix, acl, contentType, customKey }
  * @returns {Promise<{ path: string, filename: string, size: number, mime_type: string, uploaded_at: string }>}
  */
-async function uploadFile(file, optionsOrPrefix) {
+async function uploadFile(file, optionsOrPrefix, client) {
   if (!file) throw new Error("File is required");
-
-  const { s3, bucketName: bucket } = getClient();
+  const { s3, bucketName: bucket } = client || getClient();
   const { key, body, contentType, size, originalName, acl } = normalizeUploadArgs(file, optionsOrPrefix);
 
   const params = {
@@ -174,9 +173,9 @@ async function deleteMultipleFiles(keys) {
  * @param {number} expiresIn - Expiration in seconds (default 3600)
  * @returns {Promise<string>}
  */
-async function getSignedUrl(key, expiresIn = 3600) {
+async function getSignedUrl(key, expiresIn = 3600, client) {
   if (!key) throw new Error("File path (key) is required");
-  const { s3, bucketName: bucket } = getClient();
+  const { s3, bucketName: bucket } = client || getClient();
   try {
     const url = await s3.getSignedUrlPromise("getObject", {
       Bucket: bucket,
@@ -300,8 +299,36 @@ async function copyObject(sourceKey, destKey, options = {}) {
   return result;
 }
 
+/**
+ * Get bucket client for the current request. Use req.tenant.bucket when available (tenant context), else default from env.
+ * @param {object} req - Express request (may have req.tenant.bucket)
+ * @returns {{ s3: AWS.S3, bucketName: string }}
+ */
+function getBucketForRequest(req) {
+  if (req?.tenant?.bucket) return req.tenant.bucket;
+  return getClient();
+}
+
+/**
+ * Get object from bucket using a specific client (for tenant-scoped bucket).
+ * @param {{ s3: AWS.S3, bucketName: string }} client
+ * @param {string} key
+ * @returns {Promise<{ body: Buffer, contentType?: string }>}
+ */
+async function getObjectWithClient(client, key) {
+  if (!key) throw new Error("File path (key) is required");
+  const { s3, bucketName: bucket } = client;
+  const result = await s3.getObject({ Bucket: bucket, Key: key }).promise();
+  return {
+    body: result.Body,
+    contentType: result.ContentType,
+  };
+}
+
 module.exports = {
   getClient,
+  getBucketForRequest,
+  getObjectWithClient,
   generateFilePath,
   uploadFile,
   uploadMultipleFiles,

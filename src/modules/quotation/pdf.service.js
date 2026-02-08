@@ -74,16 +74,19 @@ const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
  * Resolve path to base64 data URL: bucket key or legacy /uploads/ path
  * @param {string} pathOrKey - Bucket key (no leading /) or legacy path (e.g. /uploads/logo.png)
  * @param {string} mimeType - MIME type fallback
+ * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
  * @returns {Promise<string>} Base64 data URL
  */
-const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg") => {
+const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) => {
     if (!pathOrKey) return "";
     if (pathOrKey.startsWith("/")) {
         const absolutePath = path.join(PUBLIC_DIR, pathOrKey);
         return fileToDataUrl(absolutePath, mimeType);
     }
     try {
-        const result = await bucketService.getObject(pathOrKey);
+        const result = bucketClient
+            ? await bucketService.getObjectWithClient(bucketClient, pathOrKey)
+            : await bucketService.getObject(pathOrKey);
         const body = result.body;
         const contentType = result.contentType || mimeType;
         const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
@@ -119,9 +122,10 @@ const generateQRCode = async (data) => {
 /**
  * Build the complete HTML document from templates
  * @param {Object} data - Quotation data
+ * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
  * @returns {Promise<string>} Complete HTML string
  */
-const buildHtmlDocument = async (data) => {
+const buildHtmlDocument = async (data, bucketClient) => {
     // Load CSS
     const cssPath = path.join(TEMPLATE_DIR, "styles/quotation.css");
     const styles = fs.readFileSync(cssPath, "utf-8");
@@ -147,7 +151,7 @@ const buildHtmlDocument = async (data) => {
     if (data.companyLogoPath) {
         const ext = path.extname(data.companyLogoPath).toLowerCase();
         const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
-        logoImage = await pathToDataUrl(data.companyLogoPath, mimeType);
+        logoImage = await pathToDataUrl(data.companyLogoPath, mimeType, bucketClient);
     }
 
     // Fallback to default logo paths if not found
@@ -238,14 +242,16 @@ const buildHtmlDocument = async (data) => {
 /**
  * Generate PDF from quotation data
  * @param {Object} quotationData - Complete quotation data object
+ * @param {{ bucketClient?: { s3: object, bucketName: string } }} [options] - Optional tenant bucket client
  * @returns {Promise<Buffer>} PDF file as buffer
  */
-const generateQuotationPDF = async (quotationData) => {
+const generateQuotationPDF = async (quotationData, options = {}) => {
+    const { bucketClient } = options;
     let browser = null;
 
     try {
         // Build HTML document
-        const html = await buildHtmlDocument(quotationData);
+        const html = await buildHtmlDocument(quotationData, bucketClient);
 
         // Debug: Save HTML to file for inspection
         const debugHtmlPath = path.join(PUBLIC_DIR, "pdfs", "debug-quotation.html");
@@ -315,9 +321,10 @@ const getMakeNames = (makeIds, productMakesMap) => {
  * Get make logos as base64 data URLs from IDs array (supports bucket key or legacy path)
  * @param {Array|null} makeIds - Array of ProductMake IDs
  * @param {Map} productMakesMap - Map of ID to {name, logo}
+ * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
  * @returns {Promise<Array>} Array of objects with name and logoDataUrl
  */
-const getMakeLogos = async (makeIds, productMakesMap) => {
+const getMakeLogos = async (makeIds, productMakesMap, bucketClient) => {
     if (!makeIds || !Array.isArray(makeIds) || makeIds.length === 0) {
         return [];
     }
@@ -327,7 +334,7 @@ const getMakeLogos = async (makeIds, productMakesMap) => {
         if (make && make.logo) {
             const ext = path.extname(make.logo).toLowerCase();
             const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
-            const logoDataUrl = await pathToDataUrl(make.logo, mimeType);
+            const logoDataUrl = await pathToDataUrl(make.logo, mimeType, bucketClient);
             if (logoDataUrl) {
                 logos.push({
                     name: make.name,
@@ -346,9 +353,10 @@ const getMakeLogos = async (makeIds, productMakesMap) => {
  * @param {Object} company - Company profile data
  * @param {Object} bankAccount - Bank account details
  * @param {Map} productMakesMap - Map of ProductMake ID to name
+ * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
  * @returns {Promise<Object>} Formatted data for PDF templates
  */
-const prepareQuotationData = async (quotation, company, bankAccount, productMakesMap = new Map()) => {
+const prepareQuotationData = async (quotation, company, bankAccount, productMakesMap = new Map(), bucketClient) => {
     // Calculate derived values
     const projectCapacity = parseFloat(quotation.project_capacity) || 0;
     const pricePerKw = parseFloat(quotation.price_per_kw) || 0;
@@ -476,21 +484,21 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
             make: getMakeNames(quotation.panel_make_ids, productMakesMap),
             warranty: quotation.panel_warranty || 0,
             performance_warranty: quotation.panel_performance_warranty || 0,
-            make_logos: await getMakeLogos(quotation.panel_make_ids, productMakesMap),
+            make_logos: await getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient),
         },
         inverter: {
             size: quotation.inverter_size || 0,
             quantity: quotation.inverter_quantity || 0,
             make: getMakeNames(quotation.inverter_make_ids, productMakesMap),
             warranty: quotation.inverter_warranty || 0,
-            make_logos: await getMakeLogos(quotation.inverter_make_ids, productMakesMap),
+            make_logos: await getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient),
         },
         hybrid_inverter: {
             size: quotation.hybrid_inverter_size || 0,
             quantity: quotation.hybrid_inverter_quantity || 0,
             make: getMakeNames(quotation.hybrid_inverter_make_ids, productMakesMap),
             warranty: quotation.hybrid_inverter_warranty || "",
-            make_logos: await getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap),
+            make_logos: await getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient),
         },
         battery: {
             size: quotation.battery_size || 0,
@@ -498,7 +506,7 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
             type: quotation.battery_type || "",
             make: getMakeNames(quotation.battery_make_ids, productMakesMap),
             warranty: quotation.battery_warranty || "",
-            make_logos: await getMakeLogos(quotation.battery_make_ids, productMakesMap),
+            make_logos: await getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient),
         },
         cables: {
             ac_cable_make: getMakeNames(quotation.cable_ac_make_ids, productMakesMap),

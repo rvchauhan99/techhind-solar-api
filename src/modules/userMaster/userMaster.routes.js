@@ -1,16 +1,16 @@
 const { Router } = require('express');
 const controller = require('./userMaster.controller.js');
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 
 const router = Router();
 
-router.get('/list', validateAccessToken, controller.list);
-router.get('/export', validateAccessToken, controller.exportList);
-router.post('/create', validateAccessToken, controller.create);
-router.get('/profile', validateAccessToken, controller.getProfile);
-router.get('/:id', validateAccessToken, controller.getById);
-router.put('/:id', validateAccessToken, controller.update);
-router.delete('/:id', validateAccessToken, controller.remove);
-router.put('/:id/set-password', validateAccessToken, controller.setPassword);
+router.get('/list', ...requireAuthWithTenant, controller.list);
+router.get('/export', ...requireAuthWithTenant, controller.exportList);
+router.post('/create', ...requireAuthWithTenant, controller.create);
+router.get('/profile', ...requireAuthWithTenant, controller.getProfile);
+router.get('/:id', ...requireAuthWithTenant, controller.getById);
+router.put('/:id', ...requireAuthWithTenant, controller.update);
+router.delete('/:id', ...requireAuthWithTenant, controller.remove);
+router.put('/:id/set-password', ...requireAuthWithTenant, controller.setPassword);
 
 module.exports = router;

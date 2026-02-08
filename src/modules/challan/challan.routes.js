@@ -1,18 +1,18 @@
 "use strict";
 
 const { Router } = require("express");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const controller = require("./challan.controller.js");
 
 const router = Router();
 
-router.get("/", validateAccessToken, controller.list);
-router.get("/next-challan-number", validateAccessToken, controller.getNextChallanNumber);
-router.get("/quotation-products", validateAccessToken, controller.getQuotationProducts);
-router.get("/delivery-status", validateAccessToken, controller.getDeliveryStatus);
-router.post("/", validateAccessToken, controller.create);
-router.get("/:id", validateAccessToken, controller.getById);
-router.put("/:id", validateAccessToken, controller.update);
-router.delete("/:id", validateAccessToken, controller.remove);
+router.get("/", ...requireAuthWithTenant, controller.list);
+router.get("/next-challan-number", ...requireAuthWithTenant, controller.getNextChallanNumber);
+router.get("/quotation-products", ...requireAuthWithTenant, controller.getQuotationProducts);
+router.get("/delivery-status", ...requireAuthWithTenant, controller.getDeliveryStatus);
+router.post("/", ...requireAuthWithTenant, controller.create);
+router.get("/:id", ...requireAuthWithTenant, controller.getById);
+router.put("/:id", ...requireAuthWithTenant, controller.update);
+router.delete("/:id", ...requireAuthWithTenant, controller.remove);
 
 module.exports = router;

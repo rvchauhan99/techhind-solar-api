@@ -11,6 +11,7 @@ const {
   transactionMiddleware,
 } = require("./common/middlewares/transaction.js");
 const { validateEnv } = require("./config/envValidator.js");
+const { getRegistrySequelize } = require("./config/registryDb.js");
 
 dotenv.config();
 
@@ -49,6 +50,40 @@ const NODE_ENV = process.env.NODE_ENV || "development";
   try {
     await db.sequelize.authenticate();
     const { host, database, port, username } = db.sequelize.config;
+
+    let tenantMode = "dedicated";
+    let tenantLogLines = [];
+    const dedicatedId = process.env.DEDICATED_TENANT_ID || "";
+
+    if (getRegistrySequelize()) {
+      tenantMode = "shared (multi-tenant)";
+      try {
+        const sequelize = getRegistrySequelize();
+        const { QueryTypes } = require("sequelize");
+        const rows = await sequelize.query(
+          "SELECT tenant_key, mode, status FROM tenants ORDER BY tenant_key",
+          { type: QueryTypes.SELECT }
+        );
+        const list = Array.isArray(rows) ? rows : [rows];
+        if (list.length === 0) {
+          tenantLogLines.push("   Tenants  : (none in registry)");
+        } else {
+          tenantLogLines.push(`   Tenants  : ${list.length} active in registry`);
+          list.forEach((t) => {
+            tenantLogLines.push(`      - \x1b[36m${t.tenant_key ?? "—"}\x1b[0m (${t.mode ?? "—"}, ${t.status ?? "—"})`);
+          });
+        }
+      } catch (err) {
+        tenantLogLines.push(`   Tenants  : \x1b[33mRegistry query failed: ${err.message}\x1b[0m`);
+      }
+    } else {
+      tenantLogLines.push(`   Tenant   : \x1b[36mdedicated\x1b[0m${dedicatedId ? ` (id: ${dedicatedId})` : ""}`);
+    }
+
+    const tenantBlock = tenantMode.startsWith("shared")
+      ? tenantLogLines.join("\n")
+      : tenantLogLines.join("\n");
+
     app.listen(PORT, () => {
       if (NODE_ENV === "development" || NODE_ENV === "test") {
         console.log(`
@@ -61,6 +96,8 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 🔌 DB Port     : \x1b[36m${port}\x1b[0m
 📦 Environment : \x1b[33m${NODE_ENV}\x1b[0m
 🌐 Port        : \x1b[36m${PORT}\x1b[0m
+🏷️  Mode       : \x1b[36m${tenantMode}\x1b[0m
+${tenantBlock}
 ============================================
 `);
       } else if (NODE_ENV === "production") {
@@ -75,6 +112,8 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 🏭 Environment : \x1b[35m${NODE_ENV}\x1b[0m
 🌐 Port        : \x1b[36m${PORT}\x1b[0m
 🕒 Started At  : \x1b[90m${new Date().toLocaleString()}\x1b[0m
+🏷️  Mode       : \x1b[36m${tenantMode}\x1b[0m
+${tenantBlock}
 ============================================
 `);
       }

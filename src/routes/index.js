@@ -29,6 +29,8 @@ const confirmOrdersRoutes = require('../modules/confirmOrders/confirmOrders.rout
 const closedOrdersRoutes = require('../modules/closedOrders/closedOrders.routes.js');
 const challanRoutes = require('../modules/challan/challan.routes.js');
 const serializedInventoryReportRoutes = require('../modules/reports/serializedInventory/serializedInventory.routes.js');
+const billingRoutes = require('../modules/billing/billing.routes.js');
+const adminRoutes = require('../modules/admin/admin.routes.js');
 const router = Router();
 
 // health check API
@@ -66,6 +68,8 @@ router.use('/confirm-orders', confirmOrdersRoutes);
 router.use('/closed-orders', closedOrdersRoutes);
 router.use('/challan', challanRoutes);
 router.use('/reports/serialized-inventory', serializedInventoryReportRoutes);
+router.use('/billing', billingRoutes);
+router.use('/admin', adminRoutes);
 
 router.get("/", (req, res) => res.send("API Running ✅"));
 

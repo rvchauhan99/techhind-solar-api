@@ -49,6 +49,10 @@ const validateEnv = () => {
     }
   });
 
+  if (process.env.TENANT_REGISTRY_DB_URL && !process.env.MASTER_ENCRYPTION_KEY) {
+    missing.push("MASTER_ENCRYPTION_KEY (required when TENANT_REGISTRY_DB_URL is set)");
+  }
+
   if (missing.length > 0) {
     console.error("❌ Missing required environment variables:");
     missing.forEach((varName) => {

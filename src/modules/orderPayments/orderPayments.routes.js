@@ -1,25 +1,25 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("./orderPayments.controller");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 
 // List payments (before /:id)
-router.get("/", validateAccessToken, controller.listPayments);
+router.get("/", ...requireAuthWithTenant, controller.listPayments);
 
 // Get receipt signed URL (before /:id)
-router.get("/:id/receipt-url", validateAccessToken, controller.getReceiptUrl);
+router.get("/:id/receipt-url", ...requireAuthWithTenant, controller.getReceiptUrl);
 
 // Create payment with file upload
-router.post("/", validateAccessToken, uploadMemory.single("receipt_cheque_file"), controller.createPayment);
+router.post("/", ...requireAuthWithTenant, uploadMemory.single("receipt_cheque_file"), controller.createPayment);
 
 // Get payment by ID
-router.get("/:id", validateAccessToken, controller.getPaymentById);
+router.get("/:id", ...requireAuthWithTenant, controller.getPaymentById);
 
 // Update payment with file upload
-router.put("/:id", validateAccessToken, uploadMemory.single("receipt_cheque_file"), controller.updatePayment);
+router.put("/:id", ...requireAuthWithTenant, uploadMemory.single("receipt_cheque_file"), controller.updatePayment);
 
 // Delete payment
-router.delete("/:id", validateAccessToken, controller.deletePayment);
+router.delete("/:id", ...requireAuthWithTenant, controller.deletePayment);
 
 module.exports = router;

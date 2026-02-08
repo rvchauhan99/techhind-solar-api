@@ -14,21 +14,21 @@ const {
   verifyPasswordResetOtp,
   resetPassword,
 } = require("./auth.controller.js");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { validateAccessToken, requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 
 const router = Router();
 
 router.post("/login", login);
 router.post("/verify-2fa", verifyTwoFactor);
-router.post("/change-password", validateAccessToken, changePassword);
+router.post("/change-password", ...requireAuthWithTenant, changePassword);
 router.post("/refresh-token", refreshToken);
-router.get("/profile", validateAccessToken, getUserProfile);
-router.get("/logout", validateAccessToken, logout);
+router.get("/profile", ...requireAuthWithTenant, getUserProfile);
+router.get("/logout", ...requireAuthWithTenant, logout);
 
 // 2FA Routes
-router.post("/2fa/generate", validateAccessToken, generateTwoFactor);
-router.post("/2fa/enable", validateAccessToken, enableTwoFactor);
-router.post("/2fa/disable", validateAccessToken, disableTwoFactor);
+router.post("/2fa/generate", ...requireAuthWithTenant, generateTwoFactor);
+router.post("/2fa/enable", ...requireAuthWithTenant, enableTwoFactor);
+router.post("/2fa/disable", ...requireAuthWithTenant, disableTwoFactor);
 
 // Password Reset Routes (Public - no auth required)
 router.post("/forgot-password", sendPasswordResetOtp);

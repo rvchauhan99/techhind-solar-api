@@ -11,21 +11,36 @@ const authService = require("./auth.service.js");
 const emailService = require("../../common/services/email.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const db = require("../../models/index.js");
+const tenantRegistryService = require("../tenant/tenantRegistry.service.js");
+const dbPoolManager = require("../tenant/dbPoolManager.js");
 
 const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, tenant_key } = req.body;
+  let user;
+  let tenantSequelize = null;
 
-  const user = await authService.loginUser(email, password, req.transaction);
+  if (tenant_key && dbPoolManager.isSharedMode()) {
+    const tenant = await tenantRegistryService.getTenantByKey(tenant_key);
+    if (!tenant) {
+      return responseHandler.sendError(res, "Invalid tenant", 400);
+    }
+    tenantSequelize = await dbPoolManager.getPool(tenant.id, tenant);
+    user = await authService.loginUserWithTenant(tenantSequelize, email, password);
+    user.tenant_id = tenant.id;
+  } else {
+    user = await authService.loginUser(email, password, req.transaction);
+    user.tenant_id = process.env.DEDICATED_TENANT_ID || null;
+  }
 
   // Check if 2FA is enabled
   if (user.two_factor_enabled) {
-    // Generate a temporary token for 2FA verification
+    const tempPayload = { id: user.id, email: user.email, type: "2fa_pending" };
+    if (user.tenant_id) tempPayload.tenant_id = user.tenant_id;
     const tempToken = jwt.sign(
-      { id: user.id, email: user.email, type: "2fa_pending" },
-      process.env.JWT_SECRET_ACCESS_TOKEN, // Using access token secret for simplicity, but strictly should be different
+      tempPayload,
+      process.env.JWT_SECRET_ACCESS_TOKEN,
       { expiresIn: "5m" }
     );
-
     return responseHandler.sendSuccess(
       res,
       { require_2fa: true, tempToken },
@@ -35,23 +50,31 @@ const login = asyncHandler(async (req, res) => {
 
   const accessToken = tokenHandler.accessToken(user);
   const refreshToken = tokenHandler.refreshToken(user);
-
-  // Decode refresh token
   const decodedRefreshToken = jwt.decode(refreshToken);
   const refreshIat = new Date(decodedRefreshToken.iat * 1000);
   const refreshExp = new Date(decodedRefreshToken.exp * 1000);
 
-  await authService.deleteExistingTokens(user.id, req.transaction);
-
-  // Save tokens in DB (same as before)
-  await authService.createUserToken(
-    user.id,
-    accessToken,
-    refreshToken,
-    refreshIat,
-    refreshExp,
-    req.transaction
-  );
+  if (tenantSequelize) {
+    await authService.deleteExistingTokensOnSequelize(tenantSequelize, user.id);
+    await authService.createUserTokenOnSequelize(
+      tenantSequelize,
+      user.id,
+      accessToken,
+      refreshToken,
+      refreshIat,
+      refreshExp
+    );
+  } else {
+    await authService.deleteExistingTokens(user.id, req.transaction);
+    await authService.createUserToken(
+      user.id,
+      accessToken,
+      refreshToken,
+      refreshIat,
+      refreshExp,
+      req.transaction
+    );
+  }
 
   const payload = {
     id: user.id,
@@ -59,7 +82,6 @@ const login = asyncHandler(async (req, res) => {
     accessToken,
     refreshToken,
   };
-
   responseHandler.sendSuccess(res, payload, "User Login successfully");
 });
 
@@ -85,6 +107,7 @@ const verifyTwoFactor = asyncHandler(async (req, res) => {
 
   // 2FA Success - Generate real tokens
   const user = await authService.chcekUserByEmail(decoded.email, req.transaction); // Re-fetch user
+  user.tenant_id = decoded.tenant_id || process.env.DEDICATED_TENANT_ID || null;
   const accessToken = tokenHandler.accessToken(user);
   const refreshToken = tokenHandler.refreshToken(user);
 

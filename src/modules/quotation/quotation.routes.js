@@ -1,25 +1,25 @@
 "use strict";
 
 const { Router } = require("express");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const controller = require("./quotation.controller.js");
 
 const router = Router();
 
-router.post("/project-price", validateAccessToken, controller.getProjectPrices);
-router.post("/project-price-bom-details", validateAccessToken, controller.getProjectPriceBomDetails);
-router.get("/product-make", validateAccessToken, controller.getProductMakes);
-router.get("/next-quotation-number", validateAccessToken, controller.getNextQuotationNumber);
-router.get("/quotation-count-by-inquiry", validateAccessToken, controller.getQuotationCountByInquiry);
-router.get("/products", validateAccessToken, controller.getAllProducts);
-router.get("/", validateAccessToken, controller.list);
-router.get("/export", validateAccessToken, controller.exportList);
-router.post("/", validateAccessToken, controller.create);
-router.get("/:id/pdf", validateAccessToken, controller.generatePDF);
-router.get("/:id", validateAccessToken, controller.getById);
-router.put("/:id/approve", validateAccessToken, controller.approve);
-router.put("/:id/unapprove", validateAccessToken, controller.unapprove);
-router.put("/:id", validateAccessToken, controller.update);
-router.delete("/:id", validateAccessToken, controller.remove);
+router.post("/project-price", ...requireAuthWithTenant, controller.getProjectPrices);
+router.post("/project-price-bom-details", ...requireAuthWithTenant, controller.getProjectPriceBomDetails);
+router.get("/product-make", ...requireAuthWithTenant, controller.getProductMakes);
+router.get("/next-quotation-number", ...requireAuthWithTenant, controller.getNextQuotationNumber);
+router.get("/quotation-count-by-inquiry", ...requireAuthWithTenant, controller.getQuotationCountByInquiry);
+router.get("/products", ...requireAuthWithTenant, controller.getAllProducts);
+router.get("/", ...requireAuthWithTenant, controller.list);
+router.get("/export", ...requireAuthWithTenant, controller.exportList);
+router.post("/", ...requireAuthWithTenant, controller.create);
+router.get("/:id/pdf", ...requireAuthWithTenant, controller.generatePDF);
+router.get("/:id", ...requireAuthWithTenant, controller.getById);
+router.put("/:id/approve", ...requireAuthWithTenant, controller.approve);
+router.put("/:id/unapprove", ...requireAuthWithTenant, controller.unapprove);
+router.put("/:id", ...requireAuthWithTenant, controller.update);
+router.delete("/:id", ...requireAuthWithTenant, controller.remove);
 
 module.exports = router;

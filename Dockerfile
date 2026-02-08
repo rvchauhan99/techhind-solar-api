@@ -29,5 +29,5 @@ USER pptruser
 # App default port (override with PORT env)
 EXPOSE 5000
 
-# Run migrations then start the server (no npm install at runtime)
-CMD ["sh", "-c", "npm run db:migrate && node src/server.js"]
+# Start the server only. Run migrations as a separate job (e.g. CI or cron): db:migrate or db:tenant-migrate.
+CMD ["node", "src/server.js"]

@@ -1,23 +1,23 @@
 const { Router } = require('express');
 const controller = require('./masters.controller.js');
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 
 const router = Router();
 
 const uploadMemory = require('../../common/middlewares/uploadMemory.js');
 
-router.get('/master-list', validateAccessToken, controller.masterList);
-router.get('/list/:model', validateAccessToken, controller.list);
-router.get('/reference-options', validateAccessToken, controller.getReferenceOptions);
-router.get('/constants', validateAccessToken, controller.getAppConstants);
-router.get('/state/default', validateAccessToken, controller.getDefaultState);
-router.post('/create', validateAccessToken, uploadMemory.single('file'), controller.create);
+router.get('/master-list', ...requireAuthWithTenant, controller.masterList);
+router.get('/list/:model', ...requireAuthWithTenant, controller.list);
+router.get('/reference-options', ...requireAuthWithTenant, controller.getReferenceOptions);
+router.get('/constants', ...requireAuthWithTenant, controller.getAppConstants);
+router.get('/state/default', ...requireAuthWithTenant, controller.getDefaultState);
+router.post('/create', ...requireAuthWithTenant, uploadMemory.single('file'), controller.create);
 // CSV sample download and upload (must be before /:id routes)
-router.get('/sample-file', validateAccessToken, controller.downloadSample);
-router.post('/upload', validateAccessToken, uploadMemory.single('file'), controller.uploadData);
-router.get('/:id/file-url', validateAccessToken, controller.getFileUrl);
-router.get('/:id', validateAccessToken, controller.getById);
-router.put('/:id', validateAccessToken, uploadMemory.single('file'), controller.update);
-router.delete('/:id', validateAccessToken, controller.remove);
+router.get('/sample-file', ...requireAuthWithTenant, controller.downloadSample);
+router.post('/upload', ...requireAuthWithTenant, uploadMemory.single('file'), controller.uploadData);
+router.get('/:id/file-url', ...requireAuthWithTenant, controller.getFileUrl);
+router.get('/:id', ...requireAuthWithTenant, controller.getById);
+router.put('/:id', ...requireAuthWithTenant, uploadMemory.single('file'), controller.update);
+router.delete('/:id', ...requireAuthWithTenant, controller.remove);
 
 module.exports = router;
