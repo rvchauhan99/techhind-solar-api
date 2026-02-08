@@ -3,5 +3,5 @@ env.local
 .env
 
 # Certificates / keys (use env or secrets in production)
-*.pem
-src/config/ca.pem
+# *.pem
+# src/config/ca.pem
