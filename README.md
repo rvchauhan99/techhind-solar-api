@@ -41,16 +41,9 @@ solar-systems-api/
 npm install
 ```
 
-3. Create a `.env` file in the root directory with the following variables:
+3. Create a `.env` file in the root directory (see `.env.example` for reference). For **production/cloud** (e.g. Render, Railway, Aiven):
 
-```env
-PORT=3000
-DB_HOST=localhost
-DB_USER=your_username
-DB_PASSWORD=your_password
-DB_NAME=solar_systems
-JWT_SECRET=your_jwt_secret
-```
+   - Set **`DB_SSL_CA`** in your host’s environment variables with the full CA certificate PEM content. Use literal `\n` for newlines (e.g. `-----BEGIN CERTIFICATE-----\nMIIE...\n-----END CERTIFICATE-----`). Do not commit the PEM file; the repo uses env-only for SSL CA in production.
 
 ## Running the Application
 

@@ -1,14 +1,15 @@
 const fs = require("fs");
 require("dotenv").config();
 
-// SSL options: use CA cert when DB_SSL_CA_PATH or DB_SSL_CA is set (rejectUnauthorized: true)
+// SSL options: use CA cert when DB_SSL_CA (env) or DB_SSL_CA_PATH (file) is set (rejectUnauthorized: true)
+// Prefer DB_SSL_CA for production/cloud; use DB_SSL_CA_PATH for local dev if you have ca.pem
 function getDialectOptions(useSsl) {
     if (!useSsl) return {};
     let sslCA = null;
-    if (process.env.DB_SSL_CA_PATH) {
-        sslCA = fs.readFileSync(process.env.DB_SSL_CA_PATH, "utf8");
-    } else if (process.env.DB_SSL_CA) {
+    if (process.env.DB_SSL_CA) {
         sslCA = process.env.DB_SSL_CA.replace(/\\n/g, "\n");
+    } else if (process.env.DB_SSL_CA_PATH) {
+        sslCA = fs.readFileSync(process.env.DB_SSL_CA_PATH, "utf8");
     }
     return {
         ssl: sslCA
