@@ -40,6 +40,16 @@ app.use(transactionMiddleware);
 const path = require("path");
 app.use(express.static(path.join(__dirname, "../public")));
 
+// Root route for deployment health check (e.g. GET https://your-api.vercel.app/)
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: true,
+    message: "Server is running",
+    service: "Solar API",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.use("/api", routes);
 app.use(errorHandler);
 
