@@ -1,16 +1,16 @@
 "use strict";
 
 const { Router } = require("express");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const controller = require("./stock.controller.js");
 
 const router = Router();
 
-router.get("/", validateAccessToken, controller.list);
-router.get("/export", validateAccessToken, controller.exportList);
-router.get("/serials/available", validateAccessToken, controller.getAvailableSerials);
-router.get("/:id", validateAccessToken, controller.getById);
-router.get("/warehouse/:warehouseId", validateAccessToken, controller.getByWarehouse);
+router.get("/", ...requireAuthWithTenant, controller.list);
+router.get("/export", ...requireAuthWithTenant, controller.exportList);
+router.get("/serials/available", ...requireAuthWithTenant, controller.getAvailableSerials);
+router.get("/:id", ...requireAuthWithTenant, controller.getById);
+router.get("/warehouse/:warehouseId", ...requireAuthWithTenant, controller.getByWarehouse);
 
 module.exports = router;
 

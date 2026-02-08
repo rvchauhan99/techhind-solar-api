@@ -1,18 +1,18 @@
 "use strict";
 
 const { Router } = require("express");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const controller = require("./stockTransfer.controller.js");
 
 const router = Router();
 
-router.get("/", validateAccessToken, controller.list);
-router.get("/export", validateAccessToken, controller.exportList);
-router.post("/", validateAccessToken, controller.create);
-router.get("/:id", validateAccessToken, controller.getById);
-router.put("/:id", validateAccessToken, controller.update);
-router.post("/:id/approve", validateAccessToken, controller.approve);
-router.post("/:id/receive", validateAccessToken, controller.receive);
+router.get("/", ...requireAuthWithTenant, controller.list);
+router.get("/export", ...requireAuthWithTenant, controller.exportList);
+router.post("/", ...requireAuthWithTenant, controller.create);
+router.get("/:id", ...requireAuthWithTenant, controller.getById);
+router.put("/:id", ...requireAuthWithTenant, controller.update);
+router.post("/:id/approve", ...requireAuthWithTenant, controller.approve);
+router.post("/:id/receive", ...requireAuthWithTenant, controller.receive);
 
 module.exports = router;
 

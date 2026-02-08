@@ -1,39 +1,39 @@
 const { Router } = require("express");
 const controller = require("./companyMaster.controller.js");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 
 const router = Router();
 
 // Company Profile Routes
-router.get("/profile", validateAccessToken, controller.getProfile);
-router.put("/profile", validateAccessToken, controller.updateProfile);
+router.get("/profile", ...requireAuthWithTenant, controller.getProfile);
+router.put("/profile", ...requireAuthWithTenant, controller.updateProfile);
 
 // Bank Account Routes
-router.get("/bank-accounts", validateAccessToken, controller.listBankAccounts);
-router.post("/bank-accounts", validateAccessToken, controller.createBankAccount);
-router.put("/bank-accounts/:id", validateAccessToken, controller.updateBankAccount);
-router.delete("/bank-accounts/:id", validateAccessToken, controller.deleteBankAccount);
+router.get("/bank-accounts", ...requireAuthWithTenant, controller.listBankAccounts);
+router.post("/bank-accounts", ...requireAuthWithTenant, controller.createBankAccount);
+router.put("/bank-accounts/:id", ...requireAuthWithTenant, controller.updateBankAccount);
+router.delete("/bank-accounts/:id", ...requireAuthWithTenant, controller.deleteBankAccount);
 
 // Branch Routes
-router.get("/branches", validateAccessToken, controller.listBranches);
-router.get("/branches/default", validateAccessToken, controller.getDefaultBranch);
-router.post("/branches", validateAccessToken, controller.createBranch);
-router.put("/branches/:id", validateAccessToken, controller.updateBranch);
-router.delete("/branches/:id", validateAccessToken, controller.deleteBranch);
+router.get("/branches", ...requireAuthWithTenant, controller.listBranches);
+router.get("/branches/default", ...requireAuthWithTenant, controller.getDefaultBranch);
+router.post("/branches", ...requireAuthWithTenant, controller.createBranch);
+router.put("/branches/:id", ...requireAuthWithTenant, controller.updateBranch);
+router.delete("/branches/:id", ...requireAuthWithTenant, controller.deleteBranch);
 
 // Warehouse Routes
-router.get("/warehouses", validateAccessToken, controller.listWarehouses);
-router.post("/warehouses", validateAccessToken, controller.createWarehouse);
-router.put("/warehouses/:id", validateAccessToken, controller.updateWarehouse);
-router.delete("/warehouses/:id", validateAccessToken, controller.deleteWarehouse);
-router.get("/warehouses/:id/managers", validateAccessToken, controller.getWarehouseManagers);
-router.put("/warehouses/:id/managers", validateAccessToken, controller.setWarehouseManagers);
+router.get("/warehouses", ...requireAuthWithTenant, controller.listWarehouses);
+router.post("/warehouses", ...requireAuthWithTenant, controller.createWarehouse);
+router.put("/warehouses/:id", ...requireAuthWithTenant, controller.updateWarehouse);
+router.delete("/warehouses/:id", ...requireAuthWithTenant, controller.deleteWarehouse);
+router.get("/warehouses/:id/managers", ...requireAuthWithTenant, controller.getWarehouseManagers);
+router.put("/warehouses/:id/managers", ...requireAuthWithTenant, controller.setWarehouseManagers);
 
 // Image Routes
-router.get("/images/:imageType/url", validateAccessToken, controller.getImageUrl);
-router.post("/images/upload", validateAccessToken, uploadMemory.single("image"), controller.uploadImage);
-router.post("/images/delete", validateAccessToken, controller.deleteImage);
+router.get("/images/:imageType/url", ...requireAuthWithTenant, controller.getImageUrl);
+router.post("/images/upload", ...requireAuthWithTenant, uploadMemory.single("image"), controller.uploadImage);
+router.post("/images/delete", ...requireAuthWithTenant, controller.deleteImage);
 
 module.exports = router;
 

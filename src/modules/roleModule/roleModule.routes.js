@@ -1,16 +1,16 @@
 const { Router } = require('express');
 const controller = require('./roleModule.controller.js');
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 
 const router = Router();
 
-router.get('/list', validateAccessToken, controller.list);
-router.get('/export', validateAccessToken, controller.exportList);
-router.get('/role/:roleId', validateAccessToken, controller.getByRoleId);
-router.get('/permission/:moduleId', validateAccessToken, controller.getPermission);
-router.post('/create', validateAccessToken, controller.create);
-router.get('/:id', validateAccessToken, controller.getById);
-router.put('/:id', validateAccessToken, controller.update);
-router.delete('/:id', validateAccessToken, controller.remove);
+router.get('/list', ...requireAuthWithTenant, controller.list);
+router.get('/export', ...requireAuthWithTenant, controller.exportList);
+router.get('/role/:roleId', ...requireAuthWithTenant, controller.getByRoleId);
+router.get('/permission/:moduleId', ...requireAuthWithTenant, controller.getPermission);
+router.post('/create', ...requireAuthWithTenant, controller.create);
+router.get('/:id', ...requireAuthWithTenant, controller.getById);
+router.put('/:id', ...requireAuthWithTenant, controller.update);
+router.delete('/:id', ...requireAuthWithTenant, controller.remove);
 
 module.exports = router;

@@ -266,16 +266,18 @@ const generatePDF = asyncHandler(async (req, res) => {
         productMakes.map(pm => [pm.id, { name: pm.name, logo: pm.logo }])
     );
 
+    const bucketClient = bucketService.getBucketForRequest(req);
     // Prepare data for PDF
     const pdfData = await pdfService.prepareQuotationData(
         quotation,
         company ? company.toJSON() : null,
         bankAccount ? bankAccount.toJSON() : null,
-        productMakesMap
+        productMakesMap,
+        bucketClient
     );
 
     // Generate PDF buffer
-    const pdfBuffer = await pdfService.generateQuotationPDF(pdfData);
+    const pdfBuffer = await pdfService.generateQuotationPDF(pdfData, { bucketClient });
 
     const filename = `quotation-${quotation.quotation_number || id}.pdf`;
 
@@ -283,7 +285,8 @@ const generatePDF = asyncHandler(async (req, res) => {
     try {
         uploadResult = await bucketService.uploadFile(
             { buffer: pdfBuffer, originalname: filename, mimetype: "application/pdf", size: pdfBuffer.length },
-            { prefix: "quotations/pdfs", acl: "private" }
+            { prefix: "quotations/pdfs", acl: "private" },
+            bucketClient
         );
     } catch (error) {
         console.error("Error uploading PDF to bucket:", error);
@@ -292,12 +295,16 @@ const generatePDF = asyncHandler(async (req, res) => {
 
     let url;
     try {
-        url = await bucketService.getSignedUrl(uploadResult.path, 3600);
+        url = await bucketService.getSignedUrl(uploadResult.path, 3600, bucketClient);
     } catch (error) {
         console.error("Error generating signed URL for PDF:", error);
         throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
     }
 
+    if (req.tenant?.id) {
+      const usageService = require("../billing/usage.service.js");
+      usageService.incrementPdfGenerated(req.tenant.id).catch(() => {});
+    }
     return responseHandler.sendSuccess(res, {
         path: uploadResult.path,
         filename: filename,

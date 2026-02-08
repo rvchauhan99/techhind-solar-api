@@ -59,6 +59,10 @@ To start in production mode:
 npm start
 ```
 
+## Deployment
+
+Step-by-step deployment guides: [Multi-tenant (shared)](docs/deploy-multi-tenant.md) | [Single-tenant (dedicated)](docs/deploy-single-tenant.md).
+
 ## Database Management
 
 ### Running Migrations

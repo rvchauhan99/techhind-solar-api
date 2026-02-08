@@ -26,6 +26,71 @@ const loginUser = async (email, password, transaction) => {
   return user;
 };
 
+/**
+ * Login against a tenant's DB (shared mode). Uses raw queries on the given sequelize.
+ * Returns user pojo { id, email, role_id, two_factor_enabled, first_login, ... }.
+ * Caller must then delete existing tokens and create new token on same sequelize.
+ * @param {import("sequelize").Sequelize} tenantSequelize
+ * @param {string} email
+ * @param {string} password
+ * @returns {Promise<object>}
+ */
+const loginUserWithTenant = async (tenantSequelize, email, password) => {
+  const users = await tenantSequelize.query(
+    `SELECT id, email, password, role_id, two_factor_enabled, first_login, status
+     FROM users WHERE email = :email LIMIT 1`,
+    { replacements: { email }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(users) ? users[0] : users;
+  if (!row) throw new AppError("Invalid credentials", 401);
+  if (row.status !== USER_STATUS.ACTIVE) throw new AppError("Invalid credentials", 401);
+  const isMatch = await bcrypt.compare(password, row.password);
+  if (!isMatch) throw new AppError("Invalid credentials", 401);
+  return {
+    id: row.id,
+    email: row.email,
+    role_id: row.role_id,
+    two_factor_enabled: row.two_factor_enabled || false,
+    first_login: row.first_login,
+  };
+};
+
+/**
+ * Delete existing user_tokens for user on the given sequelize (tenant DB).
+ */
+const deleteExistingTokensOnSequelize = async (tenantSequelize, user_id) => {
+  await tenantSequelize.query(
+    "DELETE FROM user_tokens WHERE user_id = :user_id",
+    { replacements: { user_id } }
+  );
+};
+
+/**
+ * Insert a user_token row on the given sequelize (tenant DB).
+ */
+const createUserTokenOnSequelize = async (
+  tenantSequelize,
+  user_id,
+  access_token,
+  refresh_token,
+  refresh_iat,
+  refresh_exp
+) => {
+  await tenantSequelize.query(
+    `INSERT INTO user_tokens (user_id, access_token, refresh_token, refresh_iat, refresh_exp, created_at, updated_at)
+     VALUES (:user_id, :access_token, :refresh_token, :refresh_iat, :refresh_exp, NOW(), NOW())`,
+    {
+      replacements: {
+        user_id,
+        access_token,
+        refresh_token,
+        refresh_iat: refresh_iat instanceof Date ? refresh_iat : new Date(refresh_iat),
+        refresh_exp: refresh_exp instanceof Date ? refresh_exp : new Date(refresh_exp),
+      },
+    }
+  );
+};
+
 const deleteExistingTokens = async (user_id, transaction) => {
   const result = await db.UserToken.destroy({
     where: { user_id },
@@ -444,11 +509,14 @@ const resetPassword = async (
 module.exports = {
   checkedToken,
   loginUser,
+  loginUserWithTenant,
   deleteExistingTokens,
+  deleteExistingTokensOnSequelize,
+  createUserToken,
+  createUserTokenOnSequelize,
   chcekUserByEmail,
   findValidRefreshToken,
   getUserprofileById,
-  createUserToken,
   deleteUserToken,
   changePassword,
   updateUserToken,

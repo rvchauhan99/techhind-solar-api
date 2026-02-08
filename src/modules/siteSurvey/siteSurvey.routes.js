@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const controller = require("./siteSurvey.controller.js");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 
 const router = Router();
@@ -16,7 +16,7 @@ const fileFields = [
     { name: "shadow_object_photo", maxCount: 1 },
 ];
 
-router.get("/document-url", validateAccessToken, controller.getDocumentUrl);
-router.post("/create", validateAccessToken, uploadMemory.fields(fileFields), controller.create);
+router.get("/document-url", ...requireAuthWithTenant, controller.getDocumentUrl);
+router.post("/create", ...requireAuthWithTenant, uploadMemory.fields(fileFields), controller.create);
 
 module.exports = router;

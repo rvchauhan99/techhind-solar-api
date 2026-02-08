@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const controller = require("./siteVisit.controller.js");
-const { validateAccessToken } = require("../../common/middlewares/auth.js");
+const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 
 const router = Router();
@@ -17,11 +17,11 @@ const fileFields = [
   { name: "other_images_videos", maxCount: 20 }, // Multiple files allowed
 ];
 
-router.get("/list", validateAccessToken, controller.list);
-router.get("/export", validateAccessToken, controller.exportList);
-router.get("/document-url", validateAccessToken, controller.getDocumentUrl);
-router.get("/roof-types", validateAccessToken, controller.getRoofTypes);
-router.post("/create", validateAccessToken, uploadMemory.fields(fileFields), controller.create);
+router.get("/list", ...requireAuthWithTenant, controller.list);
+router.get("/export", ...requireAuthWithTenant, controller.exportList);
+router.get("/document-url", ...requireAuthWithTenant, controller.getDocumentUrl);
+router.get("/roof-types", ...requireAuthWithTenant, controller.getRoofTypes);
+router.post("/create", ...requireAuthWithTenant, uploadMemory.fields(fileFields), controller.create);
 
 module.exports = router;
 
