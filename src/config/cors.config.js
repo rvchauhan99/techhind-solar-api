@@ -1,29 +1,18 @@
 const cors = require("cors");
 require("dotenv").config();
 
-// Get allowed origins from environment variable or use defaults
-const getAllowedOrigins = () => {
-  if (process.env.CORS_ALLOWED_ORIGINS) {
-    return process.env.CORS_ALLOWED_ORIGINS.split(",").map((origin) => origin.trim());
-  }
+// If CORS_ALLOWED_ORIGINS is set, only those origins (plus *.vercel.app) are allowed.
+// If not set, any origin is allowed (Vercel, custom domains, localhost, etc.).
+const restrictOrigins = Boolean(process.env.CORS_ALLOWED_ORIGINS);
 
-  // Default origins for development
-  return [
-    "http://localhost:3000", // Local Next.js (Dev)
-    "http://localhost:3002", // Local Next.js (Port 3002)
-    "http://127.0.0.1:3000", // Local loopback
-    "https://solar-management-system-web.onrender.com",
-  ];
-};
+const allowedOrigins = restrictOrigins
+  ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+  : [];
 
-const allowedOrigins = getAllowedOrigins();
-
-/** True if origin is a Vercel deployment (production or preview). */
 function isVercelOrigin(origin) {
   if (!origin || typeof origin !== "string") return false;
   try {
-    const u = new URL(origin);
-    return u.hostname.endsWith(".vercel.app");
+    return new URL(origin).hostname.endsWith(".vercel.app");
   } catch {
     return false;
   }
@@ -31,9 +20,8 @@ function isVercelOrigin(origin) {
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (e.g. mobile apps, curl, Postman)
+    if (!restrictOrigins) return callback(null, true);
     if (!origin) return callback(null, true);
-    // Allow all Vercel deployment URLs (*.vercel.app)
     if (isVercelOrigin(origin)) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     callback(new Error("Not allowed by CORS"));
