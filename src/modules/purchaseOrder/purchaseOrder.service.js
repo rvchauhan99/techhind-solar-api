@@ -56,6 +56,7 @@ const listPurchaseOrders = async ({
   limit = 20,
   q = null,
   status = null,
+  include_closed: includeClosed = false,
   sortBy = "created_at",
   sortOrder = "DESC",
   po_number: poNumber = null,
@@ -84,6 +85,8 @@ const listPurchaseOrders = async ({
 
   if (status) {
     where.status = status;
+  } else if (!includeClosed) {
+    where.status = { [Op.ne]: PO_STATUS.CLOSED };
   }
 
   if (q) {
@@ -279,19 +282,27 @@ const getPurchaseOrderById = async ({ id } = {}) => {
 
   const poData = po.toJSON();
   
-  // Normalize tracking_type and ensure serial_required consistency for all items
+  // Normalize tracking_type and ensure serial_required consistency; add order/received/returned/remaining qty
   if (poData.items && Array.isArray(poData.items)) {
     poData.items = poData.items.map((item) => {
+      const orderQty = item.quantity ?? 0;
+      const receivedQty = item.received_quantity ?? 0;
+      const returnedQty = item.returned_quantity ?? 0;
+      const remainingQty = Math.max(0, orderQty - receivedQty);
+      const base = {
+        ...item,
+        order_qty: orderQty,
+        received_qty: receivedQty,
+        returned_qty: returnedQty,
+        remaining_qty: remainingQty,
+      };
       if (item.product) {
-        const normalizedTrackingType = item.product.tracking_type 
-          ? item.product.tracking_type.toUpperCase() 
+        const normalizedTrackingType = item.product.tracking_type
+          ? item.product.tracking_type.toUpperCase()
           : "LOT";
-        
-        // If tracking_type is SERIAL OR serial_required is true, ensure consistency
         const shouldBeSerial = normalizedTrackingType === "SERIAL" || item.product.serial_required === true;
-        
         return {
-          ...item,
+          ...base,
           product: {
             ...item.product,
             tracking_type: shouldBeSerial ? "SERIAL" : normalizedTrackingType,
@@ -299,7 +310,7 @@ const getPurchaseOrderById = async ({ id } = {}) => {
           },
         };
       }
-      return item;
+      return base;
     });
   }
 
@@ -604,6 +615,7 @@ const deletePurchaseOrder = async ({ id, transaction } = {}) => {
 const exportPurchaseOrders = async ({
   q = null,
   status = null,
+  include_closed: includeClosed = false,
   sortBy = "created_at",
   sortOrder = "DESC",
   po_number: poNumber = null,
@@ -644,6 +656,7 @@ const exportPurchaseOrders = async ({
     limit: 10000,
     q,
     status,
+    include_closed: includeClosed,
     sortBy,
     sortOrder,
     po_number: poNumber,

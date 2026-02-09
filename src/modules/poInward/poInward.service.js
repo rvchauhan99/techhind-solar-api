@@ -3,7 +3,7 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
-const { RECEIPT_STATUS, RECEIPT_TYPE } = require("../../common/utils/constants.js");
+const { RECEIPT_STATUS, RECEIPT_TYPE, PO_STATUS } = require("../../common/utils/constants.js");
 const stockService = require("../stock/stock.service.js");
 
 const {
@@ -234,8 +234,8 @@ const createPOInward = async ({ payload, transaction } = {}) => {
       throw new Error("Purchase order not found");
     }
 
-    if (po.status !== "APPROVED") {
-      throw new Error("Purchase order must be APPROVED before creating inward");
+    if (po.status !== PO_STATUS.APPROVED && po.status !== PO_STATUS.PARTIAL_RECEIVED) {
+      throw new Error("Purchase order must be APPROVED or PARTIAL_RECEIVED to create inward; CLOSED and DRAFT POs are not eligible");
     }
 
     // Calculate totals
@@ -276,6 +276,12 @@ const createPOInward = async ({ payload, transaction } = {}) => {
       const poItem = await PurchaseOrderItem.findByPk(item.purchase_order_item_id, { transaction: t });
       if (!poItem) {
         throw new Error(`Purchase order item with id ${item.purchase_order_item_id} not found`);
+      }
+      const remaining = (poItem.quantity ?? 0) - (poItem.received_quantity ?? 0);
+      if ((item.accepted_quantity ?? 0) > remaining) {
+        throw new Error(
+          `Accepted quantity (${item.accepted_quantity}) exceeds remaining quantity (${remaining}) for PO item id ${item.purchase_order_item_id}`
+        );
       }
 
       const product = await Product.findByPk(item.product_id, { transaction: t });
@@ -400,6 +406,21 @@ const approvePOInward = async ({ id, transaction } = {}) => {
       );
     }
 
+    // Set PO status to PARTIAL_RECEIVED or CLOSED based on received vs order qty
+    const po = await PurchaseOrder.findOne({
+      where: { id: poInward.purchase_order_id },
+      include: [{ model: PurchaseOrderItem, as: "items", attributes: ["id", "quantity", "received_quantity"] }],
+      transaction: t,
+    });
+    if (po && po.items && po.items.length > 0) {
+      const allFullyReceived = po.items.every(
+        (it) => (it.received_quantity ?? 0) >= (it.quantity ?? 0)
+      );
+      const anyReceived = po.items.some((it) => (it.received_quantity ?? 0) > 0);
+      const newStatus = allFullyReceived ? PO_STATUS.CLOSED : (anyReceived ? PO_STATUS.PARTIAL_RECEIVED : po.status);
+      await po.update({ status: newStatus }, { transaction: t });
+    }
+
     // Create/update stocks and stock serials
     await stockService.createStockFromPOInward({
       poInward: poInward.toJSON(),
@@ -452,6 +473,10 @@ const updatePOInward = async ({ id, payload, transaction } = {}) => {
       });
 
       const po = await PurchaseOrder.findByPk(poInward.purchase_order_id, { transaction: t });
+      if (!po) throw new Error("Purchase order not found");
+      if (po.status !== PO_STATUS.APPROVED && po.status !== PO_STATUS.PARTIAL_RECEIVED) {
+        throw new Error("Purchase order must be APPROVED or PARTIAL_RECEIVED to update inward; CLOSED and DRAFT POs are not eligible");
+      }
       const receiptType = totalAcceptedQty >= po.total_quantity ? RECEIPT_TYPE.COMPLETE : RECEIPT_TYPE.PARTIAL;
 
       await poInward.update(
@@ -477,6 +502,15 @@ const updatePOInward = async ({ id, payload, transaction } = {}) => {
       // Recreate items (same logic as create)
       for (const item of items) {
         const poItem = await PurchaseOrderItem.findByPk(item.purchase_order_item_id, { transaction: t });
+        if (!poItem) {
+          throw new Error(`Purchase order item with id ${item.purchase_order_item_id} not found`);
+        }
+        const remaining = (poItem.quantity ?? 0) - (poItem.received_quantity ?? 0);
+        if ((item.accepted_quantity ?? 0) > remaining) {
+          throw new Error(
+            `Accepted quantity (${item.accepted_quantity}) exceeds remaining quantity (${remaining}) for PO item id ${item.purchase_order_item_id}`
+          );
+        }
         const product = await Product.findByPk(item.product_id, { transaction: t });
 
         // Normalize tracking_type to uppercase and ensure serial_required consistency
