@@ -38,6 +38,34 @@ const derivePanFromGstin = (gstin) => {
 
 const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
 
+/** Generate next supplier code: SUP-00001, SUP-00002, ... (prefix + 5-digit global sequence). */
+const generateSupplierCode = async () => {
+  const rows = await Supplier.findAll({
+    where: { supplier_code: { [Op.like]: "SUP-%" } },
+    attributes: ["supplier_code"],
+    raw: true,
+  });
+  const prefix = "SUP-";
+  const digitRegex = /^SUP-(\d+)$/;
+  let maxNum = 0;
+  rows.forEach((r) => {
+    const code = r.supplier_code || "";
+    const m = code.match(digitRegex);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!Number.isNaN(n) && n > maxNum) maxNum = n;
+    }
+  });
+  const nextNum = maxNum + 1;
+  const padded = String(nextNum).padStart(5, "0");
+  return `${prefix}${padded}`;
+};
+
+/** Return next supplier code for API/form prefill. */
+const getNextSupplierCode = async () => {
+  return await generateSupplierCode();
+};
+
 const buildStringCondition = (field, value, op = "contains") => {
   const val = String(value || "").trim();
   if (!val) return null;
@@ -212,7 +240,7 @@ const getSupplierById = async ({ id } = {}) => {
   };
 };
 
-const createSupplier = async ({ payload, transaction } = {}) => {
+const createSupplier = async ({ payload, transaction } = {}, retryOnConflict = false) => {
   const t = transaction || (await db.sequelize.transaction());
   let committedHere = !transaction;
 
@@ -227,8 +255,16 @@ const createSupplier = async ({ payload, transaction } = {}) => {
       gstin = null;
     }
 
+    let supplierCode =
+      payload.supplier_code != null && String(payload.supplier_code).trim() !== ""
+        ? String(payload.supplier_code).trim()
+        : null;
+    if (supplierCode == null) {
+      supplierCode = await generateSupplierCode();
+    }
+
     const supplierData = {
-      supplier_code: payload.supplier_code,
+      supplier_code: supplierCode,
       supplier_name: payload.supplier_name,
       contact_person: payload.contact_person || null,
       phone: payload.phone || null,
@@ -252,6 +288,12 @@ const createSupplier = async ({ payload, transaction } = {}) => {
   } catch (err) {
     if (committedHere) {
       await t.rollback();
+    }
+    const isUniqueError =
+      err.name === "SequelizeUniqueConstraintError" ||
+      (err.parent && err.parent.code === "23505");
+    if (isUniqueError && !retryOnConflict && (!payload.supplier_code || String(payload.supplier_code).trim() === "")) {
+      return createSupplier({ payload: { ...payload, supplier_code: await generateSupplierCode() }, transaction }, true);
     }
     throw err;
   }
@@ -427,6 +469,7 @@ module.exports = {
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  getNextSupplierCode,
   derivePanFromGstin,
 };
 

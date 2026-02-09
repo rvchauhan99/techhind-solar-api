@@ -79,6 +79,16 @@ const exportList = asyncHandler(async (req, res) => {
   return res.send(buffer);
 });
 
+const getNextSupplierCode = asyncHandler(async (req, res) => {
+  const supplier_code = await supplierService.getNextSupplierCode();
+  return responseHandler.sendSuccess(
+    res,
+    { supplier_code },
+    "Next supplier code generated",
+    200
+  );
+});
+
 const getById = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const item = await supplierService.getSupplierById({ id });
@@ -120,6 +130,7 @@ const remove = asyncHandler(async (req, res) => {
 module.exports = {
   list,
   exportList,
+  getNextSupplierCode,
   getById,
   create,
   update,

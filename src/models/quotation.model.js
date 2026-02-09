@@ -2,6 +2,7 @@
 
 const { DataTypes, QueryTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
+const { QUOTATION_STATUS } = require("../common/utils/constants.js");
 
 // Helper to generate quotation number: YYMM###
 const generateQuotationNumber = async () => {
@@ -81,6 +82,18 @@ const Quotation = sequelize.define(
             type: DataTypes.BOOLEAN,
             allowNull: false,
             defaultValue: false,
+        },
+        status: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: QUOTATION_STATUS.DRAFT,
+            validate: {
+                isIn: [Object.values(QUOTATION_STATUS)],
+            },
+        },
+        status_on: {
+            type: DataTypes.DATEONLY,
+            allowNull: true,
         },
 
         // Customer Details
@@ -462,6 +475,12 @@ const Quotation = sequelize.define(
         },
         la_product: {
             type: DataTypes.BIGINT,
+            allowNull: true,
+        },
+
+        // Full BOM snapshot at quotation time (product params + qty per line)
+        bom_snapshot: {
+            type: DataTypes.JSON,
             allowNull: true,
         },
 

@@ -41,6 +41,8 @@ const list = asyncHandler(async (req, res) => {
         inquiry_number,
         created_at_from,
         created_at_to,
+        status,
+        include_converted,
     } = req.query;
     const items = await quotationService.listQuotations({
         search: q,
@@ -71,6 +73,8 @@ const list = asyncHandler(async (req, res) => {
         inquiry_number,
         created_at_from,
         created_at_to,
+        status,
+        include_converted: include_converted === "true" || include_converted === true,
     });
     return responseHandler.sendSuccess(res, items, "Quotation list fetched", 200);
 });
@@ -101,6 +105,8 @@ const exportList = asyncHandler(async (req, res) => {
         inquiry_number,
         created_at_from,
         created_at_to,
+        status,
+        include_converted,
     } = req.query;
     const buffer = await quotationService.exportQuotations({
         search: q,
@@ -124,6 +130,8 @@ const exportList = asyncHandler(async (req, res) => {
         state_name,
         order_type_name,
         project_scheme_name,
+        status,
+        include_converted: include_converted === "true" || include_converted === true,
         inquiry_number,
         created_at_from,
         created_at_to,

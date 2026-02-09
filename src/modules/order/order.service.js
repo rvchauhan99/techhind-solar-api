@@ -3,6 +3,7 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
+const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 
 const {
     Order,
@@ -23,6 +24,35 @@ const {
     Product,
     ProjectPhase,
 } = db;
+
+/** Derive first panel and first inverter product_id from bom_snapshot (by product_snapshot.product_type_name). */
+const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
+    const out = { solar_panel_id: null, inverter_id: null };
+    if (!bom_snapshot || !Array.isArray(bom_snapshot)) return out;
+    const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, "_");
+    for (const line of bom_snapshot) {
+        const typeName = norm(line.product_snapshot?.product_type_name || "");
+        if (typeName === "panel" && out.solar_panel_id == null) out.solar_panel_id = line.product_id;
+        if (typeName === "inverter" && out.inverter_id == null) out.inverter_id = line.product_id;
+        if (out.solar_panel_id != null && out.inverter_id != null) break;
+    }
+    return out;
+};
+
+/** Normalize order bom_snapshot for API: ensure shipped_qty, returned_qty, pending_qty on each line (backward compat). */
+const normalizeOrderBomSnapshot = (bom_snapshot) => {
+    if (bom_snapshot == null || !Array.isArray(bom_snapshot)) return bom_snapshot;
+    const qty = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
+    return bom_snapshot.map((line) => {
+        const quantity = qty(line.quantity);
+        const shipped_qty = qty(line.shipped_qty);
+        const returned_qty = qty(line.returned_qty);
+        const pending_qty = line.pending_qty != null && !Number.isNaN(Number(line.pending_qty))
+            ? Number(line.pending_qty)
+            : quantity - shipped_qty + returned_qty;
+        return { ...line, shipped_qty, returned_qty, pending_qty };
+    });
+};
 
 const listOrders = async ({
     page = 1,
@@ -228,6 +258,8 @@ const listOrders = async ({
             stages: row.stages || {},
             current_stage_key: row.current_stage_key || null,
 
+            bom_snapshot: normalizeOrderBomSnapshot(row.bom_snapshot) ?? null,
+
             created_at: row.created_at,
             updated_at: row.updated_at,
         };
@@ -354,6 +386,7 @@ const getOrderById = async ({ id } = {}) => {
         inverter_id: row.inverter_id,
         project_phase_id: row.project_phase_id,
         order_remarks: row.order_remarks,
+        bom_snapshot: normalizeOrderBomSnapshot(row.bom_snapshot),
         // Related data
         inquiry_number: row.inquiry?.inquiry_number || null,
         quotation_number: row.quotation?.quotation_number || null,
@@ -503,6 +536,36 @@ const createOrder = async ({ payload, transaction } = {}) => {
             customerId = customer.id;
         }
 
+        // Copy BOM snapshot from quotation when order is created from quote; add order qty tracking
+        let bom_snapshot = null;
+        let solar_panel_id = payload.solar_panel_id ?? null;
+        let inverter_id = payload.inverter_id ?? null;
+        let quotationForStatus = null;
+        if (payload.quotation_id) {
+            const quotation = await db.Quotation.findOne({
+                where: { id: payload.quotation_id, deleted_at: null },
+                attributes: ["id", "bom_snapshot", "inquiry_id"],
+                transaction: t,
+            });
+            quotationForStatus = quotation;
+            if (quotation && Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0) {
+                const raw = JSON.parse(JSON.stringify(quotation.bom_snapshot));
+                const qty = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
+                bom_snapshot = raw.map((line) => {
+                    const quantity = qty(line.quantity);
+                    return {
+                        ...line,
+                        shipped_qty: 0,
+                        returned_qty: 0,
+                        pending_qty: quantity,
+                    };
+                });
+                const derived = derivePanelAndInverterFromBomSnapshot(quotation.bom_snapshot);
+                if (derived.solar_panel_id != null) solar_panel_id = derived.solar_panel_id;
+                if (derived.inverter_id != null) inverter_id = derived.inverter_id;
+            }
+        }
+
         // 2) Create Order
         const orderData = {
             status: payload.status || "pending",
@@ -535,12 +598,41 @@ const createOrder = async ({ payload, transaction } = {}) => {
             geda_registration_date: payload.geda_registration_date || null,
             payment_type: payload.payment_type || null,
             loan_type_id: payload.loan_type_id || null,
-            solar_panel_id: payload.solar_panel_id || null,
-            inverter_id: payload.inverter_id || null,
+            solar_panel_id,
+            inverter_id,
             project_phase_id: payload.project_phase_id || null,
+            bom_snapshot,
         };
 
         const created = await Order.create(orderData, { transaction: t });
+
+        const statusOn = new Date().toISOString().slice(0, 10);
+        if (payload.inquiry_id) {
+            await Inquiry.update(
+                { status: INQUIRY_STATUS.CONVERTED },
+                { where: { id: payload.inquiry_id }, transaction: t }
+            );
+        }
+        if (payload.quotation_id) {
+            await Quotation.update(
+                { status: QUOTATION_STATUS.CONVERTED, status_on: statusOn },
+                { where: { id: payload.quotation_id }, transaction: t }
+            );
+            const inquiryId = quotationForStatus?.inquiry_id;
+            if (inquiryId != null) {
+                await Quotation.update(
+                    { status: QUOTATION_STATUS.NOT_SELECTED, status_on: statusOn },
+                    {
+                        where: {
+                            inquiry_id: inquiryId,
+                            id: { [Op.ne]: payload.quotation_id },
+                            deleted_at: null,
+                        },
+                        transaction: t,
+                    }
+                );
+            }
+        }
 
         if (committedHere) {
             await t.commit();

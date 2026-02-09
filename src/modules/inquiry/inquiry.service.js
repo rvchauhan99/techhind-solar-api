@@ -2,6 +2,7 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
+const { INQUIRY_STATUS } = require("../../common/utils/constants.js");
 
 const listInquiries = async ({
   search,
@@ -60,6 +61,8 @@ const listInquiries = async ({
   }
   if (status) {
     where.status = status;
+  } else {
+    where.status = { [Op.ne]: INQUIRY_STATUS.CONVERTED };
   }
   if (referenceFrom) {
     where.reference_from = { [Op.iLike]: `%${referenceFrom}%` };

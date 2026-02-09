@@ -238,6 +238,12 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
+        // Full BOM snapshot at order time (copied from quotation when created from quote)
+        bom_snapshot: {
+            type: DataTypes.JSON,
+            allowNull: true,
+        },
+
         // Pipeline Tracking
         stages: {
             type: DataTypes.JSON,

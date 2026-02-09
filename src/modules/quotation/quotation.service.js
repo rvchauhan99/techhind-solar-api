@@ -2,7 +2,21 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
-const { INQUIRY_STATUS } = require("../../common/utils/constants.js");
+const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
+
+/** Derive panel_product and inverter_product from bom_snapshot when present (for response consistency). */
+const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
+    const out = { panel_product: null, inverter_product: null };
+    if (!bom_snapshot || !Array.isArray(bom_snapshot)) return out;
+    const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, "_");
+    for (const line of bom_snapshot) {
+        const typeName = norm(line.product_snapshot?.product_type_name || "");
+        if (typeName === "panel" && out.panel_product == null) out.panel_product = line.product_id;
+        if (typeName === "inverter" && out.inverter_product == null) out.inverter_product = line.product_id;
+        if (out.panel_product != null && out.inverter_product != null) break;
+    }
+    return out;
+};
 
 const listQuotations = async ({
     search,
@@ -33,6 +47,8 @@ const listQuotations = async ({
     mobile_number,
     created_at_from,
     created_at_to,
+    status,
+    include_converted,
 } = {}) => {
     const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, ProjectPrice, Inquiry, ProductMake } = db;
     const { Op } = db.Sequelize;
@@ -125,6 +141,15 @@ const listQuotations = async ({
         where.is_approved = is_approved === "true" || is_approved === true;
     }
 
+    if (status) {
+        where.status = status;
+    } else if (!include_converted) {
+        where[Op.or] = [
+            { status: { [Op.ne]: QUOTATION_STATUS.CONVERTED } },
+            { status: null },
+        ];
+    }
+
     if (quotation_date_from || quotation_date_to) {
         where.quotation_date = where.quotation_date || {};
         if (quotation_date_from) where.quotation_date[Op.gte] = quotation_date_from;
@@ -198,6 +223,7 @@ const listQuotations = async ({
 
     const data = list.map((it) => {
         const row = it.toJSON();
+        const derived = derivePanelAndInverterFromBomSnapshot(row.bom_snapshot);
         return {
             id: row.id,
             quotation_number: row.quotation_number,
@@ -209,8 +235,8 @@ const listQuotations = async ({
             project_cost: row.project_cost,
             total_project_value: row.total_project_value,
             is_approved: row.is_approved,
-            panel_product: row.panel_product,
-            inverter_product: row.inverter_product,
+            panel_product: derived.panel_product ?? row.panel_product,
+            inverter_product: derived.inverter_product ?? row.inverter_product,
             order_type_id: row.order_type_id,
             project_scheme_id: row.project_scheme_id,
             user_name: row.user?.name,
@@ -223,6 +249,7 @@ const listQuotations = async ({
             status: row.status,
             status_on: row.status_on,
             panel_make: row.panel_make,
+            bom_snapshot: row.bom_snapshot,
         };
     });
 
@@ -298,7 +325,11 @@ const getQuotationById = async ({ id }) => {
     });
 
     if (!found) return null;
-    return found.toJSON();
+    const result = found.toJSON();
+    const derived = derivePanelAndInverterFromBomSnapshot(result.bom_snapshot);
+    if (derived.panel_product != null) result.panel_product = derived.panel_product;
+    if (derived.inverter_product != null) result.inverter_product = derived.inverter_product;
+    return result;
 };
 
 const createQuotation = async ({ payload, transaction } = {}) => {
@@ -331,6 +362,14 @@ const createQuotation = async ({ payload, transaction } = {}) => {
                 { status: INQUIRY_STATUS.QUOTATION, is_dead: false },
                 { where: { id: payload.inquiry_id }, transaction: t }
             );
+        }
+
+        // Build full BOM snapshot when project_price_id is set
+        if (payload.project_price_id) {
+            const bomSnapshot = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t);
+            if (bomSnapshot && bomSnapshot.length > 0) {
+                payload.bom_snapshot = bomSnapshot;
+            }
         }
 
         // Create the quotation (without quotation_number initially if we need to create inquiry first)
@@ -408,6 +447,14 @@ const updateQuotation = async ({ id, payload, transaction } = {}) => {
             transaction: t,
         });
         if (!quotation) throw new Error("Quotation not found");
+
+        // Rebuild BOM snapshot when project_price_id is present in payload
+        if (payload.project_price_id != null) {
+            const bomSnapshot = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t);
+            if (bomSnapshot && bomSnapshot.length > 0) {
+                payload.bom_snapshot = bomSnapshot;
+            }
+        }
 
         await quotation.update(payload, { transaction: t });
 
@@ -526,6 +573,78 @@ const getProjectPrices = async ({ schemeId, transaction } = {}) => {
     });
     return projectPrices
 
+};
+
+/**
+ * Build full BOM snapshot from Project Price's BOM (all products with full params + qty).
+ * Used when creating/updating quotation with project_price_id set.
+ * @param {number} projectPriceId
+ * @param {object} [transaction]
+ * @returns {Promise<Array|null>} Array of { product_id, quantity, sort_order, product_snapshot } or null
+ */
+const buildBomSnapshotFromProjectPrice = async (projectPriceId, transaction) => {
+    const { ProjectPrice, BillOfMaterial, Product, ProductType, ProductMake, MeasurementUnit } = db;
+    if (!projectPriceId) return null;
+
+    const projectPrice = await ProjectPrice.findOne({
+        where: { id: projectPriceId, deleted_at: null },
+        include: [
+            { model: BillOfMaterial, as: "billOfMaterial", attributes: ["id", "bom_name", "bom_code", "bom_detail"] },
+        ],
+        transaction,
+    });
+    if (!projectPrice) return null;
+
+    const data = projectPrice.toJSON();
+    const bomDetail = data?.billOfMaterial?.bom_detail;
+    if (!Array.isArray(bomDetail) || bomDetail.length === 0) return null;
+
+    const productIds = [...new Set(bomDetail.map((i) => i.product_id).filter(Boolean))];
+    if (productIds.length === 0) return null;
+
+    const products = await Product.findAll({
+        where: { id: productIds, deleted_at: null },
+        include: [
+            { model: ProductType, as: "productType", attributes: ["id", "name"] },
+            { model: ProductMake, as: "productMake", attributes: ["id", "name"] },
+            { model: MeasurementUnit, as: "measurementUnit", attributes: ["id", "name"] },
+        ],
+        transaction,
+    });
+
+    const productMap = {};
+    products.forEach((p) => {
+        const j = p.toJSON();
+        productMap[p.id] = {
+            id: j.id,
+            product_type_id: j.product_type_id,
+            product_make_id: j.product_make_id,
+            product_name: j.product_name,
+            product_description: j.product_description,
+            hsn_ssn_code: j.hsn_ssn_code,
+            measurement_unit_id: j.measurement_unit_id,
+            capacity: j.capacity,
+            barcode_number: j.barcode_number,
+            gst_percent: j.gst_percent,
+            tracking_type: j.tracking_type,
+            serial_required: j.serial_required,
+            properties: j.properties,
+            is_active: j.is_active,
+            min_stock_quantity: j.min_stock_quantity,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+            product_type_name: j.productType?.name ?? null,
+            product_make_name: j.productMake?.name ?? null,
+            measurement_unit_name: j.measurementUnit?.name ?? null,
+        };
+    });
+
+    return bomDetail.map((item, index) => ({
+        product_id: item.product_id,
+        quantity: item.quantity,
+        sort_order: index,
+        product_snapshot: productMap[item.product_id] ?? null,
+    }));
 };
 
 const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
