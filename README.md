@@ -61,7 +61,12 @@ npm start
 
 ## Deployment
 
-Step-by-step deployment guides: [Multi-tenant (shared)](docs/deploy-multi-tenant.md) | [Single-tenant (dedicated)](docs/deploy-single-tenant.md).
+The API supports two deployment modes:
+
+- **Single-tenant (dedicated):** One API instance and one database. Leave `TENANT_REGISTRY_DB_URL` unset. See [Single-tenant (dedicated) deployment](docs/deploy-single-tenant.md).
+- **Multi-tenant (shared):** One API instance, a Registry database, and one database per tenant. Set `TENANT_REGISTRY_DB_URL` and `MASTER_ENCRYPTION_KEY`. See [Multi-tenant (shared) deployment](docs/deploy-multi-tenant.md).
+
+**Connection pools:** Use `DB_POOL_MAX` and `DB_POOL_MIN` (defaults 5 and 0) to stay within managed Postgres connection limits (e.g. Aiven). Keeping these low avoids errors like "remaining connection slots are reserved for roles with the SUPERUSER attribute". See the deploy guides for details.
 
 ## Database Management
 

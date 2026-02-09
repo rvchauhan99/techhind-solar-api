@@ -281,36 +281,17 @@ const generatePDF = asyncHandler(async (req, res) => {
 
     const filename = `quotation-${quotation.quotation_number || id}.pdf`;
 
-    let uploadResult;
-    try {
-        uploadResult = await bucketService.uploadFile(
-            { buffer: pdfBuffer, originalname: filename, mimetype: "application/pdf", size: pdfBuffer.length },
-            { prefix: "quotations/pdfs", acl: "private" },
-            bucketClient
-        );
-    } catch (error) {
-        console.error("Error uploading PDF to bucket:", error);
-        throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
-    }
-
-    let url;
-    try {
-        url = await bucketService.getSignedUrl(uploadResult.path, 3600, bucketClient);
-    } catch (error) {
-        console.error("Error generating signed URL for PDF:", error);
-        throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
-    }
-
     if (req.tenant?.id) {
-      const usageService = require("../billing/usage.service.js");
-      usageService.incrementPdfGenerated(req.tenant.id).catch(() => {});
+        const usageService = require("../billing/usage.service.js");
+        usageService.incrementPdfGenerated(req.tenant.id).catch(() => {});
     }
-    return responseHandler.sendSuccess(res, {
-        path: uploadResult.path,
-        filename: filename,
-        url,
-        expires_in: 3600
-    }, "PDF generated successfully", 200);
+
+    res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdfBuffer.length,
+        "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+    });
+    return res.end(pdfBuffer);
 });
 
 module.exports = {

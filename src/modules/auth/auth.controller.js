@@ -18,6 +18,7 @@ const login = asyncHandler(async (req, res) => {
   const { email, password, tenant_key } = req.body;
   let user;
   let tenantSequelize = null;
+  let loginTransaction = null; // Used in shared mode when login has no tenant_key (global middleware does not set req.transaction)
 
   if (tenant_key && dbPoolManager.isSharedMode()) {
     const tenant = await tenantRegistryService.getTenantByKey(tenant_key);
@@ -28,7 +29,12 @@ const login = asyncHandler(async (req, res) => {
     user = await authService.loginUserWithTenant(tenantSequelize, email, password);
     user.tenant_id = tenant.id;
   } else {
-    user = await authService.loginUser(email, password, req.transaction);
+    if (dbPoolManager.isSharedMode() && !req.transaction) {
+      loginTransaction = await db.sequelize.transaction({ timeout: 30000 });
+      req.transaction = loginTransaction; // so error handler can rollback
+    }
+    const txn = req.transaction || loginTransaction;
+    user = await authService.loginUser(email, password, txn);
     user.tenant_id = process.env.DEDICATED_TENANT_ID || null;
   }
 
@@ -41,6 +47,7 @@ const login = asyncHandler(async (req, res) => {
       process.env.JWT_SECRET_ACCESS_TOKEN,
       { expiresIn: "5m" }
     );
+    if (loginTransaction && !loginTransaction.finished) await loginTransaction.commit().catch(() => {});
     return responseHandler.sendSuccess(
       res,
       { require_2fa: true, tempToken },
@@ -65,15 +72,17 @@ const login = asyncHandler(async (req, res) => {
       refreshExp
     );
   } else {
-    await authService.deleteExistingTokens(user.id, req.transaction);
+    const txn = req.transaction || loginTransaction;
+    await authService.deleteExistingTokens(user.id, txn);
     await authService.createUserToken(
       user.id,
       accessToken,
       refreshToken,
       refreshIat,
       refreshExp,
-      req.transaction
+      txn
     );
+    if (loginTransaction && !loginTransaction.finished) await loginTransaction.commit().catch(() => {});
   }
 
   const payload = {

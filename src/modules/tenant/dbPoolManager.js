@@ -7,9 +7,10 @@ const defaultSequelize = require("../../config/db.js");
 
 const poolCache = new Map();
 
+// Match main DB pool limits to avoid exhausting managed Postgres connection slots
 const defaultPoolConfig = {
-  max: parseInt(process.env.DB_POOL_MAX) || 10,
-  min: parseInt(process.env.DB_POOL_MIN) || 2,
+  max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
+  min: parseInt(process.env.DB_POOL_MIN, 10) || 0,
   acquire: 30000,
   idle: 10000,
 };
