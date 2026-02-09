@@ -3,8 +3,38 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
+const AppError = require("../../common/errors/AppError.js");
+const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 
 const { Supplier, State } = db;
+
+/** Indian GSTIN: 15 chars. Chars 1-2 = state code, 3-12 = PAN (10 chars), 13 = entity, 14 = Z, 15 = checksum. */
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
+
+/**
+ * Validates Indian GSTIN and derives PAN from it (chars 3-12).
+ * @param {string} gstin - Raw GSTIN (trimmed and uppercased internally).
+ * @returns {{ normalizedGstin: string, pan: string }}
+ * @throws {AppError} 400 if GSTIN is invalid.
+ */
+const derivePanFromGstin = (gstin) => {
+  const raw = typeof gstin === "string" ? gstin.trim() : "";
+  if (!raw) {
+    throw new AppError("GSTIN is required when deriving PAN", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+  const normalized = raw.toUpperCase().replace(/\s/g, "");
+  if (normalized.length !== 15) {
+    throw new AppError("Invalid GSTIN format: must be 15 characters", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+  if (!GSTIN_REGEX.test(normalized)) {
+    throw new AppError(
+      "Invalid GSTIN format: expected Indian format (2 digits state + 10 char PAN + entity + Z + checksum)",
+      RESPONSE_STATUS_CODES.BAD_REQUEST
+    );
+  }
+  const pan = normalized.slice(2, 12);
+  return { normalizedGstin: normalized, pan };
+};
 
 const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
 
@@ -187,6 +217,16 @@ const createSupplier = async ({ payload, transaction } = {}) => {
   let committedHere = !transaction;
 
   try {
+    let gstin = payload.gstin != null ? String(payload.gstin).trim() : "";
+    let pan_number = null;
+    if (gstin) {
+      const derived = derivePanFromGstin(gstin);
+      gstin = derived.normalizedGstin;
+      pan_number = derived.pan;
+    } else {
+      gstin = null;
+    }
+
     const supplierData = {
       supplier_code: payload.supplier_code,
       supplier_name: payload.supplier_name,
@@ -197,8 +237,8 @@ const createSupplier = async ({ payload, transaction } = {}) => {
       city: payload.city || null,
       state_id: payload.state_id || null,
       pincode: payload.pincode || null,
-      gstin: payload.gstin || null,
-      pan_number: payload.pan_number || null,
+      gstin,
+      pan_number,
       is_active: payload.is_active !== undefined ? payload.is_active : true,
     };
 
@@ -231,6 +271,20 @@ const updateSupplier = async ({ id, payload, transaction } = {}) => {
 
     if (!supplier) throw new Error("Supplier not found");
 
+    let gstin = supplier.gstin;
+    let pan_number = supplier.pan_number;
+    if ("gstin" in payload) {
+      const raw = payload.gstin != null ? String(payload.gstin).trim() : "";
+      if (raw) {
+        const derived = derivePanFromGstin(payload.gstin);
+        gstin = derived.normalizedGstin;
+        pan_number = derived.pan;
+      } else {
+        gstin = null;
+        pan_number = null;
+      }
+    }
+
     await supplier.update(
       {
         supplier_code: payload.supplier_code ?? supplier.supplier_code,
@@ -242,8 +296,8 @@ const updateSupplier = async ({ id, payload, transaction } = {}) => {
         city: payload.city !== undefined ? payload.city : supplier.city,
         state_id: payload.state_id !== undefined ? payload.state_id : supplier.state_id,
         pincode: payload.pincode !== undefined ? payload.pincode : supplier.pincode,
-        gstin: payload.gstin !== undefined ? payload.gstin : supplier.gstin,
-        pan_number: payload.pan_number !== undefined ? payload.pan_number : supplier.pan_number,
+        gstin,
+        pan_number,
         is_active: payload.is_active !== undefined ? payload.is_active : supplier.is_active,
       },
       { transaction: t }
@@ -373,5 +427,6 @@ module.exports = {
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  derivePanFromGstin,
 };
 

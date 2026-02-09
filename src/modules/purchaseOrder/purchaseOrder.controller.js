@@ -15,6 +15,7 @@ const list = asyncHandler(async (req, res) => {
     limit = 20,
     q = null,
     status = null,
+    include_closed: includeClosed = null,
     sortBy = "created_at",
     sortOrder = "DESC",
     po_number: poNumber = null,
@@ -35,11 +36,13 @@ const list = asyncHandler(async (req, res) => {
     grand_total_op: grandTotalOp = null,
     grand_total_to: grandTotalTo = null,
   } = req.query;
+  const includeClosedBool = includeClosed === "true" || includeClosed === true;
   const result = await purchaseOrderService.listPurchaseOrders({
     page: parseInt(page),
     limit: parseInt(limit),
     q,
     status,
+    include_closed: includeClosedBool,
     sortBy,
     sortOrder,
     po_number: poNumber,
@@ -289,6 +292,7 @@ const exportList = asyncHandler(async (req, res) => {
   const {
     q = null,
     status = null,
+    include_closed: includeClosed = null,
     sortBy = "created_at",
     sortOrder = "DESC",
     po_number: poNumber = null,
@@ -309,9 +313,11 @@ const exportList = asyncHandler(async (req, res) => {
     grand_total_op: grandTotalOp = null,
     grand_total_to: grandTotalTo = null,
   } = req.query;
+  const includeClosedBool = includeClosed === "true" || includeClosed === true;
   const buffer = await purchaseOrderService.exportPurchaseOrders({
     q,
     status,
+    include_closed: includeClosedBool,
     sortBy,
     sortOrder,
     po_number: poNumber,
