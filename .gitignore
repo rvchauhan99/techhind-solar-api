@@ -1,6 +1,10 @@
 node_modules
 env.local
 .env
+env copy
+*env*copy*
+*.env.*
+!.env.example
 
 # Certificates / keys (use env or secrets in production)
 # *.pem
