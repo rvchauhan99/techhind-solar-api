@@ -88,9 +88,13 @@ Set these for the API process (e.g. in `.env` or your host’s env).
 | `PORT` | No | Server port (default 9090) |
 | `FRONTEND_URL` | Recommended | Allowed origin for CORS (e.g. `https://your-app.com`) |
 | `DEDICATED_TENANT_ID` | No | Optional UUID for logging/billing |
+| `DB_POOL_MAX` | No | Max connections in pool (default 5). Keep low for managed Postgres (e.g. Aiven) to avoid "remaining connection slots reserved for SUPERUSER". |
+| `DB_POOL_MIN` | No | Min connections in pool (default 0). |
 | `BUCKET_*` | If using files | Endpoint, name, access key, secret key, region |
 
 \* Use either all `DB_*` vars or `DATABASE_URL`.
+
+**Managed Postgres (Aiven, etc.):** The app uses a single connection pool. If you hit connection limits, set `DB_POOL_MAX=3` (or lower) and `DB_POOL_MIN=0`.
 
 Add email (e.g. `BREVO_*`) and other vars as needed (see `.env.example`).
 

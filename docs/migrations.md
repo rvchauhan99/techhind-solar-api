@@ -16,6 +16,8 @@ Migrations are **never** run inside the API server lifecycle. They must be execu
 
 ## Execution modes
 
+Runtime connection pool settings (`DB_POOL_MAX`, `DB_POOL_MIN`, `REGISTRY_DB_POOL_MAX`) are configured via environment variables only; migrations do not change pool configuration.
+
 ### Shared mode
 
 - Set `TENANT_REGISTRY_DB_URL` and `MASTER_ENCRYPTION_KEY`.

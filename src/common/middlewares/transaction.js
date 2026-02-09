@@ -1,8 +1,14 @@
 const sequelize = require("../../config/db.js");
+const dbPoolManager = require("../../modules/tenant/dbPoolManager.js");
 
 const transactionMiddleware = async (req, res, next) => {
   // Only wrap mutating requests in a DB transaction
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    return next();
+  }
+
+  // In shared (multi-tenant) mode, tenantTransactionMiddleware sets req.transaction from req.tenant.sequelize for protected routes; skip creating one on the default pool here to avoid unnecessary connections.
+  if (dbPoolManager.isSharedMode()) {
     return next();
   }
 
@@ -20,18 +26,17 @@ const transactionMiddleware = async (req, res, next) => {
     const originalJson = res.json;
     const originalEnd = res.end;
 
-    // Helper function to commit transaction (only on success)
+    // Helper: commit whatever transaction is on the request (may be set by tenantTransactionMiddleware for protected routes)
     const commitTransaction = async () => {
-      // Only commit if status code indicates success (< 400)
-      // Error handler will handle rollback for errors
+      const t = req.transaction;
       if (
-        transaction &&
-        !transaction.finished &&
+        t &&
+        !t.finished &&
         !res.headersSent &&
         res.statusCode < 400
       ) {
         try {
-          await transaction.commit();
+          await t.commit();
           console.log("✅ Transaction committed");
         } catch (err) {
           console.error("❌ Transaction commit failed:", err);

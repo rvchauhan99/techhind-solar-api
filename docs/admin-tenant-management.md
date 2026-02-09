@@ -7,7 +7,7 @@ The **Tenant Management** feature lets admins manage tenants in the Registry fro
 - **API:** Set **`TENANT_REGISTRY_DB_URL`** and **`ADMIN_API_KEY`**. If either is missing, admin routes respond with 503 (not configured) or 401 (unauthorized).
 - **Frontend:** Set **`NEXT_PUBLIC_ADMIN_API_KEY`** to the same value as `ADMIN_API_KEY` so the admin UI can call the admin APIs. If not set, the admin section shows "Admin not configured".
 
-In **dedicated** deployment (no Registry), admin APIs are not available.
+In **dedicated** deployment (no Registry), admin APIs are not available. For single-tenant deployment, see [deploy-single-tenant.md](deploy-single-tenant.md); admin APIs are not used there.
 
 ## Security
 

@@ -70,8 +70,13 @@ Set these for the API process.
 | **NODE_ENV** | Yes in production | e.g. `production` |
 | **PORT** | No | Server port (default 9090) |
 | **FRONTEND_URL** | Recommended | Allowed origin for CORS |
+| **DB_POOL_MAX** | No | Max connections per pool for main and per-tenant DBs (default 5). Keep low on managed Postgres. |
+| **DB_POOL_MIN** | No | Min connections per pool (default 0). |
+| **REGISTRY_DB_POOL_MAX** | No | Max connections for the Registry DB pool (default 5). |
 
 \* Or use **DATABASE_URL** if your config supports it. Tenant databases are **not** configured via these; they come from the Registry.
+
+**Connection limits:** Total connections ≈ main pool + Registry pool + (per-tenant pool × active tenants). Managed Postgres (e.g. Aiven) reserves some slots for superuser; the rest are shared. Use small pool values (e.g. `DB_POOL_MAX=3`, `REGISTRY_DB_POOL_MAX=3`) to avoid "remaining connection slots reserved for roles with the SUPERUSER attribute".
 
 Add **BREVO_*** (or other email), **BUCKET_*** (if you use a default bucket), and any other vars from `.env.example` as needed.
 
