@@ -154,10 +154,9 @@ const buildHtmlDocument = async (data, bucketClient) => {
         logoImage = await pathToDataUrl(data.companyLogoPath, mimeType, bucketClient);
     }
 
-    // Fallback to default logo paths if not found
+    // Fallback to bundled default logos only (no local uploads path)
     if (!logoImage) {
         const defaultLogoPaths = [
-            path.join(PUBLIC_DIR, "uploads/company-logo.png"),
             path.join(PUBLIC_DIR, "logo.png"),
             path.join(PUBLIC_DIR, "solar-earth-logo.png"),
         ];
