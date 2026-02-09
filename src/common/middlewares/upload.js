@@ -1,3 +1,8 @@
+/**
+ * @deprecated Do not use for new uploads. All file/document uploads must use
+ * uploadMemory.js and bucket.service.js (bucket only). This middleware writes
+ * to local disk (public/uploads) and must not be used.
+ */
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
