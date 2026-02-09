@@ -38,6 +38,10 @@ handlebars.registerHelper("formatDate", function (date) {
     return `${day}-${month}-${year}`;
 });
 
+handlebars.registerHelper("add", function (a, b) {
+    return (Number(a) || 0) + (Number(b) || 0);
+});
+
 /**
  * Load and compile a template file
  * @param {string} templatePath - Relative path from template directory
@@ -533,6 +537,9 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
             lightening_arrestor: quotation.la_description || "",
             miscellaneous: quotation.mis_description || "",
         },
+
+        // Full BOM snapshot (when present, PDF BOM page uses this; else falls back to panel/inverter/etc. above)
+        bom_snapshot: Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0 ? quotation.bom_snapshot : null,
 
         // Savings and Payback data
         savings: {

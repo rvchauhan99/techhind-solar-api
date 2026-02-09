@@ -9,6 +9,35 @@
   </div>
   <div class="bom-underline"></div>
 
+  {{#if bom_snapshot}}
+  <!-- BOM from snapshot (full product params + qty) -->
+  <div class="bom-snapshot-table">
+    <table class="bom-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product Name</th>
+          <th>Type</th>
+          <th>Make</th>
+          <th>Capacity / Spec</th>
+          <th>Qty</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each bom_snapshot}}
+        <tr>
+          <td>{{add @index 1}}</td>
+          <td>{{#if this.product_snapshot}}{{this.product_snapshot.product_name}}{{else}}-{{/if}}</td>
+          <td>{{#if this.product_snapshot}}{{this.product_snapshot.product_type_name}}{{else}}-{{/if}}</td>
+          <td>{{#if this.product_snapshot}}{{this.product_snapshot.product_make_name}}{{else}}-{{/if}}</td>
+          <td>{{#if this.product_snapshot}}{{this.product_snapshot.capacity}}{{#if this.product_snapshot.measurement_unit_name}} {{this.product_snapshot.measurement_unit_name}}{{/if}}{{else}}-{{/if}}</td>
+          <td>{{this.quantity}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
   <!-- Panel Section -->
   <div class="bom-section">
     <div class="bom-section-icon">
@@ -252,4 +281,5 @@
     <p><strong>Lightening Arrestor:</strong> {{balance_of_system.lightening_arrestor}}</p>
     <p><strong>Miscellaneous Item:</strong> {{balance_of_system.miscellaneous}}</p>
   </div>
+  {{/if}}
 </div>

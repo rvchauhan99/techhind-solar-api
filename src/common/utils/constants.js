@@ -44,6 +44,13 @@ const INQUIRY_STATUS = {
   SITE_VISIT_DONE: "Site Visit Done",
   QUOTATION: "Quotation",
   UNDER_DISCUSSION: "Under Discussion",
+  CONVERTED: "Converted",
+};
+const QUOTATION_STATUS = {
+  DRAFT: "Draft",
+  SENT: "Sent",
+  CONVERTED: "Converted",
+  NOT_SELECTED: "Not Selected",
 };
 const PAYMENT_TYPES = ["Direct Payment", "Loan Payment", "PDC Payment"];
 const FOLLOWUP_RATING = ["High", "Medium", "Low"];
@@ -122,6 +129,7 @@ module.exports = {
   INQUIRY_RATINGS,
   PAYMENT_TYPES,
   INQUIRY_STATUS,
+  QUOTATION_STATUS,
   FOLLOWUP_RATING,
   PO_STATUS,
   RECEIPT_STATUS,

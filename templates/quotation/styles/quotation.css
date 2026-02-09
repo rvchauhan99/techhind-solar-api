@@ -624,6 +624,33 @@ body {
   margin-bottom: 20px;
 }
 
+.bom-snapshot-table {
+  margin-top: 20px;
+}
+
+.bom-snapshot-table .bom-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.bom-snapshot-table .bom-table th,
+.bom-snapshot-table .bom-table td {
+  border: 1px solid var(--border-gray);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.bom-snapshot-table .bom-table th {
+  background: var(--primary-blue);
+  color: var(--white);
+  font-weight: 600;
+}
+
+.bom-snapshot-table .bom-table tr:nth-child(even) {
+  background: var(--light-gray);
+}
+
 .bom-section {
   display: flex;
   align-items: flex-start;

@@ -50,6 +50,53 @@ const generateChallanNumber = async () => {
 };
 
 /**
+ * Recompute and persist order.bom_snapshot shipped_qty / pending_qty from challan items.
+ * Call after createChallan, updateChallan, deleteChallan for the affected order.
+ */
+const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
+    if (!orderId) return;
+    const order = await Order.findOne({
+        where: { id: orderId, deleted_at: null },
+        attributes: ["id", "bom_snapshot"],
+        transaction,
+    });
+    if (!order || !Array.isArray(order.bom_snapshot) || order.bom_snapshot.length === 0) return;
+
+    const challans = await Challan.findAll({
+        where: { order_id: orderId, deleted_at: null },
+        include: [
+            { model: ChallanItems, as: "items", attributes: ["product_id", "quantity"] },
+        ],
+        transaction,
+    });
+
+    const shippedByProduct = {};
+    challans.forEach((c) => {
+        (c.items || []).forEach((item) => {
+            const pid = item.product_id;
+            const qty = Number(item.quantity) || 0;
+            shippedByProduct[pid] = (shippedByProduct[pid] || 0) + qty;
+        });
+    });
+
+    const qtyNum = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
+    const updatedSnapshot = order.bom_snapshot.map((line) => {
+        const quantity = qtyNum(line.quantity);
+        const shipped_qty = shippedByProduct[line.product_id] || 0;
+        const returned_qty = qtyNum(line.returned_qty);
+        const pending_qty = quantity - shipped_qty + returned_qty;
+        return {
+            ...line,
+            shipped_qty,
+            returned_qty,
+            pending_qty,
+        };
+    });
+
+    await order.update({ bom_snapshot: updatedSnapshot }, { transaction });
+};
+
+/**
  * List challans with pagination and filtering
  */
 const listChallans = async ({ order_id, page = 1, limit = 20, search = null } = {}) => {
@@ -155,11 +202,11 @@ const createChallan = async ({ payload, transaction } = {}) => {
         throw error;
     }
 
-    // Validate quantities against quotation
+    // Validate quantities against order BOM or (fallback) quotation legacy
     if (challanData.order_id) {
-        // Fetch order with quotation
         const order = await Order.findOne({
             where: { id: challanData.order_id, deleted_at: null },
+            attributes: ["id", "bom_snapshot"],
             include: [
                 {
                     model: db.Quotation,
@@ -187,107 +234,83 @@ const createChallan = async ({ payload, transaction } = {}) => {
             throw error;
         }
 
-        if (order.quotation) {
-            // Product types that need validation
+        const previousChallans = await Challan.findAll({
+            where: { order_id: challanData.order_id, deleted_at: null },
+            include: [
+                { model: ChallanItems, as: "items", attributes: ["product_id", "quantity"] },
+            ],
+        });
+
+        const previousQuantities = {};
+        previousChallans.forEach((c) => {
+            (c.items || []).forEach((it) => {
+                const pid = it.product_id;
+                previousQuantities[pid] = (previousQuantities[pid] || 0) + parseFloat(it.quantity);
+            });
+        });
+
+        const useBomSnapshot = Array.isArray(order.bom_snapshot) && order.bom_snapshot.length > 0;
+
+        if (useBomSnapshot) {
+            const bomByProductId = {};
+            order.bom_snapshot.forEach((line) => {
+                bomByProductId[line.product_id] = { quantity: parseFloat(line.quantity) || 0, line };
+            });
+            for (const item of items) {
+                const ordered = bomByProductId[item.product_id];
+                if (!ordered) {
+                    const error = new Error(`Product id ${item.product_id} is not in order BOM`);
+                    error.statusCode = 400;
+                    throw error;
+                }
+                const previousQty = previousQuantities[item.product_id] || 0;
+                const currentQty = parseFloat(item.quantity) || 0;
+                const totalQty = previousQty + currentQty;
+                if (totalQty > ordered.quantity) {
+                    const error = new Error(
+                        `Total quantity for product id ${item.product_id} (${totalQty}) exceeds order BOM quantity (${ordered.quantity}). Previous challan: ${previousQty}, Current: ${currentQty}`
+                    );
+                    error.statusCode = 400;
+                    throw error;
+                }
+            }
+        } else if (order.quotation) {
             const validatableTypes = [
-                "panel",
-                "inverter",
-                "hybrid_inverter",
-                "battery",
-                "acdb",
-                "dcdb",
-                "ac_cable",
-                "dc_cable",
-                "earthing",
-                "la",
+                "panel", "inverter", "hybrid_inverter", "battery", "acdb", "dcdb",
+                "ac_cable", "dc_cable", "earthing", "la",
             ];
-
-            // Map product type to quotation field
             const typeToQuotationField = {
-                panel: "panel_quantity",
-                inverter: "inverter_quantity",
-                hybrid_inverter: "hybrid_inverter_quantity",
-                battery: "battery_quantity",
-                acdb: "acdb_quantity",
-                dcdb: "dcdb_quantity",
-                ac_cable: "cable_ac_quantity",
-                dc_cable: "cable_dc_quantity",
-                earthing: "earthing_quantity",
-                la: "la_quantity",
+                panel: "panel_quantity", inverter: "inverter_quantity",
+                hybrid_inverter: "hybrid_inverter_quantity", battery: "battery_quantity",
+                acdb: "acdb_quantity", dcdb: "dcdb_quantity",
+                ac_cable: "cable_ac_quantity", dc_cable: "cable_dc_quantity",
+                earthing: "earthing_quantity", la: "la_quantity",
             };
-
-            // Fetch product details for items
-            const productIds = items.map(item => item.product_id);
+            const productIds = items.map((item) => item.product_id);
             const products = await Product.findAll({
                 where: { id: productIds, deleted_at: null },
-                include: [
-                    {
-                        model: ProductType,
-                        as: "productType",
-                        attributes: ["id", "name"],
-                    },
-                ],
+                include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
             });
-
-            // Create a map of product_id to product
             const productMap = {};
-            products.forEach(p => {
-                productMap[p.id] = p;
-            });
+            products.forEach((p) => { productMap[p.id] = p; });
 
-            // Fetch all previous challans for this order
-            const previousChallans = await Challan.findAll({
-                where: { order_id: challanData.order_id, deleted_at: null },
-                include: [
-                    {
-                        model: ChallanItems,
-                        as: "items",
-                        attributes: ["product_id", "quantity"],
-                    },
-                ],
-            });
-
-            // Calculate total quantities per product from previous challans
-            const previousQuantities = {};
-            previousChallans.forEach(challan => {
-                if (challan.items) {
-                    challan.items.forEach(item => {
-                        if (!previousQuantities[item.product_id]) {
-                            previousQuantities[item.product_id] = 0;
-                        }
-                        previousQuantities[item.product_id] += parseFloat(item.quantity);
-                    });
-                }
-            });
-
-            // Validate each item
             for (const item of items) {
                 const product = productMap[item.product_id];
-                if (!product || !product.productType) {
-                    continue; // Skip if product not found
-                }
-
+                if (!product || !product.productType) continue;
                 const productTypeName = product.productType.name.toLowerCase().replace(/\s+/g, "_");
-
-                // Check if this product type needs validation
-                if (validatableTypes.includes(productTypeName)) {
-                    const quotationField = typeToQuotationField[productTypeName];
-                    const quotationQty = order.quotation[quotationField];
-
-                    if (quotationQty !== null && quotationQty !== undefined) {
-                        // Calculate total quantity (previous + current)
-                        const previousQty = previousQuantities[item.product_id] || 0;
-                        const currentQty = parseFloat(item.quantity);
-                        const totalQty = previousQty + currentQty;
-
-                        if (totalQty > parseFloat(quotationQty)) {
-                            const error = new Error(
-                                `Total quantity for ${product.product_name} (${totalQty}) exceeds quotation quantity (${quotationQty}). Previous challan quantity: ${previousQty}, Current: ${currentQty}`
-                            );
-                            error.statusCode = 400;
-                            throw error;
-                        }
-                    }
+                if (!validatableTypes.includes(productTypeName)) continue;
+                const quotationField = typeToQuotationField[productTypeName];
+                const quotationQty = order.quotation[quotationField];
+                if (quotationQty == null) continue;
+                const previousQty = previousQuantities[item.product_id] || 0;
+                const currentQty = parseFloat(item.quantity);
+                const totalQty = previousQty + currentQty;
+                if (totalQty > parseFloat(quotationQty)) {
+                    const error = new Error(
+                        `Total quantity for ${product.product_name} (${totalQty}) exceeds quotation quantity (${quotationQty}). Previous challan quantity: ${previousQty}, Current: ${currentQty}`
+                    );
+                    error.statusCode = 400;
+                    throw error;
                 }
             }
         }
@@ -328,6 +351,8 @@ const createChallan = async ({ payload, transaction } = {}) => {
                 current_stage_key: "fabrication"
             }, { transaction });
         }
+
+        await updateOrderBomShippedQuantities(challanData.order_id, transaction);
     }
 
     // Fetch created challan with items
@@ -368,6 +393,10 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
         await ChallanItems.bulkCreate(itemsToCreate, { transaction });
     }
 
+    if (challan.order_id) {
+        await updateOrderBomShippedQuantities(challan.order_id, transaction);
+    }
+
     // Fetch updated challan with items
     return await getChallanById({ id });
 };
@@ -384,7 +413,12 @@ const deleteChallan = async ({ id, transaction } = {}) => {
         throw new Error("Challan not found");
     }
 
+    const orderId = challan.order_id;
     await challan.destroy({ transaction });
+
+    if (orderId) {
+        await updateOrderBomShippedQuantities(orderId, transaction);
+    }
 
     return { message: "Challan deleted successfully" };
 };
@@ -398,16 +432,19 @@ const getNextChallanNumber = async () => {
 
 /**
  * Get quotation products by order_id
+ * Product list from order.bom_snapshot or quotation.bom_snapshot when present, else legacy quotation product IDs.
  */
 const getQuotationProductsByOrderId = async ({ order_id } = {}) => {
     const order = await Order.findOne({
         where: { id: order_id, deleted_at: null },
+        attributes: ["id", "bom_snapshot"],
         include: [
             {
                 model: db.Quotation,
                 as: "quotation",
                 attributes: [
                     "id",
+                    "bom_snapshot",
                     "structure_product",
                     "panel_product",
                     "inverter_product",
@@ -428,41 +465,38 @@ const getQuotationProductsByOrderId = async ({ order_id } = {}) => {
         throw new Error("Order not found");
     }
 
-    if (!order.quotation) {
-        return { products: [] };
+    let productIds = [];
+    const bom = Array.isArray(order.bom_snapshot) && order.bom_snapshot.length > 0
+        ? order.bom_snapshot
+        : (order.quotation && Array.isArray(order.quotation.bom_snapshot) && order.quotation.bom_snapshot.length > 0
+            ? order.quotation.bom_snapshot
+            : null);
+    if (bom) {
+        productIds = [...new Set(bom.map((line) => line.product_id).filter((id) => id != null))];
+    } else if (order.quotation) {
+        productIds = [
+            order.quotation.structure_product,
+            order.quotation.panel_product,
+            order.quotation.inverter_product,
+            order.quotation.battery_product,
+            order.quotation.hybrid_inverter_product,
+            order.quotation.acdb_product,
+            order.quotation.dcdb_product,
+            order.quotation.cable_ac_product,
+            order.quotation.cable_dc_product,
+            order.quotation.earthing_product,
+            order.quotation.la_product,
+        ].filter((id) => id != null && id !== undefined);
     }
-
-    // Extract product IDs from quotation
-    const productIds = [
-        order.quotation.structure_product,
-        order.quotation.panel_product,
-        order.quotation.inverter_product,
-        order.quotation.battery_product,
-        order.quotation.hybrid_inverter_product,
-        order.quotation.acdb_product,
-        order.quotation.dcdb_product,
-        order.quotation.cable_ac_product,
-        order.quotation.cable_dc_product,
-        order.quotation.earthing_product,
-        order.quotation.la_product,
-    ].filter(id => id != null && id !== undefined);
 
     if (productIds.length === 0) {
         return { products: [] };
     }
 
-    // Fetch products
     const products = await Product.findAll({
-        where: {
-            id: productIds,
-            deleted_at: null,
-        },
+        where: { id: productIds, deleted_at: null },
         include: [
-            {
-                model: ProductType,
-                as: "productType",
-                attributes: ["id", "name"],
-            },
+            { model: ProductType, as: "productType", attributes: ["id", "name"] },
         ],
     });
 
@@ -470,42 +504,26 @@ const getQuotationProductsByOrderId = async ({ order_id } = {}) => {
 };
 
 /**
- * Get delivery status for an order
- * Compares challan quantities with quotation quantities for each product type
+ * Get delivery status for an order.
+ * When order.bom_snapshot is present: status keyed by product_id (required, delivered, pending, status).
+ * Else: status keyed by product type (panel, inverter, ...) from quotation legacy.
  */
 const getDeliveryStatus = async ({ order_id } = {}) => {
-    // Fetch order with quotation
     const order = await Order.findOne({
         where: { id: order_id, deleted_at: null },
+        attributes: ["id", "bom_snapshot"],
         include: [
             {
                 model: db.Quotation,
                 as: "quotation",
                 attributes: [
                     "id",
-                    // Product IDs
-                    "structure_product",
-                    "panel_product",
-                    "inverter_product",
-                    "battery_product",
-                    "hybrid_inverter_product",
-                    "acdb_product",
-                    "dcdb_product",
-                    "cable_ac_product",
-                    "cable_dc_product",
-                    "earthing_product",
-                    "la_product",
-                    // Quantities (some products may not have these)
-                    "panel_quantity",
-                    "inverter_quantity",
-                    "hybrid_inverter_quantity",
-                    "battery_quantity",
-                    "acdb_quantity",
-                    "dcdb_quantity",
-                    "cable_ac_quantity",
-                    "cable_dc_quantity",
-                    "earthing_quantity",
-                    "la_quantity",
+                    "structure_product", "panel_product", "inverter_product", "battery_product",
+                    "hybrid_inverter_product", "acdb_product", "dcdb_product",
+                    "cable_ac_product", "cable_dc_product", "earthing_product", "la_product",
+                    "panel_quantity", "inverter_quantity", "hybrid_inverter_quantity", "battery_quantity",
+                    "acdb_quantity", "dcdb_quantity", "cable_ac_quantity", "cable_dc_quantity",
+                    "earthing_quantity", "la_quantity",
                 ],
             },
         ],
@@ -515,11 +533,6 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
         throw new Error("Order not found");
     }
 
-    if (!order.quotation) {
-        return { status: {} };
-    }
-
-    // Fetch all challans for this order
     const challans = await Challan.findAll({
         where: { order_id, deleted_at: null },
         include: [
@@ -533,11 +546,7 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
                         as: "product",
                         attributes: ["id", "product_name"],
                         include: [
-                            {
-                                model: ProductType,
-                                as: "productType",
-                                attributes: ["id", "name"],
-                            },
+                            { model: ProductType, as: "productType", attributes: ["id", "name"] },
                         ],
                     },
                 ],
@@ -545,85 +554,82 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
         ],
     });
 
-    // Product type mapping for quantities
-    const typeToQuotationField = {
-        panel: "panel_quantity",
-        inverter: "inverter_quantity",
-        hybrid_inverter: "hybrid_inverter_quantity",
-        battery: "battery_quantity",
-        acdb: "acdb_quantity",
-        dcdb: "dcdb_quantity",
-        ac_cable: "cable_ac_quantity",
-        dc_cable: "cable_dc_quantity",
-        earthing: "earthing_quantity",
-        la: "la_quantity",
-    };
-
-    // Product type to product ID mapping
-    const typeToProductField = {
-        structure: "structure_product",
-        panel: "panel_product",
-        inverter: "inverter_product",
-        battery: "battery_product",
-        hybrid_inverter: "hybrid_inverter_product",
-        acdb: "acdb_product",
-        dcdb: "dcdb_product",
-        ac_cable: "cable_ac_product",
-        dc_cable: "cable_dc_product",
-        earthing: "earthing_product",
-        la: "la_product",
-    };
-
-    // Calculate delivered quantities per product type
-    const deliveredQuantities = {};
-
-    challans.forEach(challan => {
-        if (challan.items) {
-            challan.items.forEach(item => {
-                if (item.product && item.product.productType) {
-                    const productTypeName = item.product.productType.name.toLowerCase().replace(/\s+/g, "_");
-
-                    if (!deliveredQuantities[productTypeName]) {
-                        deliveredQuantities[productTypeName] = 0;
-                    }
-                    deliveredQuantities[productTypeName] += parseFloat(item.quantity);
-                }
-            });
-        }
+    const deliveredByProductId = {};
+    challans.forEach((c) => {
+        (c.items || []).forEach((it) => {
+            const pid = it.product_id;
+            deliveredByProductId[pid] = (deliveredByProductId[pid] || 0) + parseFloat(it.quantity);
+        });
     });
 
-    // Build status object
-    const status = {};
+    const useBomSnapshot = Array.isArray(order.bom_snapshot) && order.bom_snapshot.length > 0;
 
-    // Check each product type
-    Object.keys(typeToProductField).forEach(type => {
-        const productField = typeToProductField[type];
-        const quotationField = typeToQuotationField[type];
-        const productId = order.quotation[productField];
+    if (useBomSnapshot) {
+        const status = {};
+        order.bom_snapshot.forEach((line) => {
+            const pid = line.product_id;
+            const required = parseFloat(line.quantity) || 0;
+            const delivered = deliveredByProductId[pid] || 0;
+            const pending = (line.pending_qty != null && !Number.isNaN(Number(line.pending_qty)))
+                ? Number(line.pending_qty)
+                : Math.max(0, required - delivered);
+            status[pid] = {
+                required,
+                delivered,
+                pending,
+                status: delivered >= required ? "complete" : delivered > 0 ? "partial" : "pending",
+            };
+        });
+        return { status };
+    }
 
-        // Only include if product exists in quotation
-        if (productId !== null && productId !== undefined) {
-            const deliveredQty = deliveredQuantities[type] || 0;
+    if (!order.quotation) {
+        return { status: {} };
+    }
 
-            // Check if this product type has a quantity field
-            if (quotationField && order.quotation[quotationField] !== null && order.quotation[quotationField] !== undefined) {
-                // Has quantity field - compare delivered vs required
-                const requiredQty = order.quotation[quotationField];
-                if (requiredQty > 0) {
-                    status[type] = {
-                        required: parseFloat(requiredQty),
-                        delivered: deliveredQty,
-                        status: deliveredQty >= parseFloat(requiredQty) ? "complete" : deliveredQty > 0 ? "partial" : "pending"
-                    };
-                }
-            } else {
-                // No quantity field - mark as complete if any challan exists
-                status[type] = {
-                    required: null,
-                    delivered: deliveredQty,
-                    status: deliveredQty > 0 ? "complete" : "pending"
-                };
+    const typeToQuotationField = {
+        panel: "panel_quantity", inverter: "inverter_quantity", hybrid_inverter: "hybrid_inverter_quantity",
+        battery: "battery_quantity", acdb: "acdb_quantity", dcdb: "dcdb_quantity",
+        ac_cable: "cable_ac_quantity", dc_cable: "cable_dc_quantity",
+        earthing: "earthing_quantity", la: "la_quantity",
+    };
+    const typeToProductField = {
+        structure: "structure_product", panel: "panel_product", inverter: "inverter_product",
+        battery: "battery_product", hybrid_inverter: "hybrid_inverter_product",
+        acdb: "acdb_product", dcdb: "dcdb_product",
+        ac_cable: "cable_ac_product", dc_cable: "cable_dc_product",
+        earthing: "earthing_product", la: "la_product",
+    };
+
+    const deliveredQuantities = {};
+    challans.forEach((c) => {
+        (c.items || []).forEach((it) => {
+            if (it.product && it.product.productType) {
+                const typeName = it.product.productType.name.toLowerCase().replace(/\s+/g, "_");
+                deliveredQuantities[typeName] = (deliveredQuantities[typeName] || 0) + parseFloat(it.quantity);
             }
+        });
+    });
+
+    const status = {};
+    Object.keys(typeToProductField).forEach((type) => {
+        const productId = order.quotation[typeToProductField[type]];
+        if (productId == null) return;
+        const deliveredQty = deliveredQuantities[type] || 0;
+        const quotationField = typeToQuotationField[type];
+        const requiredQty = quotationField ? order.quotation[quotationField] : null;
+        if (requiredQty != null && parseFloat(requiredQty) > 0) {
+            status[type] = {
+                required: parseFloat(requiredQty),
+                delivered: deliveredQty,
+                status: deliveredQty >= parseFloat(requiredQty) ? "complete" : deliveredQty > 0 ? "partial" : "pending",
+            };
+        } else {
+            status[type] = {
+                required: null,
+                delivered: deliveredQty,
+                status: deliveredQty > 0 ? "complete" : "pending",
+            };
         }
     });
 
