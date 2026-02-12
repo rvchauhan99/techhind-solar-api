@@ -111,6 +111,10 @@ const TRANSACTION_TYPE = {
   TRANSFER_OUT: "TRANSFER_OUT",
   TRANSFER_IN: "TRANSFER_IN",
   STOCK_ADJUSTMENT: "STOCK_ADJUSTMENT",
+  // Outward movement for customer delivery challans
+  DELIVERY_CHALLAN_OUT: "DELIVERY_CHALLAN_OUT",
+  // Inward movement when cancelling/reversing a delivery challan
+  DELIVERY_CHALLAN_CANCEL_IN: "DELIVERY_CHALLAN_CANCEL_IN",
 };
 
 const MOVEMENT_TYPE = {

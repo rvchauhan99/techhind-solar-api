@@ -115,7 +115,6 @@ const create = asyncHandler(async (req, res) => {
     }
   }
 
-  payload.created_by = req.user.id;
   if (attachments.length > 0) {
     payload.attachments = attachments;
   }

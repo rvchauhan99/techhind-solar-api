@@ -253,6 +253,7 @@ const Order = sequelize.define(
                 estimate_paid: "locked",
                 planner: "locked",
                 delivery: "locked",
+                assign_fabricator_and_installer: "locked",
                 fabrication: "locked",
                 installation: "locked",
                 netmeter_apply: "locked",
@@ -265,6 +266,14 @@ const Order = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
             defaultValue: "estimate_generated",
+        },
+
+        // Overall delivery status derived from BOM shipped/pending quantities
+        // Values: 'pending' | 'partial' | 'complete'
+        delivery_status: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            defaultValue: "pending",
         },
 
         // Stage 1: Estimate Generated
@@ -356,7 +365,13 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
-        // Stage 5: Fabrication
+        // Stage 5: Assign Fabricator & Installer
+        assign_fabricator_installer_completed_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+
+        // Stage 6: Fabrication
         fabricator_installer_are_same: {
             type: DataTypes.BOOLEAN,
             allowNull: false,
@@ -391,13 +406,13 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
-        // Stage 6: Installation
+        // Stage 7: Installation
         installation_completed_at: {
             type: DataTypes.DATE,
             allowNull: true,
         },
 
-        // Stage 7: Netmeter Apply
+        // Stage 8: Netmeter Apply
         netmeter_applied: {
             type: DataTypes.BOOLEAN,
             allowNull: false,
@@ -416,7 +431,7 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
-        // Stage 8: Netmeter Installed
+        // Stage 9: Netmeter Installed
         netmeter_installed: {
             type: DataTypes.BOOLEAN,
             allowNull: false,
@@ -460,7 +475,7 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
-        // Stage 9: Subsidy Claim
+        // Stage 10: Subsidy Claim
         subsidy_claim: {
             type: DataTypes.BOOLEAN,
             allowNull: false,
@@ -504,7 +519,7 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
-        // Stage 10: Subsidy Disbursed
+        // Stage 11: Subsidy Disbursed
         subsidy_disbursed: {
             type: DataTypes.BOOLEAN,
             allowNull: false,

@@ -21,7 +21,9 @@ const list = asyncHandler(async (req, res) => {
     state_name,
     gstin,
     is_active,
+    visibility,
   } = req.query;
+  const visibilityVal = ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
   const result = await supplierService.listSuppliers({
     page: parseInt(page),
     limit: parseInt(limit),
@@ -38,6 +40,7 @@ const list = asyncHandler(async (req, res) => {
     state_name,
     gstin,
     is_active,
+    visibility: visibilityVal,
   });
   return responseHandler.sendSuccess(res, result, "Supplier list fetched", 200);
 });
@@ -57,7 +60,9 @@ const exportList = asyncHandler(async (req, res) => {
     state_name,
     gstin,
     is_active,
+    visibility,
   } = req.query;
+  const visibilityVal = ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
   const buffer = await supplierService.exportSuppliers({
     q,
     sortBy,
@@ -72,6 +77,7 @@ const exportList = asyncHandler(async (req, res) => {
     state_name,
     gstin,
     is_active,
+    visibility: visibilityVal,
   });
   const filename = `suppliers-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

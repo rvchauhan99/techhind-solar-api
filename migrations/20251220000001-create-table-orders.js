@@ -226,6 +226,7 @@ module.exports = {
                     estimate_paid: "locked",
                     planner: "locked",
                     delivery: "locked",
+                    assign_fabricator_and_installer: "locked",
                     fabrication: "locked",
                     installation: "locked",
                     netmeter_apply: "locked",

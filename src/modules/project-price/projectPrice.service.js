@@ -24,12 +24,17 @@ const listProjectPrices = async ({
   total_project_value_to,
   system_warranty = null,
   is_locked = null,
+  visibility = null,
 } = {}) => {
   const offset = (page - 1) * limit;
 
-  const where = {
-    deleted_at: null,
-  };
+  const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
+  const where = {};
+  if (visibilityVal === "active") {
+    where.deleted_at = null;
+  } else if (visibilityVal === "inactive") {
+    where.deleted_at = { [Op.ne]: null };
+  }
 
   const addNumCond = (field, val, valTo, opStr) => {
     const v = parseFloat(val);
@@ -97,15 +102,16 @@ const listProjectPrices = async ({
       );
     }
 
-    where[Op.and] = [
-      { deleted_at: null },
-      {
-        [Op.or]: orConditions,
-      },
-    ];
+    where[Op.and] = where[Op.and] || [];
+    if (visibilityVal === "active") {
+      where[Op.and].push({ deleted_at: null });
+    } else if (visibilityVal === "inactive") {
+      where[Op.and].push({ deleted_at: { [Op.ne]: null } });
+    }
+    where[Op.and].push({ [Op.or]: orConditions });
   }
 
-  const { count, rows } = await ProjectPrice.findAndCountAll({
+  const findOptions = {
     where,
     include: [
       stateInclude,
@@ -117,7 +123,12 @@ const listProjectPrices = async ({
     limit,
     offset,
     distinct: true,
-  });
+  };
+  if (visibilityVal === "inactive" || visibilityVal === "all") {
+    findOptions.paranoid = false;
+  }
+
+  const { count, rows } = await ProjectPrice.findAndCountAll(findOptions);
 
   const data = rows.map((item) => {
     const row = item.toJSON();
@@ -142,6 +153,7 @@ const listProjectPrices = async ({
       is_locked: row.is_locked,
       created_at: row.created_at,
       updated_at: row.updated_at,
+      deleted_at: row.deleted_at,
     };
   });
 

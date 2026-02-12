@@ -128,6 +128,22 @@ npx sequelize-cli db:seed:undo:all
 
 ```
 
+## Audit Trail & Automatic Timestamps
+
+- Each Sequelize model now exposes `created_by` and `updated_by` columns that reference `users.id`. These are optional (nullable) for legacy data but are filled automatically whenever a request comes from an authenticated user.
+- `created_at` and `updated_at` timestamps are enabled across every table. Sequelize manages both fields automatically—no manual assignment is required in services or controllers.
+- Request-scoped metadata is handled through the new `requestContextMiddleware` (registered in `src/server.js`). Authentication middleware (`requireAuthWithTenant`) routes the logged-in user into this context so model hooks can populate the audit columns.
+
+### Post-update steps
+
+After pulling these changes, run the latest migrations to add any missing audit/timestamp columns to your database:
+
+```bash
+npm run db:migrate
+```
+
+If you maintain seed data or run scripts outside of HTTP requests, ensure you call `setCurrentUser` from `src/common/utils/requestContext.js` (or execute within `runWithContext`) before writing to the database so audit columns continue to populate.
+
 ## Available API Modules
 
 1. Authentication Module

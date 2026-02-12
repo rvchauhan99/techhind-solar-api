@@ -158,7 +158,7 @@ const updateUser = async (id, updates, transaction = null) => {
     mobile_number: safeUpdates.mobile_number,
   };
 
-  await user.update({ ...allowed, updated_at: new Date() }, { transaction });
+  await user.update({ ...allowed }, { transaction });
   const obj = user.toJSON();
   delete obj.password;
   return obj;
@@ -188,10 +188,7 @@ const setUserPassword = async (userId, { new_password: newPassword, confirm_pass
   });
   if (!user) throw new AppError('User not found', RESPONSE_STATUS_CODES.NOT_FOUND);
   const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await user.update(
-    { password: hashedPassword, first_login: true, updated_at: new Date() },
-    { transaction }
-  );
+  await user.update({ password: hashedPassword, first_login: true }, { transaction });
   const obj = user.toJSON();
   delete obj.password;
   return obj;

@@ -244,10 +244,7 @@ const changePassword = async (
 
   // hash and update
   const hashed = await bcrypt.hash(newPassword, 10);
-  await user.update(
-    { password: hashed, first_login: true, updated_at: new Date() },
-    { transaction }
-  );
+  await user.update({ password: hashed, first_login: true }, { transaction });
   return true;
 };
 
@@ -483,7 +480,7 @@ const resetPassword = async (
 
     // Update password
     await user.update(
-      { password: hashed, updated_at: new Date() },
+      { password: hashed },
       { transaction: t }
     );
 

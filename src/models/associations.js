@@ -56,6 +56,9 @@ module.exports = (db) => {
     StockAdjustmentSerial,
     Challan,
     ChallanItems,
+    PanelTechnology,
+    Fabrication,
+    Installation,
   } = db;
 
   // User ↔ Role
@@ -511,6 +514,14 @@ module.exports = (db) => {
     User.hasMany(PurchaseOrder, { foreignKey: "created_by", as: "createdPurchaseOrders" });
     User.hasMany(PurchaseOrder, { foreignKey: "approved_by", as: "approvedPurchaseOrders" });
   }
+
+  // PanelTechnology ↔ User (created_by, updated_by)
+  if (PanelTechnology && User) {
+    PanelTechnology.belongsTo(User, { foreignKey: "created_by", as: "createdBy" });
+    PanelTechnology.belongsTo(User, { foreignKey: "updated_by", as: "updatedBy" });
+    User.hasMany(PanelTechnology, { foreignKey: "created_by", as: "createdPanelTechnologies" });
+    User.hasMany(PanelTechnology, { foreignKey: "updated_by", as: "updatedPanelTechnologies" });
+  }
   if (PurchaseOrder && PurchaseOrderItem) {
     PurchaseOrder.hasMany(PurchaseOrderItem, { foreignKey: "purchase_order_id", as: "items" });
     PurchaseOrderItem.belongsTo(PurchaseOrder, { foreignKey: "purchase_order_id", as: "purchaseOrder" });
@@ -678,6 +689,47 @@ module.exports = (db) => {
   if (ChallanItems && Product) {
     ChallanItems.belongsTo(Product, { foreignKey: "product_id", as: "product" });
     Product.hasMany(ChallanItems, { foreignKey: "product_id", as: "challanItems" });
+  }
+
+  // Fabrication associations (one per order)
+  if (Order && Fabrication) {
+    Order.hasOne(Fabrication, { foreignKey: "order_id", as: "fabrication" });
+    Fabrication.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  }
+  if (Fabrication && User) {
+    Fabrication.belongsTo(User, { foreignKey: "fabricator_id", as: "fabricator" });
+    User.hasMany(Fabrication, { foreignKey: "fabricator_id", as: "fabrications" });
+  }
+
+  // Installation associations (one per order)
+  if (Order && Installation) {
+    Order.hasOne(Installation, { foreignKey: "order_id", as: "installation" });
+    Installation.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  }
+  if (Installation && User) {
+    Installation.belongsTo(User, { foreignKey: "installer_id", as: "installer" });
+    User.hasMany(Installation, { foreignKey: "installer_id", as: "installations" });
+  }
+
+  const ensureAuditAssociations = (Model) => {
+    if (!Model || Model === User) return;
+    const rawAttributes = Model.rawAttributes || {};
+    const associations = Object.values(Model.associations || {});
+
+    const hasAssociationForKey = (foreignKey) =>
+      associations.some((assoc) => assoc.foreignKey === foreignKey);
+
+    if (rawAttributes.created_by && !hasAssociationForKey("created_by")) {
+      Model.belongsTo(User, { foreignKey: "created_by", as: "createdByUser" });
+    }
+
+    if (rawAttributes.updated_by && !hasAssociationForKey("updated_by")) {
+      Model.belongsTo(User, { foreignKey: "updated_by", as: "updatedByUser" });
+    }
+  };
+
+  if (User) {
+    Object.values(db).forEach(ensureAuditAssociations);
   }
 
 };

@@ -146,7 +146,6 @@ const updateFollowup = async (id, payload, transaction = null) => {
     is_schedule_site_visit: payload.is_schedule_site_visit !== undefined ? payload.is_schedule_site_visit : followup.is_schedule_site_visit,
     is_msg_send_to_customer: payload.is_msg_send_to_customer !== undefined ? payload.is_msg_send_to_customer : followup.is_msg_send_to_customer,
     rating: payload.rating !== undefined ? payload.rating : followup.rating,
-    updated_at: new Date(),
   };
 
   await followup.update(updatePayload, { transaction });

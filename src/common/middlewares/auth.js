@@ -7,6 +7,7 @@ const { tenantContextMiddleware } = require("../../modules/tenant/tenantContext.
 const { tenantTransactionMiddleware } = require("../../modules/tenant/tenantTransaction.middleware.js");
 const { usageTrackingMiddleware } = require("../../modules/billing/usageTracking.middleware.js");
 const dbPoolManager = require("../../modules/tenant/dbPoolManager.js");
+const { setCurrentUser } = require("../utils/requestContext.js");
 
 const validateAccessToken = async (req, res, next) => {
   try {
@@ -84,6 +85,11 @@ const validateAccessToken = async (req, res, next) => {
 };
 
 /** Use on protected routes that need tenant DB/bucket. Includes tenant-scoped transaction and usage tracking. */
-const requireAuthWithTenant = [validateAccessToken, tenantContextMiddleware, tenantTransactionMiddleware, usageTrackingMiddleware];
+const attachAuditUser = (req, res, next) => {
+  setCurrentUser(req.user?.id ?? null);
+  next();
+};
 
-module.exports = { validateAccessToken, tenantContextMiddleware, requireAuthWithTenant };
+const requireAuthWithTenant = [validateAccessToken, attachAuditUser, tenantContextMiddleware, tenantTransactionMiddleware, usageTrackingMiddleware];
+
+module.exports = { validateAccessToken, tenantContextMiddleware, requireAuthWithTenant, attachAuditUser };

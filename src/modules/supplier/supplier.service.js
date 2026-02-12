@@ -104,12 +104,17 @@ const listSuppliers = async ({
   state_name,
   gstin,
   is_active,
+  visibility = null,
 } = {}) => {
   const offset = (page - 1) * limit;
 
-  const where = {
-    deleted_at: null,
-  };
+  const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
+  const where = {};
+  if (visibilityVal === "active") {
+    where.deleted_at = null;
+  } else if (visibilityVal === "inactive") {
+    where.deleted_at = { [Op.ne]: null };
+  }
 
   if (contact_person) {
     where[Op.and] = where[Op.and] || [];
@@ -165,14 +170,19 @@ const listSuppliers = async ({
     if (cond) where[Op.and].push(cond);
   }
 
-  const { count, rows } = await Supplier.findAndCountAll({
+  const findOptions = {
     where,
     include: [stateInclude],
     order: [[sortBy, sortOrder]],
     limit,
     offset,
     distinct: true,
-  });
+  };
+  if (visibilityVal === "inactive" || visibilityVal === "all") {
+    findOptions.paranoid = false;
+  }
+
+  const { count, rows } = await Supplier.findAndCountAll(findOptions);
 
   const data = rows.map((supplier) => {
     const row = supplier.toJSON();

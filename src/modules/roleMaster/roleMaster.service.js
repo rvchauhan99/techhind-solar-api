@@ -96,7 +96,7 @@ const updateRole = async (id, updates, transaction = null) => {
     if (nameExists) throw new AppError('Role with same name already exists', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
-  await role.update({ ...updates, updated_at: new Date() }, { transaction });
+  await role.update({ ...updates }, { transaction });
   return role.toJSON();
 };
 
