@@ -136,6 +136,13 @@ const applyAuditHooks = (model) => {
     }
   };
 
+  model.addHook("beforeValidate", (instance) => {
+    if (instance.isNewRecord) {
+      setCreationAuditFields(instance);
+    } else {
+      setUpdateAuditFields(instance);
+    }
+  });
   model.addHook("beforeCreate", setCreationAuditFields);
   model.addHook("beforeBulkCreate", (instances, options) => {
     instances.forEach((instance) => setCreationAuditFields(instance, options));
