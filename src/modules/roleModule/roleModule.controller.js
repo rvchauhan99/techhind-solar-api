@@ -77,6 +77,7 @@ const getPermission = asyncHandler(async (req, res) => {
         can_read: false,
         can_update: false,
         can_delete: false,
+        listing_criteria: "my_team",
       },
       "No role assigned",
       200
@@ -91,6 +92,7 @@ const getPermission = asyncHandler(async (req, res) => {
         can_read: false,
         can_update: false,
         can_delete: false,
+        listing_criteria: "my_team",
       },
       "No permission found",
       200
@@ -102,6 +104,7 @@ const getPermission = asyncHandler(async (req, res) => {
     can_read: !!item.can_read,
     can_update: !!item.can_update,
     can_delete: !!item.can_delete,
+    listing_criteria: item.listing_criteria || "my_team",
   };
   return responseHandler.sendSuccess(res, perms, "Permission fetched", 200);
 });

@@ -142,6 +142,7 @@ const getUserprofileById = async (id) => {
               "can_read",
               "can_update",
               "can_delete",
+              "listing_criteria",
             ],
             include: [
               {

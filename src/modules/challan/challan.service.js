@@ -213,6 +213,7 @@ const listChallans = async ({
     created_at_from: createdAtFrom = null,
     created_at_to: createdAtTo = null,
     created_at_op: createdAtOp = null,
+    enforced_handled_by_ids: enforcedHandledByIds = null,
 } = {}) => {
     const offset = (page - 1) * limit;
     const where = { deleted_at: null };
@@ -316,9 +317,31 @@ const listChallans = async ({
     }
 
     // Related model filters
-    const orderWhere = orderNumber
-        ? buildStringCondition("order_number", orderNumber, "contains")
-        : null;
+    const orderWhereAnd = [];
+    if (orderNumber) {
+        const orderNumberCond = buildStringCondition("order_number", orderNumber, "contains");
+        if (orderNumberCond) orderWhereAnd.push(orderNumberCond);
+    }
+    const orderWhere = orderWhereAnd.length > 0 ? { [Op.and]: orderWhereAnd } : null;
+
+    if (Array.isArray(enforcedHandledByIds)) {
+        where[Op.and] = where[Op.and] || [];
+        if (enforcedHandledByIds.length === 0) {
+            where[Op.and].push({
+                [Op.or]: [
+                    { created_by: { [Op.in]: [-1] } },
+                    { "$order.handled_by$": { [Op.in]: [-1] } },
+                ],
+            });
+        } else {
+            where[Op.and].push({
+                [Op.or]: [
+                    { created_by: { [Op.in]: enforcedHandledByIds } },
+                    { "$order.handled_by$": { [Op.in]: enforcedHandledByIds } },
+                ],
+            });
+        }
+    }
     const warehouseWhere = warehouseName
         ? buildStringCondition("name", warehouseName, "contains")
         : null;
@@ -333,11 +356,12 @@ const listChallans = async ({
         limit,
         offset,
         order: [[sortField, sortDir]],
+        subQuery: false,
         include: [
             {
                 model: Order,
                 as: "order",
-                attributes: ["id", "order_number"],
+                attributes: ["id", "order_number", "handled_by"],
                 required: !!orderWhere,
                 ...(orderWhere && { where: orderWhere }),
             },

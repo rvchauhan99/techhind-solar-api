@@ -5,6 +5,13 @@ const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
 
 const RoleModule = db.RoleModule;
+const VALID_LISTING_CRITERIA = new Set(['my_team', 'all']);
+
+const normalizeListingCriteria = (value) => {
+  if (value == null || value === '') return 'my_team';
+  const normalized = String(value).trim().toLowerCase();
+  return VALID_LISTING_CRITERIA.has(normalized) ? normalized : 'my_team';
+};
 
 const createRoleModule = async (payload, transaction = null) => {
   // prevent duplicate (role_id + module_id) for non-deleted rows
@@ -14,7 +21,11 @@ const createRoleModule = async (payload, transaction = null) => {
   });
   if (exists) throw new AppError('Role-Module link already exists', RESPONSE_STATUS_CODES.BAD_REQUEST);
 
-  const created = await RoleModule.create(payload, { transaction });
+  const createPayload = {
+    ...payload,
+    listing_criteria: normalizeListingCriteria(payload?.listing_criteria),
+  };
+  const created = await RoleModule.create(createPayload, { transaction });
   return created.toJSON();
 };
 
@@ -40,6 +51,7 @@ const listRoleModules = async ({
   can_read = null,
   can_update = null,
   can_delete = null,
+  listing_criteria = null,
   sortBy = 'id',
   sortOrder = 'ASC',
 } = {}) => {
@@ -57,6 +69,9 @@ const listRoleModules = async ({
   }
   if (can_delete !== undefined && can_delete !== '' && can_delete !== null) {
     where.can_delete = can_delete === 'true' || can_delete === true;
+  }
+  if (listing_criteria !== undefined && listing_criteria !== '' && listing_criteria !== null) {
+    where.listing_criteria = normalizeListingCriteria(listing_criteria);
   }
 
   const roleInclude = {
@@ -98,7 +113,13 @@ const updateRoleModule = async (id, updates, transaction = null) => {
     if (exists) throw new AppError('Role-Module link already exists', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
-  await item.update({ ...updates }, { transaction });
+  const updatePayload = {
+    ...updates,
+    ...(Object.prototype.hasOwnProperty.call(updates || {}, 'listing_criteria')
+      ? { listing_criteria: normalizeListingCriteria(updates.listing_criteria) }
+      : {}),
+  };
+  await item.update({ ...updatePayload }, { transaction });
   return item.toJSON();
 };
 
@@ -118,6 +139,7 @@ const exportRoleModules = async (params = {}) => {
     { header: 'Read', key: 'can_read', width: 8 },
     { header: 'Update', key: 'can_update', width: 8 },
     { header: 'Delete', key: 'can_delete', width: 8 },
+    { header: 'Listing Criteria', key: 'listing_criteria', width: 16 },
     { header: 'Created At', key: 'created_at', width: 22 },
   ];
   worksheet.getRow(1).font = { bold: true };
@@ -130,6 +152,7 @@ const exportRoleModules = async (params = {}) => {
       can_read: r.can_read ? 'Yes' : 'No',
       can_update: r.can_update ? 'Yes' : 'No',
       can_delete: r.can_delete ? 'Yes' : 'No',
+      listing_criteria: normalizeListingCriteria(r.listing_criteria),
       created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
     });
   });
@@ -164,6 +187,43 @@ const getRoleModulesByRoleId = async (roleId, transaction = null) => {
   return data;
 };
 
+const getListingCriteriaForRoleAndModule = async (
+  { roleId, moduleId = null, moduleRoute = null, moduleKey = null } = {},
+  transaction = null
+) => {
+  const roleIdNum = Number(roleId);
+  if (!Number.isInteger(roleIdNum) || roleIdNum <= 0) return 'my_team';
+
+  let resolvedModuleId = moduleId ? Number(moduleId) : null;
+  if (!Number.isInteger(resolvedModuleId) || resolvedModuleId <= 0) {
+    const moduleWhere = { deleted_at: null };
+    const moduleOr = [];
+    if (moduleRoute) moduleOr.push({ route: moduleRoute });
+    if (moduleKey) moduleOr.push({ key: moduleKey });
+    if (moduleOr.length === 0) return 'my_team';
+    moduleWhere[Op.or] = moduleOr;
+
+    const moduleRow = await db.Module.findOne({
+      where: moduleWhere,
+      attributes: ['id'],
+      transaction,
+    });
+    if (!moduleRow) return 'my_team';
+    resolvedModuleId = moduleRow.id;
+  }
+
+  const permission = await RoleModule.findOne({
+    where: {
+      role_id: roleIdNum,
+      module_id: resolvedModuleId,
+      deleted_at: null,
+    },
+    attributes: ['listing_criteria'],
+    transaction,
+  });
+  return normalizeListingCriteria(permission?.listing_criteria);
+};
+
 module.exports = {
   createRoleModule,
   getRoleModuleById,
@@ -173,4 +233,5 @@ module.exports = {
   deleteRoleModule,
   getByRoleAndModule,
   getRoleModulesByRoleId,
+  getListingCriteriaForRoleAndModule,
 };

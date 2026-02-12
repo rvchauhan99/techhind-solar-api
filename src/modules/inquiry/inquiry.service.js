@@ -45,6 +45,7 @@ const listInquiries = async ({
   assigned_on_from: assignedOnFrom,
   assigned_on_to: assignedOnTo,
   assigned_on_op: assignedOnOp,
+  enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
   const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City, OrderType } = db;
   const { Op } = db.Sequelize;
@@ -111,6 +112,13 @@ const listInquiries = async ({
     if (nextReminderDateFrom) where.next_reminder_date[Op.gte] = nextReminderDateFrom;
     if (nextReminderDateTo) where.next_reminder_date[Op.lte] = nextReminderDateTo;
     if (Reflect.ownKeys(where.next_reminder_date).length === 0) delete where.next_reminder_date;
+  }
+  if (Array.isArray(enforcedHandledByIds)) {
+    if (enforcedHandledByIds.length === 0) {
+      where.handled_by = { [Op.in]: [-1] };
+    } else {
+      where.handled_by = { [Op.in]: enforcedHandledByIds };
+    }
   }
 
   if (search) {
@@ -314,6 +322,7 @@ const exportInquiries = async ({
   assigned_on_from,
   assigned_on_to,
   assigned_on_op,
+  enforced_handled_by_ids,
 } = {}) => {
   const result = await listInquiries({
     search,
@@ -354,6 +363,7 @@ const exportInquiries = async ({
     assigned_on_from,
     assigned_on_to,
     assigned_on_op,
+    enforced_handled_by_ids,
   });
   const data = Array.isArray(result) ? result : result?.data || [];
 

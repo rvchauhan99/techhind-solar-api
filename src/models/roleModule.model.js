@@ -39,6 +39,11 @@ const RoleModule = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    listing_criteria: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "all",
+    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
