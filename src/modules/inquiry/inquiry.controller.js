@@ -3,6 +3,32 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const inquiryService = require("./inquiry.service.js");
+const roleModuleService = require("../roleModule/roleModule.service.js");
+const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+
+const resolveInquiryVisibilityContext = async (req) => {
+  const roleId = Number(req.user?.role_id);
+  const userId = Number(req.user?.id);
+  const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+    {
+      roleId,
+      moduleRoute: "/inquiry",
+      moduleKey: "inquiry",
+    },
+    req.transaction
+  );
+
+  if (listingCriteria !== "my_team") {
+    return { listingCriteria, enforcedHandledByIds: null };
+  }
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return { listingCriteria, enforcedHandledByIds: [] };
+  }
+  const teamUserIds = await getTeamHierarchyUserIds(userId, {
+    transaction: req.transaction,
+  });
+  return { listingCriteria, enforcedHandledByIds: teamUserIds };
+};
 
 const list = asyncHandler(async (req, res) => {
   const {
@@ -47,6 +73,7 @@ const list = asyncHandler(async (req, res) => {
     assigned_on_to,
     assigned_on_op,
   } = req.query;
+  const { enforcedHandledByIds } = await resolveInquiryVisibilityContext(req);
   const result = await inquiryService.listInquiries({
     search: q,
     is_dead,
@@ -88,6 +115,7 @@ const list = asyncHandler(async (req, res) => {
     assigned_on_from,
     assigned_on_to,
     assigned_on_op,
+    enforced_handled_by_ids: enforcedHandledByIds,
   });
   return responseHandler.sendSuccess(res, result, "Inquiry list fetched", 200);
 });
@@ -104,6 +132,7 @@ const exportList = asyncHandler(async (req, res) => {
     next_reminder_date_from, next_reminder_date_to, next_reminder_date_op,
     assigned_on_from, assigned_on_to, assigned_on_op,
   } = req.query;
+  const { enforcedHandledByIds } = await resolveInquiryVisibilityContext(req);
   const buffer = await inquiryService.exportInquiries({
     search: q,
     is_dead,
@@ -141,6 +170,7 @@ const exportList = asyncHandler(async (req, res) => {
     assigned_on_from,
     assigned_on_to,
     assigned_on_op,
+    enforced_handled_by_ids: enforcedHandledByIds,
   });
   const filename = `inquiries-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

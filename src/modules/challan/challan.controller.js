@@ -6,6 +6,32 @@ const bucketService = require("../../common/services/bucket.service.js");
 const db = require("../../models/index.js");
 const challanService = require("./challan.service.js");
 const challanPdfService = require("./pdf.service.js");
+const roleModuleService = require("../roleModule/roleModule.service.js");
+const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+
+const resolveDeliveryChallanVisibilityContext = async (req) => {
+    const roleId = Number(req.user?.role_id);
+    const userId = Number(req.user?.id);
+    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+        {
+            roleId,
+            moduleRoute: "/delivery-challans",
+            moduleKey: "Delivery Challans",
+        },
+        req.transaction
+    );
+
+    if (listingCriteria !== "my_team") {
+        return { listingCriteria, enforcedHandledByIds: null };
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+        return { listingCriteria, enforcedHandledByIds: [] };
+    }
+    const teamUserIds = await getTeamHierarchyUserIds(userId, {
+        transaction: req.transaction,
+    });
+    return { listingCriteria, enforcedHandledByIds: teamUserIds };
+};
 
 const list = asyncHandler(async (req, res) => {
     const {
@@ -29,6 +55,7 @@ const list = asyncHandler(async (req, res) => {
         created_at_op: createdAtOp = null,
     } = req.query;
 
+    const { enforcedHandledByIds } = await resolveDeliveryChallanVisibilityContext(req);
     const result = await challanService.listChallans({
         order_id: order_id ? parseInt(order_id, 10) : undefined,
         page: parseInt(page, 10),
@@ -49,6 +76,7 @@ const list = asyncHandler(async (req, res) => {
         created_at_from: createdAtFrom,
         created_at_to: createdAtTo,
         created_at_op: createdAtOp,
+        enforced_handled_by_ids: enforcedHandledByIds,
     });
 
     return responseHandler.sendSuccess(res, result, "Challan list fetched", 200);

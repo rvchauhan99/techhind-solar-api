@@ -6,6 +6,56 @@ const bucketService = require("../../common/services/bucket.service.js");
 const orderService = require("./order.service.js");
 const orderPdfService = require("./pdf.service.js");
 const db = require("../../models/index.js");
+const roleModuleService = require("../roleModule/roleModule.service.js");
+const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+
+const resolveOrderVisibilityContext = async (req) => {
+    const roleId = Number(req.user?.role_id);
+    const userId = Number(req.user?.id);
+    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+        {
+            roleId,
+            moduleRoute: "/order",
+            moduleKey: "pending_orders",
+        },
+        req.transaction
+    );
+
+    if (listingCriteria !== "my_team") {
+        return { listingCriteria, enforcedHandledByIds: null };
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+        return { listingCriteria, enforcedHandledByIds: [] };
+    }
+    const teamUserIds = await getTeamHierarchyUserIds(userId, {
+        transaction: req.transaction,
+    });
+    return { listingCriteria, enforcedHandledByIds: teamUserIds };
+};
+
+const resolveFabricationInstallationVisibilityContext = async (req) => {
+    const roleId = Number(req.user?.role_id);
+    const userId = Number(req.user?.id);
+    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+        {
+            roleId,
+            moduleRoute: "/fabrication-installation",
+            moduleKey: "fabrication_installation",
+        },
+        req.transaction
+    );
+
+    if (listingCriteria !== "my_team") {
+        return { listingCriteria, userIds: null };
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+        return { listingCriteria, userIds: [] };
+    }
+    const teamUserIds = await getTeamHierarchyUserIds(userId, {
+        transaction: req.transaction,
+    });
+    return { listingCriteria, userIds: teamUserIds };
+};
 
 const list = asyncHandler(async (req, res) => {
     const {
@@ -26,6 +76,7 @@ const list = asyncHandler(async (req, res) => {
         project_cost_op,
         project_cost_to,
     } = req.query;
+    const { enforcedHandledByIds } = await resolveOrderVisibilityContext(req);
     const result = await orderService.listOrders({
         page: parseInt(page),
         limit: parseInt(limit),
@@ -43,6 +94,7 @@ const list = asyncHandler(async (req, res) => {
         project_cost,
         project_cost_op,
         project_cost_to,
+        enforced_handled_by_ids: enforcedHandledByIds,
     });
     return responseHandler.sendSuccess(res, result, "Order list fetched", 200);
 });
@@ -64,6 +116,7 @@ const exportList = asyncHandler(async (req, res) => {
         project_cost_op,
         project_cost_to,
     } = req.query;
+    const { enforcedHandledByIds } = await resolveOrderVisibilityContext(req);
     const buffer = await orderService.exportOrders({
         search: q,
         status,
@@ -79,6 +132,7 @@ const exportList = asyncHandler(async (req, res) => {
         project_cost,
         project_cost_op,
         project_cost_to,
+        enforced_handled_by_ids: enforcedHandledByIds,
     });
     const filename = `orders-${new Date().toISOString().split("T")[0]}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -96,6 +150,9 @@ const listPendingDelivery = asyncHandler(async (req, res) => {
 
 const listDeliveryExecution = asyncHandler(async (req, res) => {
     const userId = req.user?.id;
+    const userIds = await getTeamHierarchyUserIds(userId, {
+        transaction: req.transaction,
+    });
     const {
         order_number = null,
         customer_name = null,
@@ -115,6 +172,7 @@ const listDeliveryExecution = asyncHandler(async (req, res) => {
     } = req.query;
     const result = await orderService.listDeliveryExecutionOrders({
         user_id: userId,
+        user_ids: userIds,
         order_number,
         customer_name,
         mobile_number,
@@ -136,6 +194,7 @@ const listDeliveryExecution = asyncHandler(async (req, res) => {
 
 const listFabricationInstallation = asyncHandler(async (req, res) => {
     const userId = req.user?.id;
+    const { userIds } = await resolveFabricationInstallationVisibilityContext(req);
     const {
         tab,
         order_number = null,
@@ -146,6 +205,7 @@ const listFabricationInstallation = asyncHandler(async (req, res) => {
     } = req.query;
     const result = await orderService.listFabricationInstallationOrders({
         user_id: userId,
+        user_ids: userIds,
         tab,
         order_number,
         customer_name,

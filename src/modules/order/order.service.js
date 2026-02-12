@@ -86,6 +86,7 @@ const listOrders = async ({
     project_cost,
     project_cost_op,
     project_cost_to,
+    enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
     const offset = (page - 1) * limit;
 
@@ -149,6 +150,13 @@ const listOrders = async ({
             ],
         };
         where[Op.and] = where[Op.and] ? [...where[Op.and], searchOr] : [searchOr];
+    }
+    if (Array.isArray(enforcedHandledByIds)) {
+        if (enforcedHandledByIds.length === 0) {
+            where.handled_by = { [Op.in]: [-1] };
+        } else {
+            where.handled_by = { [Op.in]: enforcedHandledByIds };
+        }
     }
 
     const customerWhere = customer_name ? { customer_name: { [Op.iLike]: `%${customer_name}%` } } : undefined;
@@ -761,6 +769,17 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
         const shouldAutoComplete =
             order.status === "confirmed" && isFinalStageMarkedCompleted && payload?.subsidy_disbursed === true;
         const effectiveStatus = shouldAutoComplete ? "completed" : (payload?.status ?? order.status);
+        const fabricatorInstallerAreSame =
+            payload.fabricator_installer_are_same ?? order.fabricator_installer_are_same;
+        const fabricatorInstallerId =
+            payload.fabricator_installer_id ?? order.fabricator_installer_id;
+        let fabricatorId = payload.fabricator_id ?? order.fabricator_id;
+        let installerId = payload.installer_id ?? order.installer_id;
+
+        if (fabricatorInstallerAreSame && fabricatorInstallerId != null) {
+            fabricatorId = fabricatorInstallerId;
+            installerId = fabricatorInstallerId;
+        }
 
         // Update linked customer if present
         if (order.customer_id) {
@@ -861,10 +880,10 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
 
                 // Stage 5: Assign Fabricator & Installer / Stage 6: Fabrication
                 assign_fabricator_installer_completed_at: payload.assign_fabricator_installer_completed_at ?? order.assign_fabricator_installer_completed_at,
-                fabricator_installer_are_same: payload.fabricator_installer_are_same ?? order.fabricator_installer_are_same,
-                fabricator_installer_id: payload.fabricator_installer_id ?? order.fabricator_installer_id,
-                fabricator_id: payload.fabricator_id ?? order.fabricator_id,
-                installer_id: payload.installer_id ?? order.installer_id,
+                fabricator_installer_are_same: fabricatorInstallerAreSame,
+                fabricator_installer_id: fabricatorInstallerId,
+                fabricator_id: fabricatorId,
+                installer_id: installerId,
                 fabrication_due_date: payload.fabrication_due_date ?? order.fabrication_due_date,
                 installation_due_date: payload.installation_due_date ?? order.installation_due_date,
                 fabrication_remarks: payload.fabrication_remarks ?? order.fabrication_remarks,
@@ -1079,6 +1098,7 @@ const listPendingDeliveryOrders = async ({ user_id } = {}) => {
  */
 const listDeliveryExecutionOrders = async ({
     user_id,
+    user_ids = [],
     q = null,
     order_number = null,
     customer_name = null,
@@ -1099,6 +1119,9 @@ const listDeliveryExecutionOrders = async ({
     if (!user_id) {
         return [];
     }
+    const allowedUserIds = Array.isArray(user_ids) && user_ids.length > 0
+        ? user_ids
+        : [user_id];
 
     // Reuse logic to find warehouses where the user is a manager
     const managedWarehouses = await CompanyWarehouse.findAll({
@@ -1108,7 +1131,7 @@ const listDeliveryExecutionOrders = async ({
                 as: "managers",
                 attributes: [],
                 required: true,
-                where: { id: user_id },
+                where: { id: { [Op.in]: allowedUserIds } },
             },
         ],
         attributes: ["id", "name"],
@@ -1409,6 +1432,7 @@ const listDeliveryExecutionOrders = async ({
  */
 const listFabricationInstallationOrders = async ({
     user_id,
+    user_ids = null,
     tab,
     order_number = null,
     customer_name = null,
@@ -1417,6 +1441,11 @@ const listFabricationInstallationOrders = async ({
     address = null,
 } = {}) => {
     if (!user_id || !tab) return [];
+    const scopedUserIds = Array.isArray(user_ids)
+        ? user_ids.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
+        : null;
+    const hasScopedUserIds = Array.isArray(scopedUserIds);
+    const hasAnyScopedUsers = hasScopedUserIds && scopedUserIds.length > 0;
 
     const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
     const where = {
@@ -1426,26 +1455,50 @@ const listFabricationInstallationOrders = async ({
 
     const tabVal = String(tab);
     if (tabVal === "pending_fabrication") {
+        const fabricatorCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { fabricator_id: { [Op.in]: scopedUserIds } } : { fabricator_id: { [Op.in]: [-1] } })
+            : { fabricator_id: user_id };
+        const sameAssigneeCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
+            : { fabricator_installer_id: user_id };
         where[Op.and] = [
-            { [Op.or]: [{ fabricator_id: user_id }, { fabricator_installer_id: user_id }] },
+            { [Op.or]: [fabricatorCond, sameAssigneeCond] },
             db.sequelize.literal("(stages->>'planner') = 'completed'"),
             db.sequelize.literal("(stages->>'fabrication') IS DISTINCT FROM 'completed'"),
         ];
     } else if (tabVal === "pending_installation") {
+        const installerCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { installer_id: { [Op.in]: scopedUserIds } } : { installer_id: { [Op.in]: [-1] } })
+            : { installer_id: user_id };
+        const sameAssigneeCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
+            : { fabricator_installer_id: user_id };
         where[Op.and] = [
-            { [Op.or]: [{ installer_id: user_id }, { fabricator_installer_id: user_id }] },
+            { [Op.or]: [installerCond, sameAssigneeCond] },
             db.sequelize.literal("(stages->>'fabrication') = 'completed'"),
             db.sequelize.literal("(stages->>'installation') IS DISTINCT FROM 'completed'"),
         ];
     } else if (tabVal === "completed_fabrication_15d") {
+        const fabricatorCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { fabricator_id: { [Op.in]: scopedUserIds } } : { fabricator_id: { [Op.in]: [-1] } })
+            : { fabricator_id: user_id };
+        const sameAssigneeCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
+            : { fabricator_installer_id: user_id };
         where[Op.and] = [
-            { [Op.or]: [{ fabricator_id: user_id }, { fabricator_installer_id: user_id }] },
+            { [Op.or]: [fabricatorCond, sameAssigneeCond] },
             db.sequelize.literal("(stages->>'fabrication') = 'completed'"),
             { fabrication_completed_at: { [Op.gte]: fifteenDaysAgo } },
         ];
     } else if (tabVal === "completed_installation_15d") {
+        const installerCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { installer_id: { [Op.in]: scopedUserIds } } : { installer_id: { [Op.in]: [-1] } })
+            : { installer_id: user_id };
+        const sameAssigneeCond = hasScopedUserIds
+            ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
+            : { fabricator_installer_id: user_id };
         where[Op.and] = [
-            { [Op.or]: [{ installer_id: user_id }, { fabricator_installer_id: user_id }] },
+            { [Op.or]: [installerCond, sameAssigneeCond] },
             db.sequelize.literal("(stages->>'installation') = 'completed'"),
             { installation_completed_at: { [Op.gte]: fifteenDaysAgo } },
         ];

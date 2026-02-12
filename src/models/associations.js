@@ -67,6 +67,12 @@ module.exports = (db) => {
     Role.hasMany(User, { foreignKey: "role_id", as: "users" });
   }
 
+  // User ↔ User (manager/reportees)
+  if (User) {
+    User.belongsTo(User, { foreignKey: "manager_id", as: "manager" });
+    User.hasMany(User, { foreignKey: "manager_id", as: "reportees" });
+  }
+
   // Role ↔ Module (Many-to-Many via RoleModule)
   if (Role && Module && RoleModule) {
     Role.hasMany(RoleModule, { foreignKey: "role_id", as: "roleModules" });
