@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Order Details PDF</title>
+    <style>{{{styles}}}</style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div>
+                <h1>{{safe company.name}}</h1>
+                <p>{{safe company.email}} {{#if company.phone}}| {{safe company.phone}}{{/if}}</p>
+                <p>{{safe company.website}}</p>
+            </div>
+            <div class="meta">
+                <p><strong>Order:</strong> {{safe order.order_number}}</p>
+                <p><strong>Generated:</strong> {{formatDate generated_at}}</p>
+            </div>
+        </header>
+        {{{summary}}}
+        {{{bom}}}
+    </div>
+</body>
+</html>
+

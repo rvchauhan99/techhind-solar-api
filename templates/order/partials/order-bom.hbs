@@ -1,0 +1,30 @@
+<section class="card">
+    <h2>BOM Snapshot</h2>
+    {{#if order.bom_snapshot.length}}
+    <table class="bom">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>UOM</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{#each order.bom_snapshot}}
+            <tr>
+                <td>{{add @index 1}}</td>
+                <td>{{safe product_name}}</td>
+                <td>{{safe quantity}}</td>
+                <td>{{safe uom_name}}</td>
+                <td>{{safe remarks}}</td>
+            </tr>
+            {{/each}}
+        </tbody>
+    </table>
+    {{else}}
+    <p class="muted">No BOM snapshot available.</p>
+    {{/if}}
+</section>
+
