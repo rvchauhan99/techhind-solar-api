@@ -500,6 +500,11 @@ module.exports = (db) => {
     CompanyBankAccount.hasMany(OrderPaymentDetail, { foreignKey: "company_bank_account_id", as: "orderPayments" });
   }
 
+  if (OrderPaymentDetail && User) {
+    OrderPaymentDetail.belongsTo(User, { foreignKey: "approved_by", as: "approvedByUser" });
+    OrderPaymentDetail.belongsTo(User, { foreignKey: "rejected_by", as: "rejectedByUser" });
+  }
+
   // Purchase Order associations
   if (PurchaseOrder && Supplier) {
     PurchaseOrder.belongsTo(Supplier, { foreignKey: "supplier_id", as: "supplier" });

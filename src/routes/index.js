@@ -30,6 +30,7 @@ const closedOrdersRoutes = require('../modules/closedOrders/closedOrders.routes.
 const challanRoutes = require('../modules/challan/challan.routes.js');
 const serializedInventoryReportRoutes = require('../modules/reports/serializedInventory/serializedInventory.routes.js');
 const deliveryReportRoutes = require('../modules/reports/deliveryReport/deliveryReport.routes.js');
+const paymentsReportRoutes = require('../modules/reports/payments/paymentsReport.routes.js');
 const billingRoutes = require('../modules/billing/billing.routes.js');
 const adminRoutes = require('../modules/admin/admin.routes.js');
 const router = Router();
@@ -70,6 +71,7 @@ router.use('/closed-orders', closedOrdersRoutes);
 router.use('/challan', challanRoutes);
 router.use('/reports/serialized-inventory', serializedInventoryReportRoutes);
 router.use('/reports/deliveries', deliveryReportRoutes);
+router.use('/reports/payments', paymentsReportRoutes);
 router.use('/billing', billingRoutes);
 router.use('/admin', adminRoutes);
 
