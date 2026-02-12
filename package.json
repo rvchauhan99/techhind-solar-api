@@ -18,7 +18,8 @@
     "db:restore": "node scripts/restore-from-backup.js",
     "assign-icons": "node scripts/assign-icons-to-modules.js",
     "assign-inventory-to-superadmin": "node scripts/assign-inventory-to-superadmin-once.js",
-    "test:db-permissions": "node scripts/test-db-permissions.js"
+    "test:db-permissions": "node scripts/test-db-permissions.js",
+    "test:smoke-rbac": "node scripts/smoke-rbac.js"
   },
   "dependencies": {
     "aws-sdk": "^2.1691.0",
