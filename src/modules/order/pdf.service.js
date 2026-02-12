@@ -4,10 +4,12 @@ const fs = require("fs");
 const path = require("path");
 const handlebars = require("handlebars");
 const puppeteer = require("puppeteer");
+const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.js");
 
 const TEMPLATE_DIR = path.join(__dirname, "../../../templates/order");
+const PUBLIC_DIR = path.join(__dirname, "../../../public");
 
 handlebars.registerHelper("safe", function (value) {
     if (value == null) return "-";
@@ -48,6 +50,37 @@ const loadTemplate = (templatePath) => {
     return handlebars.compile(fs.readFileSync(fullPath, "utf-8"));
 };
 
+const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
+    try {
+        if (!fs.existsSync(filePath)) return "";
+        const fileBuffer = fs.readFileSync(filePath);
+        return `data:${mimeType};base64,${fileBuffer.toString("base64")}`;
+    } catch (error) {
+        console.error(`Unable to read file for Order PDF: ${filePath}`, error);
+        return "";
+    }
+};
+
+const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) => {
+    if (!pathOrKey) return "";
+    if (pathOrKey.startsWith("/")) {
+        return fileToDataUrl(path.join(PUBLIC_DIR, pathOrKey), mimeType);
+    }
+    try {
+        const object = bucketClient
+            ? await bucketService.getObjectWithClient(bucketClient, pathOrKey)
+            : await bucketService.getObject(pathOrKey);
+        const contentType = object.contentType || mimeType;
+        const base64 = Buffer.isBuffer(object.body)
+            ? object.body.toString("base64")
+            : Buffer.from(object.body).toString("base64");
+        return `data:${contentType};base64,${base64}`;
+    } catch (error) {
+        console.error(`Unable to read bucket object for Order PDF: ${pathOrKey}`, error);
+        return "";
+    }
+};
+
 const orderedStages = (stages = {}, currentStageKey = null) => {
     const meta = [
         { key: "estimate_generated", label: "Estimate Generated" },
@@ -72,10 +105,16 @@ const orderedStages = (stages = {}, currentStageKey = null) => {
     });
 };
 
-const prepareOrderPdfData = (order, company = null, bankAccount = null) => {
+const prepareOrderPdfData = async (order, company = null, bankAccount = null, options = {}) => {
     const normalizedBom = Array.isArray(order?.bom_snapshot)
         ? normalizeBomSnapshotForDisplay(order.bom_snapshot)
         : [];
+    const companyLogoPath = company?.logo || "";
+    const logoExt = path.extname(companyLogoPath || "").toLowerCase();
+    const logoMimeType = logoExt === ".png" ? "image/png" : logoExt === ".svg" ? "image/svg+xml" : "image/jpeg";
+    const logoDataUrl = companyLogoPath
+        ? await pathToDataUrl(companyLogoPath, logoMimeType, options.bucketClient)
+        : "";
     return {
         generated_at: new Date(),
         company: {
@@ -83,6 +122,7 @@ const prepareOrderPdfData = (order, company = null, bankAccount = null) => {
             email: company?.company_email || "",
             phone: company?.contact_number || "",
             website: company?.company_website || "",
+            logo_data_url: logoDataUrl,
         },
         bank: bankAccount
             ? {

@@ -2,6 +2,7 @@
 
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
+const bucketService = require("../../common/services/bucket.service.js");
 const orderService = require("./order.service.js");
 const orderPdfService = require("./pdf.service.js");
 const db = require("../../models/index.js");
@@ -178,10 +179,19 @@ const generatePDF = asyncHandler(async (req, res) => {
         order: [["created_at", "ASC"]],
     });
 
-    const pdfData = orderPdfService.prepareOrderPdfData(
+    let bucketClient = null;
+    try {
+        bucketClient = bucketService.getBucketForRequest(req);
+    } catch (error) {
+        // Keep PDF generation resilient when bucket is not configured.
+        bucketClient = null;
+    }
+
+    const pdfData = await orderPdfService.prepareOrderPdfData(
         order,
         company ? company.toJSON() : null,
-        bankAccount ? bankAccount.toJSON() : null
+        bankAccount ? bankAccount.toJSON() : null,
+        { bucketClient }
     );
     const pdfBuffer = await orderPdfService.generateOrderPDF(pdfData);
     const filename = `order-${order.order_number || id}.pdf`;
