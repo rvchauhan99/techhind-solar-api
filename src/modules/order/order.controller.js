@@ -3,6 +3,8 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const orderService = require("./order.service.js");
+const orderPdfService = require("./pdf.service.js");
+const db = require("../../models/index.js");
 
 const list = asyncHandler(async (req, res) => {
     const {
@@ -131,6 +133,28 @@ const listDeliveryExecution = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, result, "Delivery execution orders fetched", 200);
 });
 
+const listFabricationInstallation = asyncHandler(async (req, res) => {
+    const userId = req.user?.id;
+    const {
+        tab,
+        order_number = null,
+        customer_name = null,
+        contact_number = null,
+        consumer_no = null,
+        address = null,
+    } = req.query;
+    const result = await orderService.listFabricationInstallationOrders({
+        user_id: userId,
+        tab,
+        order_number,
+        customer_name,
+        contact_number,
+        consumer_no,
+        address,
+    });
+    return responseHandler.sendSuccess(res, result, "Fabrication & Installation orders fetched", 200);
+});
+
 const getById = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const item = await orderService.getOrderById({ id });
@@ -138,6 +162,36 @@ const getById = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Order not found", 404);
     }
     return responseHandler.sendSuccess(res, item, "Order fetched", 200);
+});
+
+const generatePDF = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const order = await orderService.getOrderById({ id });
+    if (!order) {
+        return responseHandler.sendError(res, "Order not found", 404);
+    }
+
+    const { Company, CompanyBankAccount } = db;
+    const company = await Company.findOne({ where: { deleted_at: null } });
+    const bankAccount = await CompanyBankAccount.findOne({
+        where: { deleted_at: null },
+        order: [["created_at", "ASC"]],
+    });
+
+    const pdfData = orderPdfService.prepareOrderPdfData(
+        order,
+        company ? company.toJSON() : null,
+        bankAccount ? bankAccount.toJSON() : null
+    );
+    const pdfBuffer = await orderPdfService.generateOrderPDF(pdfData);
+    const filename = `order-${order.order_number || id}.pdf`;
+
+    res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdfBuffer.length,
+        "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+    });
+    return res.end(pdfBuffer);
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -190,4 +244,6 @@ module.exports = {
     getInverters,
     listPendingDelivery,
     listDeliveryExecution,
+    listFabricationInstallation,
+    generatePDF,
 };

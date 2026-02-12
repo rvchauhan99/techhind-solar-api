@@ -12,6 +12,7 @@ router.get("/", ...requireAuthWithTenant, controller.list);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
 router.get("/pending-delivery", ...requireAuthWithTenant, controller.listPendingDelivery);
 router.get("/delivery-execution", ...requireAuthWithTenant, controller.listDeliveryExecution);
+router.get("/fabrication-installation", ...requireAuthWithTenant, controller.listFabricationInstallation);
 router.get("/solar-panels", ...requireAuthWithTenant, controller.getSolarPanels);
 router.get("/inverters", ...requireAuthWithTenant, controller.getInverters);
 router.post("/", ...requireAuthWithTenant, controller.create);
@@ -19,6 +20,7 @@ router.get("/:id/fabrication", ...requireAuthWithTenant, fabricationController.g
 router.put("/:id/fabrication", ...requireAuthWithTenant, fabricationController.createOrUpdate);
 router.get("/:id/installation", ...requireAuthWithTenant, installationController.getByOrderId);
 router.put("/:id/installation", ...requireAuthWithTenant, installationController.createOrUpdate);
+router.get("/:id/pdf", ...requireAuthWithTenant, controller.generatePDF);
 router.get("/:id", ...requireAuthWithTenant, controller.getById);
 router.put("/:id", ...requireAuthWithTenant, controller.update);
 router.delete("/:id", ...requireAuthWithTenant, controller.remove);
