@@ -1,16 +1,60 @@
-const ExcelJS = require('exceljs');
-const { Op } = require('sequelize');
-const db = require('../../models/index.js');
-const AppError = require('../../common/errors/AppError.js');
-const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
+const ExcelJS = require("exceljs");
+const { Op } = require("sequelize");
+const db = require("../../models/index.js");
+const AppError = require("../../common/errors/AppError.js");
+const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 
 const RoleModule = db.RoleModule;
-const VALID_LISTING_CRITERIA = new Set(['my_team', 'all']);
+const VALID_LISTING_CRITERIA = new Set(["my_team", "all"]);
 
 const normalizeListingCriteria = (value) => {
-  if (value == null || value === '') return 'my_team';
+  if (value == null || value === "") return "my_team";
   const normalized = String(value).trim().toLowerCase();
   return VALID_LISTING_CRITERIA.has(normalized) ? normalized : 'my_team';
+};
+
+/**
+ * Resolve a Module.id from explicit id, route, or key.
+ * Throws Forbidden when the module cannot be resolved, so callers fail closed.
+ */
+const resolveModuleIdOrThrow = async (
+  { moduleId = null, moduleRoute = null, moduleKey = null } = {},
+  transaction = null
+) => {
+  let resolvedModuleId = moduleId != null ? Number(moduleId) : null;
+
+  if (Number.isInteger(resolvedModuleId) && resolvedModuleId > 0) {
+    return resolvedModuleId;
+  }
+
+  const moduleWhere = { deleted_at: null };
+  const moduleOr = [];
+  if (moduleRoute) moduleOr.push({ route: moduleRoute });
+  if (moduleKey) moduleOr.push({ key: moduleKey });
+
+  if (moduleOr.length === 0) {
+    throw new AppError(
+      "Forbidden: module route/key not provided",
+      RESPONSE_STATUS_CODES.FORBIDDEN
+    );
+  }
+
+  moduleWhere[Op.or] = moduleOr;
+
+  const moduleRow = await db.Module.findOne({
+    where: moduleWhere,
+    attributes: ["id"],
+    transaction,
+  });
+
+  if (!moduleRow) {
+    throw new AppError(
+      "Forbidden: module not found or not configured",
+      RESPONSE_STATUS_CODES.FORBIDDEN
+    );
+  }
+
+  return moduleRow.id;
 };
 
 const createRoleModule = async (payload, transaction = null) => {
@@ -186,31 +230,23 @@ const getRoleModulesByRoleId = async (roleId, transaction = null) => {
   const data = Array.isArray(rows) ? rows.map((r) => (r && typeof r.toJSON === 'function' ? r.toJSON() : r)) : [];
   return data;
 };
-
-const getListingCriteriaForRoleAndModule = async (
+/**
+ * Return full RoleModule permission row for a given role and module.
+ * module can be specified by id, route, or key. Returns plain JSON or null.
+ */
+const getPermissionForRoleAndModule = async (
   { roleId, moduleId = null, moduleRoute = null, moduleKey = null } = {},
   transaction = null
 ) => {
   const roleIdNum = Number(roleId);
-  if (!Number.isInteger(roleIdNum) || roleIdNum <= 0) return 'my_team';
-
-  let resolvedModuleId = moduleId ? Number(moduleId) : null;
-  if (!Number.isInteger(resolvedModuleId) || resolvedModuleId <= 0) {
-    const moduleWhere = { deleted_at: null };
-    const moduleOr = [];
-    if (moduleRoute) moduleOr.push({ route: moduleRoute });
-    if (moduleKey) moduleOr.push({ key: moduleKey });
-    if (moduleOr.length === 0) return 'my_team';
-    moduleWhere[Op.or] = moduleOr;
-
-    const moduleRow = await db.Module.findOne({
-      where: moduleWhere,
-      attributes: ['id'],
-      transaction,
-    });
-    if (!moduleRow) return 'my_team';
-    resolvedModuleId = moduleRow.id;
+  if (!Number.isInteger(roleIdNum) || roleIdNum <= 0) {
+    return null;
   }
+
+  const resolvedModuleId = await resolveModuleIdOrThrow(
+    { moduleId, moduleRoute, moduleKey },
+    transaction
+  );
 
   const permission = await RoleModule.findOne({
     where: {
@@ -218,9 +254,82 @@ const getListingCriteriaForRoleAndModule = async (
       module_id: resolvedModuleId,
       deleted_at: null,
     },
-    attributes: ['listing_criteria'],
     transaction,
   });
+
+  if (!permission) {
+    return null;
+  }
+
+  return typeof permission.toJSON === "function" ? permission.toJSON() : permission;
+};
+
+/**
+ * Assert that a role has permission on a module for a given action.
+ * requiredAction: 'read' | 'create' | 'update' | 'delete'
+ * Throws AppError(FORBIDDEN) on failure. Returns the permission row on success.
+ */
+const assertModulePermission = async (
+  {
+    roleId,
+    moduleId = null,
+    moduleRoute = null,
+    moduleKey = null,
+    requiredAction = "read",
+  } = {},
+  transaction = null
+) => {
+  const permission = await getPermissionForRoleAndModule(
+    { roleId, moduleId, moduleRoute, moduleKey },
+    transaction
+  );
+
+  if (!permission) {
+    throw new AppError(
+      "Forbidden: module access not assigned to role",
+      RESPONSE_STATUS_CODES.FORBIDDEN
+    );
+  }
+
+  const actionFlagMap = {
+    read: "can_read",
+    create: "can_create",
+    update: "can_update",
+    delete: "can_delete",
+  };
+
+  const flagKey = actionFlagMap[requiredAction] || actionFlagMap.read;
+  const allowed = permission[flagKey];
+
+  if (!allowed) {
+    throw new AppError(
+      "Forbidden: insufficient permissions for this action",
+      RESPONSE_STATUS_CODES.FORBIDDEN
+    );
+  }
+
+  return permission;
+};
+
+/**
+ * Return normalized listing criteria for a role & module and enforce read permission.
+ * If the module or role-module mapping is missing or can_read is false, throws Forbidden.
+ */
+const getListingCriteriaForRoleAndModule = async (
+  { roleId, moduleId = null, moduleRoute = null, moduleKey = null } = {},
+  transaction = null
+) => {
+  const permission = await assertModulePermission(
+    {
+      roleId,
+      moduleId,
+      moduleRoute,
+      moduleKey,
+      requiredAction: "read",
+    },
+    transaction
+  );
+
   return normalizeListingCriteria(permission?.listing_criteria);
 };
 
@@ -233,5 +342,7 @@ module.exports = {
   deleteRoleModule,
   getByRoleAndModule,
   getRoleModulesByRoleId,
+  getPermissionForRoleAndModule,
+  assertModulePermission,
   getListingCriteriaForRoleAndModule,
 };
