@@ -1,0 +1,71 @@
+<section class="card">
+    <h2>Customer Details</h2>
+    <table>
+        <tr><td>Name</td><td>{{safe order.customer_name}}</td></tr>
+        <tr><td>Contact</td><td>{{safe order.mobile_number}} / {{safe order.phone_no}}</td></tr>
+        <tr><td>Address</td><td>{{safe order.address}}</td></tr>
+        <tr><td>Reference</td><td>{{safe order.reference_from}}</td></tr>
+        <tr><td>Branch</td><td>{{safe order.branch_name}}</td></tr>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Project Details</h2>
+    <table>
+        <tr><td>Order Date</td><td>{{formatDate order.order_date}}</td></tr>
+        <tr><td>Consumer No</td><td>{{safe order.consumer_no}}</td></tr>
+        <tr><td>Capacity</td><td>{{safe order.capacity}}</td></tr>
+        <tr><td>Scheme</td><td>{{safe order.project_scheme_name}}</td></tr>
+        <tr><td>Discom</td><td>{{safe order.discom_name}}</td></tr>
+        <tr><td>Delivery Date</td><td>{{formatDate order.planned_delivery_date}}</td></tr>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Payment Details</h2>
+    <table>
+        <tr><td>Payment Type</td><td>{{safe order.payment_type}}</td></tr>
+        <tr><td>Project Cost</td><td>{{formatCurrency order.project_cost}}</td></tr>
+        <tr><td>Discount</td><td>{{formatCurrency order.discount}}</td></tr>
+        <tr><td>Payable</td><td>{{formatCurrency order.payable_cost}}</td></tr>
+        <tr><td>Paid</td><td>{{formatCurrency order.total_paid}}</td></tr>
+        <tr><td>Outstanding</td><td>{{formatCurrency order.outstanding_balance}}</td></tr>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Stage Status</h2>
+    <table class="stages">
+        <thead>
+            <tr>
+                <th>Stage</th>
+                <th>Status</th>
+                <th>Current</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{#each order.stages_list}}
+                <tr>
+                    <td>{{label}}</td>
+                    <td>{{safe status}}</td>
+                    <td>{{#if current}}Yes{{else}}No{{/if}}</td>
+                </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</section>
+
+{{#if bank}}
+<section class="card">
+    <h2>Bank Details</h2>
+    <table>
+        <tr><td>Bank</td><td>{{safe bank.bank_name}}</td></tr>
+        <tr><td>Account Name</td><td>{{safe bank.account_name}}</td></tr>
+        <tr><td>Account Number</td><td>{{safe bank.account_number}}</td></tr>
+        <tr><td>IFSC</td><td>{{safe bank.ifsc}}</td></tr>
+        <tr><td>Branch</td><td>{{safe bank.branch}}</td></tr>
+        <tr><td>UPI</td><td>{{safe bank.upi_id}}</td></tr>
+    </table>
+</section>
+{{/if}}
+

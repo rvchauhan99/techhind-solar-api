@@ -333,6 +333,19 @@ const getOrderById = async ({ id } = {}) => {
 
     const order = await Order.findOne({
         where: { id, deleted_at: null },
+        attributes: {
+            include: [
+                [
+                    db.sequelize.literal(`(
+                        SELECT COALESCE(SUM(payment_amount), 0)
+                        FROM order_payment_details
+                        WHERE order_payment_details.order_id = "Order".id
+                          AND order_payment_details.deleted_at IS NULL
+                    )`),
+                    "total_paid",
+                ],
+            ],
+        },
         include: [
             { model: Inquiry, as: "inquiry", attributes: ["id", "inquiry_number"] },
             { model: Quotation, as: "quotation", attributes: ["id", "quotation_number"] },
@@ -367,6 +380,11 @@ const getOrderById = async ({ id } = {}) => {
     if (!order) return null;
 
     const row = order.toJSON();
+    const totalPaid = Number(row.total_paid) || 0;
+    const projectCost = Number(row.project_cost) || 0;
+    const discount = Number(row.discount) || 0;
+    const payableCost = Math.max(projectCost - discount, 0);
+    const outstandingBalance = Math.max(payableCost - totalPaid, 0);
     return {
         id: row.id,
         order_number: row.order_number,
@@ -385,6 +403,9 @@ const getOrderById = async ({ id } = {}) => {
         existing_pv_capacity: row.existing_pv_capacity,
         project_cost: row.project_cost,
         discount: row.discount,
+        payable_cost: payableCost,
+        total_paid: totalPaid,
+        outstanding_balance: outstandingBalance,
         order_type_id: row.order_type_id,
         customer_id: row.customer_id,
         discom_id: row.discom_id,
@@ -1382,6 +1403,197 @@ const listDeliveryExecutionOrders = async ({
     return [...pending, ...partial, ...complete, ...remaining];
 };
 
+/**
+ * List orders for Fabrication & Installation team: filter by logged-in user as fabricator/installer and tab.
+ * Tab: pending_fabrication | pending_installation | completed_fabrication_15d | completed_installation_15d
+ */
+const listFabricationInstallationOrders = async ({
+    user_id,
+    tab,
+    order_number = null,
+    customer_name = null,
+    contact_number = null,
+    consumer_no = null,
+    address = null,
+} = {}) => {
+    if (!user_id || !tab) return [];
+
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    const where = {
+        deleted_at: null,
+        status: { [Op.notIn]: ["cancelled"] },
+    };
+
+    const tabVal = String(tab);
+    if (tabVal === "pending_fabrication") {
+        where[Op.and] = [
+            { [Op.or]: [{ fabricator_id: user_id }, { fabricator_installer_id: user_id }] },
+            db.sequelize.literal("(stages->>'planner') = 'completed'"),
+            db.sequelize.literal("(stages->>'fabrication') IS DISTINCT FROM 'completed'"),
+        ];
+    } else if (tabVal === "pending_installation") {
+        where[Op.and] = [
+            { [Op.or]: [{ installer_id: user_id }, { fabricator_installer_id: user_id }] },
+            db.sequelize.literal("(stages->>'fabrication') = 'completed'"),
+            db.sequelize.literal("(stages->>'installation') IS DISTINCT FROM 'completed'"),
+        ];
+    } else if (tabVal === "completed_fabrication_15d") {
+        where[Op.and] = [
+            { [Op.or]: [{ fabricator_id: user_id }, { fabricator_installer_id: user_id }] },
+            db.sequelize.literal("(stages->>'fabrication') = 'completed'"),
+            { fabrication_completed_at: { [Op.gte]: fifteenDaysAgo } },
+        ];
+    } else if (tabVal === "completed_installation_15d") {
+        where[Op.and] = [
+            { [Op.or]: [{ installer_id: user_id }, { fabricator_installer_id: user_id }] },
+            db.sequelize.literal("(stages->>'installation') = 'completed'"),
+            { installation_completed_at: { [Op.gte]: fifteenDaysAgo } },
+        ];
+    } else {
+        return [];
+    }
+
+    if (order_number) where.order_number = { [Op.iLike]: `%${order_number}%` };
+    if (consumer_no) where.consumer_no = { [Op.iLike]: `%${consumer_no}%` };
+
+    const customerAnd = [];
+    if (customer_name) customerAnd.push({ customer_name: { [Op.iLike]: `%${customer_name}%` } });
+    if (contact_number) {
+        customerAnd.push({
+            [Op.or]: [
+                { mobile_number: { [Op.iLike]: `%${contact_number}%` } },
+                { phone_no: { [Op.iLike]: `%${contact_number}%` } },
+            ],
+        });
+    }
+    if (address) {
+        customerAnd.push({
+            [Op.or]: [
+                { address: { [Op.iLike]: `%${address}%` } },
+                { landmark_area: { [Op.iLike]: `%${address}%` } },
+                { taluka: { [Op.iLike]: `%${address}%` } },
+                { district: { [Op.iLike]: `%${address}%` } },
+                { pin_code: { [Op.iLike]: `%${address}%` } },
+            ],
+        });
+    }
+    const customerWhere = customerAnd.length > 0 ? { [Op.and]: customerAnd } : undefined;
+
+    const orders = await Order.findAll({
+        where,
+        attributes: [
+            "id",
+            "order_number",
+            "order_date",
+            "customer_id",
+            "capacity",
+            "project_cost",
+            "discount",
+            "planned_delivery_date",
+            "planned_priority",
+            "planned_warehouse_id",
+            "stages",
+            "fabrication_completed_at",
+            "installation_completed_at",
+            "fabricator_id",
+            "installer_id",
+            "fabricator_installer_id",
+            "consumer_no",
+            "reference_from",
+            "payment_type",
+            [
+                db.sequelize.literal(`(
+                    SELECT COALESCE(SUM(payment_amount), 0)
+                    FROM order_payment_details
+                    WHERE order_payment_details.order_id = "Order".id
+                      AND order_payment_details.deleted_at IS NULL
+                )`),
+                "total_paid",
+            ],
+        ],
+        include: [
+            {
+                model: Customer,
+                as: "customer",
+                required: !!customerWhere,
+                where: customerWhere,
+                attributes: [
+                    "id",
+                    "customer_name",
+                    "mobile_number",
+                    "phone_no",
+                    "company_name",
+                    "email_id",
+                    "address",
+                    "pin_code",
+                    "landmark_area",
+                    "taluka",
+                    "district",
+                ],
+            },
+            { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"], required: false },
+            { model: Discom, as: "discom", attributes: ["id", "name"], required: false },
+            { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
+            { model: User, as: "handledBy", attributes: ["id", "name"], required: false },
+            { model: Product, as: "solarPanel", attributes: ["id", "product_name"], required: false },
+            { model: Product, as: "inverter", attributes: ["id", "product_name"], required: false },
+            { model: CompanyWarehouse, as: "plannedWarehouse", attributes: ["id", "name"], required: false },
+        ],
+        order: [
+            ["fabrication_completed_at", "DESC"],
+            ["installation_completed_at", "DESC"],
+            ["planned_delivery_date", "ASC"],
+        ],
+    });
+
+    const result = orders.map((o) => {
+        const row = o.toJSON();
+        const totalPaid = Number(row.total_paid) || 0;
+        const projectCost = Number(row.project_cost) || 0;
+        const discount = Number(row.discount) || 0;
+        const payableCost = Math.max(projectCost - discount, 0);
+        const outstandingBalance = Math.max(payableCost - totalPaid, 0);
+        return {
+            id: row.id,
+            order_number: row.order_number,
+            order_date: row.order_date || null,
+            customer_name: row.customer?.customer_name || null,
+            mobile_number: row.customer?.mobile_number || null,
+            phone_no: row.customer?.phone_no || null,
+            company_name: row.customer?.company_name || null,
+            email_id: row.customer?.email_id || null,
+            address: row.customer?.address || null,
+            pin_code: row.customer?.pin_code || null,
+            landmark_area: row.customer?.landmark_area || null,
+            taluka: row.customer?.taluka || null,
+            district: row.customer?.district || null,
+            consumer_no: row.consumer_no || null,
+            reference_from: row.reference_from || null,
+            payment_type: row.payment_type || null,
+            capacity: row.capacity,
+            project_cost: row.project_cost,
+            discount,
+            payable_cost: payableCost,
+            total_paid: totalPaid,
+            outstanding_balance: outstandingBalance,
+            project_scheme_name: row.projectScheme?.name || null,
+            discom_name: row.discom?.name || null,
+            branch_name: row.branch?.name || null,
+            handled_by_name: row.handledBy?.name || null,
+            solar_panel_name: row.solarPanel?.product_name || null,
+            inverter_name: row.inverter?.product_name || null,
+            planned_delivery_date: row.planned_delivery_date,
+            planned_priority: row.planned_priority,
+            planned_warehouse_name: row.plannedWarehouse?.name || null,
+            fabrication_completed_at: row.fabrication_completed_at || null,
+            installation_completed_at: row.installation_completed_at || null,
+            stages: row.stages || null,
+        };
+    });
+
+    return result;
+};
+
 const getSolarPanels = async () => {
     const products = await Product.findAll({
         where: {
@@ -1429,4 +1641,5 @@ module.exports = {
     getInverters,
     listPendingDeliveryOrders,
     listDeliveryExecutionOrders,
+    listFabricationInstallationOrders,
 };
