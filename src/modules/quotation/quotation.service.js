@@ -3,6 +3,7 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
+const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 
 /** Derive panel_product and inverter_product from bom_snapshot when present (for response consistency). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -10,7 +11,8 @@ const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     if (!bom_snapshot || !Array.isArray(bom_snapshot)) return out;
     const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, "_");
     for (const line of bom_snapshot) {
-        const typeName = norm(line.product_snapshot?.product_type_name || "");
+        const product = getBomLineProduct(line);
+        const typeName = norm(product?.product_type_name || "");
         if (typeName === "panel" && out.panel_product == null) out.panel_product = line.product_id;
         if (typeName === "inverter" && out.inverter_product == null) out.inverter_product = line.product_id;
         if (out.panel_product != null && out.inverter_product != null) break;
@@ -370,6 +372,12 @@ const createQuotation = async ({ payload, transaction } = {}) => {
             if (bomSnapshot && bomSnapshot.length > 0) {
                 payload.bom_snapshot = bomSnapshot;
             }
+        } else {
+            // Build BOM snapshot from manually selected products when project_price_id is not set
+            const bomSnapshot = await buildBomSnapshotFromQuotationProducts(payload, t);
+            if (bomSnapshot && bomSnapshot.length > 0) {
+                payload.bom_snapshot = bomSnapshot;
+            }
         }
 
         // Create the quotation (without quotation_number initially if we need to create inquiry first)
@@ -454,6 +462,11 @@ const updateQuotation = async ({ id, payload, transaction } = {}) => {
             if (bomSnapshot && bomSnapshot.length > 0) {
                 payload.bom_snapshot = bomSnapshot;
             }
+        } else {
+            // Build BOM snapshot from manually selected products when project_price_id is not set
+            const mergedPayload = { ...quotation.toJSON(), ...payload };
+            const bomSnapshot = await buildBomSnapshotFromQuotationProducts(mergedPayload, t);
+            payload.bom_snapshot = (bomSnapshot && bomSnapshot.length > 0) ? bomSnapshot : null;
         }
 
         await quotation.update(payload, { transaction: t });
@@ -576,6 +589,43 @@ const getProjectPrices = async ({ schemeId, transaction } = {}) => {
 };
 
 /**
+ * Sort BOM snapshot by product_type.display_order (ascending). Reassigns sort_order 0,1,2,...
+ * Lines without product_type_id or with unknown type get a high display_order (appear last).
+ * @param {Array} bomSnapshot - Array of BOM lines (each has product_type_id)
+ * @param {object} db - Models instance
+ * @param {object} [transaction]
+ * @returns {Promise<Array>} Sorted array (same reference if length 0)
+ */
+const sortBomSnapshotByProductTypeDisplayOrder = async (bomSnapshot, db, transaction) => {
+    if (!Array.isArray(bomSnapshot) || bomSnapshot.length === 0) return bomSnapshot;
+    const { ProductType } = db;
+    const typeIds = [...new Set(bomSnapshot.map((line) => line.product_type_id).filter((id) => id != null && !Number.isNaN(Number(id))))];
+    const displayOrderMap = {};
+    if (typeIds.length > 0) {
+        const types = await ProductType.findAll({
+            where: { id: typeIds },
+            attributes: ["id", "display_order"],
+            transaction,
+        });
+        types.forEach((t) => {
+            displayOrderMap[t.id] = t.display_order != null ? Number(t.display_order) : Number.MAX_SAFE_INTEGER;
+        });
+    }
+    const getOrder = (line) => {
+        const id = line.product_type_id;
+        if (id == null || Number.isNaN(Number(id))) return Number.MAX_SAFE_INTEGER;
+        return displayOrderMap[id] !== undefined ? displayOrderMap[id] : Number.MAX_SAFE_INTEGER;
+    };
+    const sorted = [...bomSnapshot].sort((a, b) => {
+        const orderA = getOrder(a);
+        const orderB = getOrder(b);
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    });
+    return sorted.map((line, index) => ({ ...line, sort_order: index }));
+};
+
+/**
  * Build full BOM snapshot from Project Price's BOM (all products with full params + qty).
  * Used when creating/updating quotation with project_price_id set.
  * @param {number} projectPriceId
@@ -605,9 +655,9 @@ const buildBomSnapshotFromProjectPrice = async (projectPriceId, transaction) => 
     const products = await Product.findAll({
         where: { id: productIds, deleted_at: null },
         include: [
-            { model: ProductType, as: "productType", attributes: ["id", "name"] },
+            { model: ProductType, as: "productType", attributes: ["id", "name", "display_order"] },
             { model: ProductMake, as: "productMake", attributes: ["id", "name"] },
-            { model: MeasurementUnit, as: "measurementUnit", attributes: ["id", "name"] },
+            { model: MeasurementUnit, as: "measurementUnit", attributes: ["id", "unit"] },
         ],
         transaction,
     });
@@ -635,16 +685,136 @@ const buildBomSnapshotFromProjectPrice = async (projectPriceId, transaction) => 
             updated_at: j.updated_at,
             product_type_name: j.productType?.name ?? null,
             product_make_name: j.productMake?.name ?? null,
-            measurement_unit_name: j.measurementUnit?.name ?? null,
+            measurement_unit_name: j.measurementUnit?.unit ?? null,
         };
     });
 
-    return bomDetail.map((item, index) => ({
-        product_id: item.product_id,
-        quantity: item.quantity,
-        sort_order: index,
-        product_snapshot: productMap[item.product_id] ?? null,
-    }));
+    const rawSnapshot = bomDetail.map((item, index) => {
+        const snapshot = productMap[item.product_id] ?? null;
+        return {
+            product_id: item.product_id,
+            quantity: item.quantity,
+            sort_order: index,
+            ...(snapshot ? snapshot : {}),
+        };
+    });
+    return sortBomSnapshotByProductTypeDisplayOrder(rawSnapshot, db, transaction);
+};
+
+/**
+ * Product-to-quantity and warranty mapping for manual quotation products.
+ * sort_order defines display order in bom_snapshot.
+ */
+const QUOTATION_PRODUCT_MAPPING = [
+    { productKey: "structure_product", qtyKey: "structure_height", warrantyKeys: ["system_warranty_years"] },
+    { productKey: "panel_product", qtyKey: "panel_quantity", warrantyKeys: ["panel_warranty", "panel_performance_warranty"], typeKey: "panel_type" },
+    { productKey: "inverter_product", qtyKey: "inverter_quantity", warrantyKeys: ["inverter_warranty"] },
+    { productKey: "hybrid_inverter_product", qtyKey: "hybrid_inverter_quantity", warrantyKeys: ["hybrid_inverter_warranty"] },
+    { productKey: "battery_product", qtyKey: "battery_quantity", warrantyKeys: ["battery_warranty"], typeKey: "battery_type" },
+    { productKey: "acdb_product", qtyKey: "acdb_quantity" },
+    { productKey: "dcdb_product", qtyKey: "dcdb_quantity" },
+    { productKey: "cable_ac_product", qtyKey: "cable_ac_quantity" },
+    { productKey: "cable_dc_product", qtyKey: "cable_dc_quantity" },
+    { productKey: "earthing_product", qtyKey: "earthing_quantity" },
+    { productKey: "la_product", qtyKey: "la_quantity" },
+];
+
+/**
+ * Build full BOM snapshot from quotation's manually selected products.
+ * Used when project_price_id is not set but product fields (structure_product, panel_product, etc.) are populated.
+ * @param {object} payload - Quotation create/update payload
+ * @param {object} [transaction]
+ * @returns {Promise<Array|null>} Array of { product_id, quantity, sort_order, product_snapshot } or null
+ */
+const buildBomSnapshotFromQuotationProducts = async (payload, transaction) => {
+    const { Product, ProductType, ProductMake, MeasurementUnit } = db;
+    const parseQty = (val, defaultVal = 1) => {
+        const n = val != null ? parseFloat(val) : NaN;
+        return !Number.isNaN(n) && n > 0 ? n : defaultVal;
+    };
+
+    const items = [];
+    for (let i = 0; i < QUOTATION_PRODUCT_MAPPING.length; i++) {
+        const m = QUOTATION_PRODUCT_MAPPING[i];
+        const productId = payload[m.productKey];
+        if (!productId) continue;
+        const id = parseInt(productId, 10);
+        if (Number.isNaN(id) || id <= 0) continue;
+
+        const quantity = m.qtyKey === "structure_height"
+            ? parseQty(payload.structure_height, 1)
+            : parseQty(payload[m.qtyKey], 1);
+
+        items.push({
+            product_id: id,
+            quantity,
+            sort_order: i,
+            mapping: m,
+        });
+    }
+    if (items.length === 0) return null;
+
+    const productIds = [...new Set(items.map((i) => i.product_id))];
+    const products = await Product.findAll({
+        where: { id: productIds, deleted_at: null },
+        include: [
+            { model: ProductType, as: "productType", attributes: ["id", "name", "display_order"] },
+            { model: ProductMake, as: "productMake", attributes: ["id", "name"] },
+            { model: MeasurementUnit, as: "measurementUnit", attributes: ["id", "unit"] },
+        ],
+        transaction,
+    });
+
+    const productMap = {};
+    products.forEach((p) => {
+        const j = p.toJSON();
+        productMap[p.id] = {
+            id: j.id,
+            product_type_id: j.product_type_id,
+            product_make_id: j.product_make_id,
+            product_name: j.product_name,
+            product_description: j.product_description,
+            hsn_ssn_code: j.hsn_ssn_code,
+            measurement_unit_id: j.measurement_unit_id,
+            capacity: j.capacity,
+            barcode_number: j.barcode_number,
+            gst_percent: j.gst_percent,
+            tracking_type: j.tracking_type,
+            serial_required: j.serial_required,
+            properties: j.properties,
+            is_active: j.is_active,
+            min_stock_quantity: j.min_stock_quantity,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+            product_type_name: j.productType?.name ?? null,
+            product_make_name: j.productMake?.name ?? null,
+            measurement_unit_name: j.measurementUnit?.unit ?? null,
+        };
+    });
+
+    const rawSnapshot = items.map((item, index) => {
+        const snapshot = productMap[item.product_id] ? { ...productMap[item.product_id] } : null;
+        if (snapshot && item.mapping) {
+            const m = item.mapping;
+            if (m.warrantyKeys && m.warrantyKeys.length > 0) {
+                const warranty = payload[m.warrantyKeys[0]];
+                if (warranty != null && warranty !== "") snapshot.warranty = String(warranty);
+                if (m.warrantyKeys.length > 1 && payload[m.warrantyKeys[1]] != null) {
+                    snapshot.performance_warranty = String(payload[m.warrantyKeys[1]]);
+                }
+            }
+            if (m.typeKey && payload[m.typeKey] != null) {
+                snapshot.type = String(payload[m.typeKey]);
+            }
+        }
+        return {
+            product_id: item.product_id,
+            quantity: item.quantity,
+            sort_order: index,
+            ...(snapshot ? snapshot : {}),
+        };
+    });
+    return sortBomSnapshotByProductTypeDisplayOrder(rawSnapshot, db, transaction);
 };
 
 const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
@@ -764,12 +934,19 @@ const getAllProducts = async () => {
             {
                 model: ProductType,
                 as: 'productType',
-                attributes: ['id', 'name']
+                attributes: ['id', 'name', 'display_order']
             }
         ]
     });
 
-    return products.map(p => p.toJSON());
+    const list = products.map(p => p.toJSON());
+    list.sort((a, b) => {
+        const orderA = a.productType?.display_order != null ? Number(a.productType.display_order) : Number.MAX_SAFE_INTEGER;
+        const orderB = b.productType?.display_order != null ? Number(b.productType.display_order) : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.product_name || '').localeCompare(b.product_name || '');
+    });
+    return list;
 };
 
 

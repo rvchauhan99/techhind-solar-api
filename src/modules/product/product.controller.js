@@ -36,7 +36,9 @@ const list = asyncHandler(async (req, res) => {
     min_stock_quantity_op,
     min_stock_quantity_to,
     is_active: isActive = null,
+    visibility,
   } = req.query;
+  const visibilityVal = ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
   const result = await productService.listProducts({
     page: parseInt(page),
     limit: parseInt(limit),
@@ -68,6 +70,7 @@ const list = asyncHandler(async (req, res) => {
     min_stock_quantity_op,
     min_stock_quantity_to,
     is_active: isActive,
+    visibility: visibilityVal,
   });
   return responseHandler.sendSuccess(res, result, "Product list fetched", 200);
 });
@@ -102,7 +105,9 @@ const exportList = asyncHandler(async (req, res) => {
     min_stock_quantity_op,
     min_stock_quantity_to,
     is_active: isActive = null,
+    visibility,
   } = req.query;
+  const visibilityVal = ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
   const buffer = await productService.exportProducts({
     q,
     sortBy,
@@ -132,6 +137,7 @@ const exportList = asyncHandler(async (req, res) => {
     min_stock_quantity_op,
     min_stock_quantity_to,
     is_active: isActive,
+    visibility: visibilityVal,
   });
   const filename = `products-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

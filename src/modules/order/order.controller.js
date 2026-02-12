@@ -83,6 +83,54 @@ const exportList = asyncHandler(async (req, res) => {
     return res.send(buffer);
 });
 
+const listPendingDelivery = asyncHandler(async (req, res) => {
+    const userId = req.user?.id;
+    const result = await orderService.listPendingDeliveryOrders({
+        user_id: userId,
+    });
+    return responseHandler.sendSuccess(res, result, "Pending delivery orders fetched", 200);
+});
+
+const listDeliveryExecution = asyncHandler(async (req, res) => {
+    const userId = req.user?.id;
+    const {
+        order_number = null,
+        customer_name = null,
+        mobile_number = null,
+        contact_number = null,
+        address = null,
+        consumer_no = null,
+        reference_from = null,
+        payment_type = null,
+        planned_priority = null,
+        delivery_status = null,
+        planned_warehouse_id = null,
+        order_date_from = null,
+        order_date_to = null,
+        planned_delivery_date_from = null,
+        planned_delivery_date_to = null,
+    } = req.query;
+    const result = await orderService.listDeliveryExecutionOrders({
+        user_id: userId,
+        order_number,
+        customer_name,
+        mobile_number,
+        contact_number,
+        address,
+        consumer_no,
+        reference_from,
+        payment_type,
+        planned_priority,
+        delivery_status,
+        planned_warehouse_id,
+        order_date_from,
+        order_date_to,
+        planned_delivery_date_from,
+        planned_delivery_date_to,
+    });
+    return responseHandler.sendSuccess(res, result, "Delivery execution orders fetched", 200);
+});
+
 const getById = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const item = await orderService.getOrderById({ id });
@@ -140,4 +188,6 @@ module.exports = {
     remove,
     getSolarPanels,
     getInverters,
+    listPendingDelivery,
+    listDeliveryExecution,
 };

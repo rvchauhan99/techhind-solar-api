@@ -12,6 +12,7 @@ const {
 } = require("./common/middlewares/transaction.js");
 const { validateEnv } = require("./config/envValidator.js");
 const { getRegistrySequelize } = require("./config/registryDb.js");
+const { requestContextMiddleware } = require("./common/utils/requestContext.js");
 
 dotenv.config();
 
@@ -23,6 +24,9 @@ const app = express();
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Initialize async request context before other middlewares rely on it
+app.use(requestContextMiddleware);
 
 // CORS
 app.use(corsMiddleware);

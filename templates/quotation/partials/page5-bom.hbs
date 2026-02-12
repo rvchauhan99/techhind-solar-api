@@ -27,10 +27,10 @@
         {{#each bom_snapshot}}
         <tr>
           <td>{{add @index 1}}</td>
-          <td>{{#if this.product_snapshot}}{{this.product_snapshot.product_name}}{{else}}-{{/if}}</td>
-          <td>{{#if this.product_snapshot}}{{this.product_snapshot.product_type_name}}{{else}}-{{/if}}</td>
-          <td>{{#if this.product_snapshot}}{{this.product_snapshot.product_make_name}}{{else}}-{{/if}}</td>
-          <td>{{#if this.product_snapshot}}{{this.product_snapshot.capacity}}{{#if this.product_snapshot.measurement_unit_name}} {{this.product_snapshot.measurement_unit_name}}{{/if}}{{else}}-{{/if}}</td>
+          <td>{{#if this.product_name}}{{this.product_name}}{{else}}-{{/if}}</td>
+          <td>{{#if this.product_type_name}}{{this.product_type_name}}{{else}}-{{/if}}</td>
+          <td>{{#if this.product_make_name}}{{this.product_make_name}}{{else}}-{{/if}}</td>
+          <td>{{#if this.capacity}}{{this.capacity}}{{#if this.measurement_unit_name}} {{this.measurement_unit_name}}{{/if}}{{else}}-{{/if}}</td>
           <td>{{this.quantity}}</td>
         </tr>
         {{/each}}

@@ -4,6 +4,7 @@ const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
+const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 
 const {
     Order,
@@ -23,15 +24,19 @@ const {
     City,
     Product,
     ProjectPhase,
+    CompanyWarehouse,
+    Fabrication,
+    Installation,
 } = db;
 
-/** Derive first panel and first inverter product_id from bom_snapshot (by product_snapshot.product_type_name). */
+/** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     const out = { solar_panel_id: null, inverter_id: null };
     if (!bom_snapshot || !Array.isArray(bom_snapshot)) return out;
     const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, "_");
     for (const line of bom_snapshot) {
-        const typeName = norm(line.product_snapshot?.product_type_name || "");
+        const product = getBomLineProduct(line);
+        const typeName = norm(product?.product_type_name || "");
         if (typeName === "panel" && out.solar_panel_id == null) out.solar_panel_id = line.product_id;
         if (typeName === "inverter" && out.inverter_id == null) out.inverter_id = line.product_id;
         if (out.solar_panel_id != null && out.inverter_id != null) break;
@@ -39,7 +44,7 @@ const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     return out;
 };
 
-/** Normalize order bom_snapshot for API: ensure shipped_qty, returned_qty, pending_qty on each line (backward compat). */
+/** Normalize order bom_snapshot for API: ensure shipped_qty, returned_qty, pending_qty, planned_qty, delivered_qty on each line (backward compat). */
 const normalizeOrderBomSnapshot = (bom_snapshot) => {
     if (bom_snapshot == null || !Array.isArray(bom_snapshot)) return bom_snapshot;
     const qty = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
@@ -47,10 +52,20 @@ const normalizeOrderBomSnapshot = (bom_snapshot) => {
         const quantity = qty(line.quantity);
         const shipped_qty = qty(line.shipped_qty);
         const returned_qty = qty(line.returned_qty);
+        const planned_qty = line.planned_qty != null && !Number.isNaN(Number(line.planned_qty))
+            ? Number(line.planned_qty)
+            : quantity;
         const pending_qty = line.pending_qty != null && !Number.isNaN(Number(line.pending_qty))
             ? Number(line.pending_qty)
-            : quantity - shipped_qty + returned_qty;
-        return { ...line, shipped_qty, returned_qty, pending_qty };
+            : planned_qty - shipped_qty + returned_qty;
+        return {
+            ...line,
+            shipped_qty,
+            returned_qty,
+            pending_qty,
+            planned_qty,
+            delivered_qty: shipped_qty,
+        };
     });
 };
 
@@ -343,6 +358,9 @@ const getOrderById = async ({ id } = {}) => {
             { model: Product, as: "solarPanel", attributes: ["id", "product_name", "product_description", "barcode_number"], required: false },
             { model: Product, as: "inverter", attributes: ["id", "product_name", "product_description", "barcode_number"], required: false },
             { model: ProjectPhase, as: "projectPhase", attributes: ["id", "name"], required: false },
+            { model: CompanyWarehouse, as: "plannedWarehouse", attributes: ["id", "name"], required: false },
+            { model: Fabrication, as: "fabrication", required: false, include: [{ model: User, as: "fabricator", attributes: ["id", "name"], required: false }] },
+            { model: Installation, as: "installation", required: false, include: [{ model: User, as: "installer", attributes: ["id", "name"], required: false }] },
         ],
     });
 
@@ -438,6 +456,7 @@ const getOrderById = async ({ id } = {}) => {
         planned_delivery_date: row.planned_delivery_date,
         planned_priority: row.planned_priority,
         planned_warehouse_id: row.planned_warehouse_id,
+        planned_warehouse_name: row.plannedWarehouse?.name || null,
         planned_remarks: row.planned_remarks,
         planned_solar_panel_qty: row.planned_solar_panel_qty,
         planned_inverter_qty: row.planned_inverter_qty,
@@ -450,7 +469,8 @@ const getOrderById = async ({ id } = {}) => {
         planned_has_cables: row.planned_has_cables,
         planner_completed_at: row.planner_completed_at,
 
-        // Stage 5: Fabrication
+        // Stage 5: Assign Fabricator & Installer / Stage 6: Fabrication
+        assign_fabricator_installer_completed_at: row.assign_fabricator_installer_completed_at,
         fabricator_installer_are_same: row.fabricator_installer_are_same,
         fabricator_installer_id: row.fabricator_installer_id,
         fabricator_id: row.fabricator_id,
@@ -462,6 +482,54 @@ const getOrderById = async ({ id } = {}) => {
 
         // Stage 6: Installation
         installation_completed_at: row.installation_completed_at,
+
+        // Fabrication & Installation records (from separate tables)
+        fabrication: row.fabrication ? {
+            id: row.fabrication.id,
+            order_id: row.fabrication.order_id,
+            fabricator_id: row.fabrication.fabricator_id,
+            fabricator_name: row.fabrication.fabricator?.name || null,
+            fabrication_start_date: row.fabrication.fabrication_start_date,
+            fabrication_end_date: row.fabrication.fabrication_end_date,
+            structure_type: row.fabrication.structure_type,
+            structure_material: row.fabrication.structure_material,
+            coating_type: row.fabrication.coating_type,
+            tilt_angle: row.fabrication.tilt_angle,
+            height_from_roof: row.fabrication.height_from_roof,
+            labour_category: row.fabrication.labour_category,
+            labour_count: row.fabrication.labour_count,
+            checklist: row.fabrication.checklist,
+            images: row.fabrication.images,
+            remarks: row.fabrication.remarks,
+            completed_at: row.fabrication.completed_at,
+            created_at: row.fabrication.created_at,
+            updated_at: row.fabrication.updated_at,
+        } : null,
+        installation: row.installation ? {
+            id: row.installation.id,
+            order_id: row.installation.order_id,
+            installer_id: row.installation.installer_id,
+            installer_name: row.installation.installer?.name || null,
+            installation_start_date: row.installation.installation_start_date,
+            installation_end_date: row.installation.installation_end_date,
+            inverter_installation_location: row.installation.inverter_installation_location,
+            earthing_type: row.installation.earthing_type,
+            wiring_type: row.installation.wiring_type,
+            acdb_dcdb_make: row.installation.acdb_dcdb_make,
+            panel_mounting_type: row.installation.panel_mounting_type,
+            netmeter_readiness_status: row.installation.netmeter_readiness_status,
+            total_panels_installed: row.installation.total_panels_installed,
+            inverter_serial_no: row.installation.inverter_serial_no,
+            panel_serial_numbers: row.installation.panel_serial_numbers,
+            earthing_resistance: row.installation.earthing_resistance,
+            initial_generation: row.installation.initial_generation,
+            checklist: row.installation.checklist,
+            images: row.installation.images,
+            remarks: row.installation.remarks,
+            completed_at: row.installation.completed_at,
+            created_at: row.installation.created_at,
+            updated_at: row.installation.updated_at,
+        } : null,
 
         // Stage 7: Netmeter Apply
         netmeter_applied: row.netmeter_applied,
@@ -558,6 +626,8 @@ const createOrder = async ({ payload, transaction } = {}) => {
                         shipped_qty: 0,
                         returned_qty: 0,
                         pending_qty: quantity,
+                        planned_qty: quantity,
+                        delivered_qty: 0,
                     };
                 });
                 const derived = derivePanelAndInverterFromBomSnapshot(quotation.bom_snapshot);
@@ -734,6 +804,11 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
                 project_phase_id: payload.project_phase_id ?? order.project_phase_id,
                 order_remarks: payload.order_remarks ?? order.order_remarks,
 
+                // Allow updating normalized bom_snapshot from planner / other stages
+                bom_snapshot: payload.bom_snapshot
+                    ? normalizeOrderBomSnapshot(payload.bom_snapshot)
+                    : order.bom_snapshot,
+
                 // Pipeline fields
                 stages: payload.stages ?? order.stages,
                 current_stage_key: payload.current_stage_key ?? order.current_stage_key,
@@ -763,7 +838,8 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
                 planned_has_cables: payload.planned_has_cables ?? order.planned_has_cables,
                 planner_completed_at: payload.planner_completed_at ?? order.planner_completed_at,
 
-                // Stage 5: Fabrication
+                // Stage 5: Assign Fabricator & Installer / Stage 6: Fabrication
+                assign_fabricator_installer_completed_at: payload.assign_fabricator_installer_completed_at ?? order.assign_fabricator_installer_completed_at,
                 fabricator_installer_are_same: payload.fabricator_installer_are_same ?? order.fabricator_installer_are_same,
                 fabricator_installer_id: payload.fabricator_installer_id ?? order.fabricator_installer_id,
                 fabricator_id: payload.fabricator_id ?? order.fabricator_id,
@@ -862,6 +938,450 @@ const deleteOrder = async ({ id, transaction } = {}) => {
     }
 };
 
+/**
+ * List pending delivery orders for warehouse managers.
+ * Rules:
+ * - Order must belong to a warehouse managed by the current user
+ * - Order must not be in a closed status (completed/cancelled)
+ * - Order delivery_status must not be 'complete'
+ */
+const listPendingDeliveryOrders = async ({ user_id } = {}) => {
+    if (!user_id) {
+        return [];
+    }
+
+    // Find warehouses where the user is a manager
+    const managedWarehouses = await CompanyWarehouse.findAll({
+        include: [
+            {
+                model: User,
+                as: "managers",
+                attributes: [],
+                required: true,
+                where: { id: user_id },
+            },
+        ],
+        attributes: ["id", "name"],
+        where: { deleted_at: null },
+    });
+
+    const warehouseIds = managedWarehouses.map((w) => w.id);
+    if (warehouseIds.length === 0) {
+        return [];
+    }
+
+    const orders = await Order.findAll({
+        where: {
+            deleted_at: null,
+            planned_warehouse_id: { [Op.in]: warehouseIds },
+            status: { [Op.notIn]: ["completed", "cancelled"] },
+        },
+        attributes: [
+            "id",
+            "order_number",
+            "customer_id",
+            "order_date",
+            "consumer_no",
+            "reference_from",
+            "capacity",
+            "project_cost",
+            "discount",
+            "payment_type",
+            "planned_delivery_date",
+            "planned_priority",
+            "planned_warehouse_id",
+            "delivery_status",
+            "stages",
+            "current_stage_key",
+            "bom_snapshot",
+        ],
+        include: [
+            {
+                model: Customer,
+                as: "customer",
+                attributes: ["id", "customer_name", "mobile_number", "address"],
+            },
+            { model: CompanyWarehouse, as: "plannedWarehouse", attributes: ["id", "name"], required: false },
+        ],
+        order: [["planned_delivery_date", "ASC"]],
+    });
+
+    const result = [];
+    orders.forEach((o) => {
+        const row = o.toJSON();
+        // Skip fully delivered orders
+        if (row.delivery_status === "complete") {
+            return;
+        }
+
+        const bom = normalizeOrderBomSnapshot(row.bom_snapshot) || [];
+        let totalRequired = 0;
+        let totalShipped = 0;
+        let totalPending = 0;
+        bom.forEach((line) => {
+            totalRequired += Number(line.quantity) || 0;
+            totalShipped += Number(line.shipped_qty) || 0;
+            totalPending += Number(line.pending_qty) || 0;
+        });
+
+        const warehouse = managedWarehouses.find(
+            (w) => String(w.id) === String(row.planned_warehouse_id)
+        );
+
+        result.push({
+            id: row.id,
+            order_number: row.order_number,
+            customer_name: row.customer?.customer_name || null,
+            mobile_number: row.customer?.mobile_number || null,
+            address: row.customer?.address || null,
+            capacity: row.capacity,
+            project_cost: row.project_cost,
+            planned_delivery_date: row.planned_delivery_date,
+            planned_priority: row.planned_priority,
+            planned_warehouse_id: row.planned_warehouse_id,
+            planned_warehouse_name: row.plannedWarehouse?.name || warehouse?.name || null,
+            total_required: totalRequired,
+            total_shipped: totalShipped,
+            total_pending: totalPending,
+            delivery_status: row.delivery_status || null,
+        });
+    });
+
+    return result;
+};
+
+/**
+ * List delivery execution orders for warehouse managers, grouped by delivery status.
+ * - Only orders for warehouses managed by the current user
+ * - Excludes cancelled orders
+ * - Completed column is limited to last 15 days (based on updated_at)
+ */
+const listDeliveryExecutionOrders = async ({
+    user_id,
+    q = null,
+    order_number = null,
+    customer_name = null,
+    mobile_number = null,
+    contact_number = null,
+    address = null,
+    consumer_no = null,
+    reference_from = null,
+    payment_type = null,
+    planned_priority = null,
+    delivery_status = null,
+    planned_warehouse_id = null,
+    order_date_from = null,
+    order_date_to = null,
+    planned_delivery_date_from = null,
+    planned_delivery_date_to = null,
+} = {}) => {
+    if (!user_id) {
+        return [];
+    }
+
+    // Reuse logic to find warehouses where the user is a manager
+    const managedWarehouses = await CompanyWarehouse.findAll({
+        include: [
+            {
+                model: User,
+                as: "managers",
+                attributes: [],
+                required: true,
+                where: { id: user_id },
+            },
+        ],
+        attributes: ["id", "name"],
+        where: { deleted_at: null },
+    });
+
+    const warehouseIds = managedWarehouses.map((w) => w.id);
+    if (warehouseIds.length === 0) {
+        return [];
+    }
+
+    const where = {
+        deleted_at: null,
+        planned_warehouse_id: { [Op.in]: warehouseIds },
+        status: { [Op.notIn]: ["cancelled"] },
+    };
+    if (delivery_status && String(delivery_status).toLowerCase() !== "all") {
+        where.delivery_status = String(delivery_status).toLowerCase();
+    }
+    if (planned_warehouse_id != null && String(planned_warehouse_id).trim() !== "") {
+        const allowedWarehouseIds = warehouseIds.map((id) => String(id));
+        if (allowedWarehouseIds.includes(String(planned_warehouse_id))) {
+            where.planned_warehouse_id = planned_warehouse_id;
+        } else {
+            return [];
+        }
+    }
+    if (order_number) {
+        where.order_number = { [Op.iLike]: `%${order_number}%` };
+    }
+    if (consumer_no) {
+        where.consumer_no = { [Op.iLike]: `%${consumer_no}%` };
+    }
+    if (reference_from) {
+        where.reference_from = { [Op.iLike]: `%${reference_from}%` };
+    }
+    if (payment_type) {
+        where.payment_type = { [Op.iLike]: `%${payment_type}%` };
+    }
+    if (planned_priority) {
+        where.planned_priority = { [Op.iLike]: `%${planned_priority}%` };
+    }
+    if (order_date_from || order_date_to) {
+        where.order_date = {};
+        if (order_date_from) where.order_date[Op.gte] = order_date_from;
+        if (order_date_to) where.order_date[Op.lte] = order_date_to;
+    }
+    if (planned_delivery_date_from || planned_delivery_date_to) {
+        where.planned_delivery_date = {};
+        if (planned_delivery_date_from) where.planned_delivery_date[Op.gte] = planned_delivery_date_from;
+        if (planned_delivery_date_to) where.planned_delivery_date[Op.lte] = planned_delivery_date_to;
+    }
+
+    if (q) {
+        where[Op.and] = where[Op.and] || [];
+        where[Op.and].push({
+            [Op.or]: [
+                { order_number: { [Op.iLike]: `%${q}%` } },
+                { consumer_no: { [Op.iLike]: `%${q}%` } },
+                { reference_from: { [Op.iLike]: `%${q}%` } },
+                { payment_type: { [Op.iLike]: `%${q}%` } },
+                { planned_priority: { [Op.iLike]: `%${q}%` } },
+            ],
+        });
+    }
+
+    const customerAnd = [];
+    if (customer_name) {
+        customerAnd.push({ customer_name: { [Op.iLike]: `%${customer_name}%` } });
+    }
+    if (mobile_number) {
+        customerAnd.push({ mobile_number: { [Op.iLike]: `%${mobile_number}%` } });
+    }
+    if (contact_number) {
+        customerAnd.push({
+            [Op.or]: [
+                { mobile_number: { [Op.iLike]: `%${contact_number}%` } },
+                { phone_no: { [Op.iLike]: `%${contact_number}%` } },
+            ],
+        });
+    }
+    if (address) {
+        customerAnd.push({
+            [Op.or]: [
+                { address: { [Op.iLike]: `%${address}%` } },
+                { landmark_area: { [Op.iLike]: `%${address}%` } },
+                { taluka: { [Op.iLike]: `%${address}%` } },
+                { district: { [Op.iLike]: `%${address}%` } },
+                { pin_code: { [Op.iLike]: `%${address}%` } },
+            ],
+        });
+    }
+    const customerWhere = customerAnd.length > 0 ? { [Op.and]: customerAnd } : undefined;
+
+    const orders = await Order.findAll({
+        where,
+        attributes: [
+            "id",
+            "order_number",
+            "customer_id",
+            "capacity",
+            "project_cost",
+            "planned_delivery_date",
+            "planned_priority",
+            "planned_warehouse_id",
+            "delivery_status",
+            "stages",
+            "current_stage_key",
+            "bom_snapshot",
+            "updated_at",
+            [
+                db.sequelize.literal(`(
+                    SELECT COALESCE(SUM(payment_amount), 0)
+                    FROM order_payment_details
+                    WHERE order_payment_details.order_id = "Order".id
+                      AND order_payment_details.deleted_at IS NULL
+                )`),
+                "total_paid",
+            ],
+            [
+                db.sequelize.literal(`(
+                    SELECT MAX(challan_date)
+                    FROM challans
+                    WHERE challans.order_id = "Order".id
+                      AND challans.deleted_at IS NULL
+                )`),
+                "last_challan_date",
+            ],
+            [
+                db.sequelize.literal(`(
+                    SELECT COUNT(1)
+                    FROM challans
+                    WHERE challans.order_id = "Order".id
+                      AND challans.deleted_at IS NULL
+                )`),
+                "challan_count",
+            ],
+        ],
+        include: [
+            {
+                model: Customer,
+                as: "customer",
+                required: !!customerWhere,
+                where: customerWhere,
+                attributes: [
+                    "id",
+                    "customer_name",
+                    "mobile_number",
+                    "phone_no",
+                    "company_name",
+                    "email_id",
+                    "address",
+                    "pin_code",
+                    "landmark_area",
+                    "taluka",
+                    "district",
+                ],
+            },
+            { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"], required: false },
+            { model: Discom, as: "discom", attributes: ["id", "name"], required: false },
+            { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
+            { model: User, as: "handledBy", attributes: ["id", "name"], required: false },
+            { model: User, as: "inquiryBy", attributes: ["id", "name"], required: false },
+            { model: User, as: "channelPartner", attributes: ["id", "name"], required: false },
+            { model: Product, as: "solarPanel", attributes: ["id", "product_name"], required: false },
+            { model: Product, as: "inverter", attributes: ["id", "product_name"], required: false },
+            { model: CompanyWarehouse, as: "plannedWarehouse", attributes: ["id", "name"], required: false },
+        ],
+        order: [["planned_delivery_date", "ASC"]],
+    });
+
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    const result = [];
+
+    orders.forEach((o) => {
+        const row = o.toJSON();
+
+        // Derive kanban status from delivery_status
+        const status = (row.delivery_status || "").toLowerCase();
+        let kanbanStatus = "pending";
+        if (status === "partial") kanbanStatus = "partial";
+        if (status === "complete") kanbanStatus = "complete";
+
+        // Completed: only keep last 15 days
+        if (kanbanStatus === "complete") {
+            const updatedAt = row.updated_at ? new Date(row.updated_at) : null;
+            if (!updatedAt || updatedAt < fifteenDaysAgo) {
+                return;
+            }
+        }
+
+        const bom = normalizeOrderBomSnapshot(row.bom_snapshot) || [];
+        let totalRequired = 0;
+        let totalShipped = 0;
+        let totalPending = 0;
+        bom.forEach((line) => {
+            totalRequired += Number(line.quantity) || 0;
+            totalShipped += Number(line.shipped_qty) || 0;
+            totalPending += Number(line.pending_qty) || 0;
+        });
+
+        const warehouse = managedWarehouses.find(
+            (w) => String(w.id) === String(row.planned_warehouse_id)
+        );
+        const totalPaid = Number(row.total_paid) || 0;
+        const projectCost = Number(row.project_cost) || 0;
+        const discount = Number(row.discount) || 0;
+        const payableCost = Math.max(projectCost - discount, 0);
+        const outstandingBalance = Math.max(payableCost - totalPaid, 0);
+
+        result.push({
+            id: row.id,
+            order_number: row.order_number,
+            order_date: row.order_date || null,
+            customer_name: row.customer?.customer_name || null,
+            mobile_number: row.customer?.mobile_number || null,
+            phone_no: row.customer?.phone_no || null,
+            company_name: row.customer?.company_name || null,
+            email_id: row.customer?.email_id || null,
+            address: row.customer?.address || null,
+            pin_code: row.customer?.pin_code || null,
+            landmark_area: row.customer?.landmark_area || null,
+            taluka: row.customer?.taluka || null,
+            district: row.customer?.district || null,
+            consumer_no: row.consumer_no || null,
+            reference_from: row.reference_from || null,
+            payment_type: row.payment_type || null,
+            capacity: row.capacity,
+            project_cost: row.project_cost,
+            discount,
+            payable_cost: payableCost,
+            total_paid: totalPaid,
+            outstanding_balance: outstandingBalance,
+            project_scheme_name: row.projectScheme?.name || null,
+            discom_name: row.discom?.name || null,
+            branch_name: row.branch?.name || null,
+            handled_by_name: row.handledBy?.name || null,
+            inquiry_by_name: row.inquiryBy?.name || null,
+            channel_partner_name: row.channelPartner?.name || null,
+            solar_panel_name: row.solarPanel?.product_name || null,
+            inverter_name: row.inverter?.product_name || null,
+            planned_delivery_date: row.planned_delivery_date,
+            planned_priority: row.planned_priority,
+            planned_warehouse_id: row.planned_warehouse_id,
+            planned_warehouse_name: row.plannedWarehouse?.name || warehouse?.name || null,
+            delivery_status: row.delivery_status || null,
+            kanban_status: kanbanStatus,
+            last_challan_date: row.last_challan_date || null,
+            challan_count: Number(row.challan_count) || 0,
+            total_required: totalRequired,
+            total_shipped: totalShipped,
+            total_pending: totalPending,
+        });
+    });
+
+    const toDateTime = (value, fallback) => {
+        const ts = value ? new Date(value).getTime() : Number.NaN;
+        return Number.isFinite(ts) ? ts : fallback;
+    };
+
+    const pending = result
+        .filter((r) => r.kanban_status === "pending")
+        .sort(
+            (a, b) =>
+                toDateTime(a.planned_delivery_date, Number.MAX_SAFE_INTEGER) -
+                toDateTime(b.planned_delivery_date, Number.MAX_SAFE_INTEGER)
+        );
+
+    const partial = result
+        .filter((r) => r.kanban_status === "partial")
+        .sort(
+            (a, b) =>
+                toDateTime(a.planned_delivery_date, Number.MAX_SAFE_INTEGER) -
+                toDateTime(b.planned_delivery_date, Number.MAX_SAFE_INTEGER)
+        );
+
+    const complete = result
+        .filter((r) => r.kanban_status === "complete")
+        .sort(
+            (a, b) =>
+                toDateTime(b.last_challan_date, 0) - toDateTime(a.last_challan_date, 0)
+        );
+
+    const remaining = result
+        .filter((r) => !["pending", "partial", "complete"].includes(r.kanban_status))
+        .sort(
+            (a, b) =>
+                toDateTime(a.planned_delivery_date, Number.MAX_SAFE_INTEGER) -
+                toDateTime(b.planned_delivery_date, Number.MAX_SAFE_INTEGER)
+        );
+
+    return [...pending, ...partial, ...complete, ...remaining];
+};
+
 const getSolarPanels = async () => {
     const products = await Product.findAll({
         where: {
@@ -907,4 +1427,6 @@ module.exports = {
     deleteOrder,
     getSolarPanels,
     getInverters,
+    listPendingDeliveryOrders,
+    listDeliveryExecutionOrders,
 };

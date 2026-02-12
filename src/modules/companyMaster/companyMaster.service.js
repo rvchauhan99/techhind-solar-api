@@ -107,7 +107,6 @@ const updateCompanyProfile = async (payload, transaction = null) => {
       company_email: payload.company_email,
       company_website: payload.company_website !== undefined ? payload.company_website : company.company_website,
       status: payload.status !== undefined ? payload.status : company.status,
-      updated_at: new Date(),
     };
 
     await company.update(updatePayload, { transaction });
@@ -243,7 +242,6 @@ const updateBankAccount = async (id, payload, transaction = null) => {
     bank_account_branch: payload.bank_account_branch !== undefined ? payload.bank_account_branch : bankAccount.bank_account_branch,
     is_active: isActive,
     is_default: isDefault,
-    updated_at: new Date(),
   };
 
   await bankAccount.update(updatePayload, { transaction });
@@ -269,10 +267,7 @@ const deleteBankAccount = async (id, transaction = null) => {
   }
 
   // Mark as inactive instead of deleting
-  await bankAccount.update(
-    { is_active: false, updated_at: new Date() },
-    { transaction }
-  );
+  await bankAccount.update({ is_active: false }, { transaction });
   return true;
 };
 
@@ -443,7 +438,6 @@ const updateBranch = async (id, payload, transaction = null) => {
     gst_number: payload.gst_number !== undefined ? payload.gst_number : branch.gst_number,
     is_active: isActive,
     is_default: isDefault,
-    updated_at: new Date(),
   };
 
   await branch.update(updatePayload, { transaction });
@@ -482,10 +476,7 @@ const deleteBranch = async (id, transaction = null) => {
   }
 
   // Mark as inactive instead of deleting
-  await branch.update(
-    { is_active: false, updated_at: new Date() },
-    { transaction }
-  );
+  await branch.update({ is_active: false }, { transaction });
   return true;
 };
 
@@ -603,7 +594,6 @@ const updateWarehouse = async (id, payload, transaction = null) => {
     phone_no: payload.phone_no !== undefined ? payload.phone_no : warehouse.phone_no,
     address: payload.address !== undefined ? payload.address : warehouse.address,
     is_active: payload.is_active !== undefined ? payload.is_active : warehouse.is_active,
-    updated_at: new Date(),
   };
 
   await warehouse.update(updatePayload, { transaction });
@@ -621,10 +611,7 @@ const deleteWarehouse = async (id, transaction = null) => {
   }
 
   // Mark as inactive instead of deleting
-  await warehouse.update(
-    { is_active: false, updated_at: new Date() },
-    { transaction }
-  );
+  await warehouse.update({ is_active: false }, { transaction });
   return true;
 };
 
@@ -750,7 +737,6 @@ const uploadCompanyImage = async (imageType, filePath, transaction = null) => {
   // Update the company with new image path
   const updatePayload = {
     [imageType]: filePath,
-    updated_at: new Date(),
   };
 
   await company.update(updatePayload, { transaction });
@@ -800,7 +786,6 @@ const deleteCompanyImage = async (imageType, transaction = null) => {
   // Update the company to remove image path
   const updatePayload = {
     [imageType]: null,
-    updated_at: new Date(),
   };
 
   await company.update(updatePayload, { transaction });

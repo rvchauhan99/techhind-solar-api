@@ -21,10 +21,17 @@ const listBillOfMaterials = async ({
   name_op = null,
   description = null,
   description_op = null,
+  visibility = null,
 } = {}) => {
   const offset = (page - 1) * limit;
 
-  const where = { deleted_at: null };
+  const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
+  const where = {};
+  if (visibilityVal === "active") {
+    where.deleted_at = null;
+  } else if (visibilityVal === "inactive") {
+    where.deleted_at = { [Op.ne]: null };
+  }
   const andConds = [];
 
   const buildStrCond = (field, val, op = "contains") => {
@@ -68,13 +75,18 @@ const listBillOfMaterials = async ({
     where[Op.and] = where[Op.and] ? [...(Array.isArray(where[Op.and]) ? where[Op.and] : [where[Op.and]]), searchCond] : [searchCond];
   }
 
-  const { count, rows } = await BillOfMaterial.findAndCountAll({
+  const findOptions = {
     where,
     order: [[orderSortBy, sortOrder]],
     limit,
     offset,
     distinct: true,
-  });
+  };
+  if (visibilityVal === "inactive" || visibilityVal === "all") {
+    findOptions.paranoid = false;
+  }
+
+  const { count, rows } = await BillOfMaterial.findAndCountAll(findOptions);
 
   const data = rows.map((bom) => {
     const row = bom.toJSON();
@@ -87,6 +99,7 @@ const listBillOfMaterials = async ({
       number_of_products: bomDetail.length,
       created_at: row.created_at,
       updated_at: row.updated_at,
+      deleted_at: row.deleted_at,
     };
   });
 

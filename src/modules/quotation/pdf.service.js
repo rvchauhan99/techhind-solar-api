@@ -7,6 +7,7 @@ const path = require("path");
 const QRCode = require("qrcode");
 const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
+const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.js");
 
 // Template directory paths
 const TEMPLATE_DIR = path.join(__dirname, "../../../templates/quotation");
@@ -539,7 +540,10 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         },
 
         // Full BOM snapshot (when present, PDF BOM page uses this; else falls back to panel/inverter/etc. above)
-        bom_snapshot: Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0 ? quotation.bom_snapshot : null,
+        // Normalize to flat format for template (supports both nested and flat stored formats)
+        bom_snapshot: Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0
+            ? normalizeBomSnapshotForDisplay(quotation.bom_snapshot)
+            : null,
 
         // Savings and Payback data
         savings: {

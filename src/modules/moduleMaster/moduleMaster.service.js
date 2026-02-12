@@ -20,8 +20,17 @@ const createModule = async (payload, transaction = null) => {
     throw new AppError('Module with same name or key already exists', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
-  // if sequence provided, ensure it's unique (excluding soft-deleted)
-  if (payload.sequence !== undefined && payload.sequence !== null) {
+  // Auto-assign sequence when 0, blank, or null
+  const seqVal = payload.sequence;
+  const isAutoSeq = seqVal === undefined || seqVal === null || seqVal === '' || Number(seqVal) === 0;
+  if (isAutoSeq) {
+    const maxSeq = await Module.max('sequence', {
+      where: { deleted_at: null },
+      transaction,
+    });
+    payload.sequence = (maxSeq ?? 0) + 1;
+  } else {
+    // If sequence provided, ensure it's unique (excluding soft-deleted)
     const seqExists = await Module.findOne({
       where: { sequence: payload.sequence, deleted_at: null },
       transaction,
@@ -121,8 +130,18 @@ const listModules = async ({
 const updateModule = async (id, updates, transaction = null) => {
   const module = await Module.findOne({ where: { id, deleted_at: null }, transaction });
   if (!module) throw new AppError('Module not found', RESPONSE_STATUS_CODES.NOT_FOUND);
-  // if sequence is provided, ensure it's not used by another module
-  if (updates.sequence !== undefined && updates.sequence !== null) {
+
+  // Auto-assign sequence when 0, blank, or null
+  const seqVal = updates.sequence;
+  const isAutoSeq = seqVal === undefined || seqVal === null || seqVal === '' || Number(seqVal) === 0;
+  if (isAutoSeq) {
+    const maxSeq = await Module.max('sequence', {
+      where: { deleted_at: null },
+      transaction,
+    });
+    updates.sequence = (maxSeq ?? 0) + 1;
+  } else {
+    // If sequence is provided, ensure it's not used by another module
     const seqExists = await Module.findOne({
       where: {
         sequence: updates.sequence,
@@ -136,7 +155,7 @@ const updateModule = async (id, updates, transaction = null) => {
     }
   }
 
-  await module.update({ ...updates, updated_at: new Date() }, { transaction });
+  await module.update({ ...updates }, { transaction });
   return module.toJSON();
 };
 

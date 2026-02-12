@@ -35,6 +35,7 @@
   "sub_division.model": { "displayField": "name", "orderBy": "name" },
   "task_priority.model": { "displayField": "name", "orderBy": "name" },
   "planner_auto.model": { "displayField": "title", "orderBy": "title" },
-  "customer.model": { "displayField": "customer_name", "orderBy": "customer_name" }
+  "customer.model": { "displayField": "customer_name", "orderBy": "customer_name" },
+  "panel_technology.model": { "displayField": "name", "orderBy": "sort_order" }
 }
 

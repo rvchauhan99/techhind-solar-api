@@ -33,12 +33,77 @@ const getModelByName = (model) => {
     return Model;
 };
 
+const VISIBILITY_ACTIVE = 'active';
+const VISIBILITY_INACTIVE = 'inactive';
+const VISIBILITY_ALL = 'all';
+const VALID_VISIBILITY = [VISIBILITY_ACTIVE, VISIBILITY_INACTIVE, VISIBILITY_ALL];
+
+const STRING_OPS = ['contains', 'notContains', 'equals', 'notEquals', 'startsWith', 'endsWith'];
+const NUMBER_OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
+const DATE_OPS = ['equals', 'before', 'after', 'inRange'];
+
+const buildStringCond = (fieldName, value, op = 'contains') => {
+    const val = String(value || '').trim();
+    if (!val) return null;
+    const safeOp = STRING_OPS.includes(op) ? op : 'contains';
+    switch (safeOp) {
+        case 'contains': return { [fieldName]: { [Op.iLike]: `%${val}%` } };
+        case 'notContains': return { [fieldName]: { [Op.notILike]: `%${val}%` } };
+        case 'equals': return { [fieldName]: { [Op.iLike]: val } };
+        case 'notEquals': return { [fieldName]: { [Op.notILike]: val } };
+        case 'startsWith': return { [fieldName]: { [Op.iLike]: `${val}%` } };
+        case 'endsWith': return { [fieldName]: { [Op.iLike]: `%${val}` } };
+        default: return { [fieldName]: { [Op.iLike]: `%${val}%` } };
+    }
+};
+
+const buildNumberCond = (fieldName, value, op = 'equals', valueTo = null) => {
+    const num = Number(value);
+    if (value !== '' && value != null && Number.isNaN(num)) return null;
+    if (value === '' || value == null) return null;
+    const safeOp = NUMBER_OPS.includes(op) ? op : 'equals';
+    switch (safeOp) {
+        case 'equals': return { [fieldName]: num };
+        case 'notEquals': return { [fieldName]: { [Op.ne]: num } };
+        case 'gt': return { [fieldName]: { [Op.gt]: num } };
+        case 'gte': return { [fieldName]: { [Op.gte]: num } };
+        case 'lt': return { [fieldName]: { [Op.lt]: num } };
+        case 'lte': return { [fieldName]: { [Op.lte]: num } };
+        case 'between': {
+            const to = valueTo !== '' && valueTo != null ? Number(valueTo) : null;
+            if (to === null || Number.isNaN(to)) return { [fieldName]: { [Op.gte]: num } };
+            return { [fieldName]: { [Op.between]: [num, to] } };
+        }
+        default: return { [fieldName]: num };
+    }
+};
+
+const buildDateCond = (fieldName, value, op = 'equals', valueTo = null) => {
+    if (value === '' || value == null) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    const safeOp = DATE_OPS.includes(op) ? op : 'equals';
+    switch (safeOp) {
+        case 'equals': return { [fieldName]: d };
+        case 'before': return { [fieldName]: { [Op.lt]: d } };
+        case 'after': return { [fieldName]: { [Op.gt]: d } };
+        case 'inRange': {
+            const to = valueTo !== '' && valueTo != null ? new Date(valueTo) : null;
+            if (!to || Number.isNaN(to.getTime())) return { [fieldName]: { [Op.gte]: d } };
+            return { [fieldName]: { [Op.between]: [d, to] } };
+        }
+        default: return { [fieldName]: d };
+    }
+};
+
 /**
  * Generic function to get master list for any model
- * @param {Object} params - { model, page, limit, q, status }
+ * @param {Object} params - { model, page, limit, q, status, visibility, filters }
+ * @param {string} [params.visibility] - 'active' (default) | 'inactive' | 'all' for soft-deleted filter
+ * @param {Object} [params.filters] - query params for column filters (field names, field_op, field_to)
  * @returns {Object} - { fields, data, meta }
  */
-const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = null } = {}) => {
+const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = null, visibility = null, filters = null } = {}) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
@@ -57,8 +122,8 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
 
     Object.keys(modelAttributes).forEach((fieldName) => {
         const attribute = modelAttributes[fieldName];
-        // Skip internal fields
-        if (['created_at', 'updated_at', 'deleted_at'].includes(fieldName)) {
+        // Skip internal and audit fields (audit fields are set server-side from logged-in user)
+        if (['created_at', 'updated_at', 'deleted_at', 'created_by', 'updated_by'].includes(fieldName)) {
             return;
         }
 
@@ -136,9 +201,17 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
         });
     }
 
-    // Build where clause
+    // Build where clause and paranoid based on visibility (active | inactive | all)
     const offset = (page - 1) * limit;
-    const where = { deleted_at: null };
+    const visibilityVal = visibility && VALID_VISIBILITY.includes(visibility) ? visibility : VISIBILITY_ACTIVE;
+    const where = {};
+
+    if (visibilityVal === VISIBILITY_ACTIVE) {
+        where.deleted_at = null;
+    } else if (visibilityVal === VISIBILITY_INACTIVE) {
+        where.deleted_at = { [Op.ne]: null };
+    }
+    // for VISIBILITY_ALL we do not add deleted_at to where
 
     if (status) {
         where.status = status;
@@ -155,6 +228,59 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
                 [field]: { [Op.iLike]: `%${q}%` }
             }));
         }
+    }
+
+    // Apply column filters from request (field name, field_op, field_to)
+    const skipFilterFields = ['id', 'password', 'page', 'limit', 'q', 'status', 'visibility', 'sortBy', 'sortOrder'];
+    if (filters && typeof filters === 'object') {
+        fields.forEach((field) => {
+            if (skipFilterFields.includes(field.name) || field.isFileUpload || field.primaryKey) return;
+            const value = filters[field.name];
+            const valueTo = filters[field.name + '_to'];
+            const op = filters[field.name + '_op'] || '';
+
+            const type = (field.type || 'STRING').toUpperCase();
+            if (field.reference && !field.isMultiSelect) {
+                // BelongsTo: filter by FK id (exact match); only apply when value is numeric
+                if (value !== '' && value != null && value !== undefined) {
+                    const idNum = Number(value);
+                    if (!Number.isNaN(idNum)) {
+                        where[field.name] = idNum;
+                    }
+                }
+                return;
+            }
+            if (type === 'BOOLEAN') {
+                if (value === 'true' || value === true) {
+                    where[field.name] = true;
+                } else if (value === 'false' || value === false) {
+                    where[field.name] = false;
+                }
+                return;
+            }
+            if (['INTEGER', 'BIGINT', 'DECIMAL', 'FLOAT', 'DOUBLE', 'NUMERIC'].includes(type)) {
+                const cond = buildNumberCond(field.name, value, op, valueTo);
+                if (cond) {
+                    where[Op.and] = where[Op.and] || [];
+                    where[Op.and].push(cond);
+                }
+                return;
+            }
+            if (['DATE', 'DATEONLY', 'TIMESTAMP'].includes(type)) {
+                const cond = buildDateCond(field.name, value, op, valueTo);
+                if (cond) {
+                    where[Op.and] = where[Op.and] || [];
+                    where[Op.and].push(cond);
+                }
+                return;
+            }
+            // STRING, TEXT, and reference display (treated as text)
+            const cond = buildStringCond(field.name, value, op || 'contains');
+            if (cond) {
+                where[Op.and] = where[Op.and] || [];
+                where[Op.and].push(cond);
+            }
+        });
     }
 
     // Build includes for reference fields (foreign keys)
@@ -251,13 +377,21 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
         limit,
         order: [['created_at', 'DESC']],
     };
+    if (visibilityVal === VISIBILITY_INACTIVE || visibilityVal === VISIBILITY_ALL) {
+        findOptions.paranoid = false;
+    }
 
     if (includes.length > 0) {
         findOptions.include = includes;
     }
 
+    const countOptions = { where };
+    if (visibilityVal === VISIBILITY_INACTIVE || visibilityVal === VISIBILITY_ALL) {
+        countOptions.paranoid = false;
+    }
+
     const rows = await Model.findAll(findOptions);
-    const count = await Model.count({ where });
+    const count = await Model.count(countOptions);
 
     // Convert to plain objects and add display values for reference fields
     const data = rows.map((row) => {
@@ -364,15 +498,16 @@ const deleteMaster = async ({ model, id } = {}) => {
 
 /**
  * Generic function to create a master record for any model
- * @param {Object} params - { model, payload }
+ * @param {Object} params - { model, payload, userId } - userId kept for backwards compatibility; audit fields auto-set from request context
  * @returns {Object} - Created record
  */
-const createMaster = async ({ model, payload } = {}) => {
+const createMaster = async ({ model, payload, userId } = {}) => {
     if (!model || !payload) {
         throw new AppError('Model name and payload are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
     const Model = getModelByName(model);
+    const modelAttributes = Model.rawAttributes || {};
 
     // Load multiselect config for this model
     const mastersConfig = require('../../common/utils/masters.json');
@@ -392,7 +527,6 @@ const createMaster = async ({ model, payload } = {}) => {
     }
 
     // Check for unique fields (code, email, etc.)
-    const modelAttributes = Model.rawAttributes || {};
     const uniqueFields = Object.keys(modelAttributes).filter(
         key => modelAttributes[key].unique && payload[key]
     );
@@ -532,15 +666,17 @@ const getMasterById = async ({ model, id } = {}) => {
 
 /**
  * Generic function to update a master record for any model
- * @param {Object} params - { model, id, updates }
+ * @param {Object} params - { model, id, updates, userId }
  * @returns {Object} - Updated record
  */
-const updateMaster = async ({ model, id, updates } = {}) => {
+const updateMaster = async ({ model, id, updates, userId } = {}) => {
     if (!model || !id || !updates) {
         throw new AppError('Model name, id, and updates are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
     const Model = getModelByName(model);
+    const modelAttributes = Model.rawAttributes || {};
+    delete updates.created_by; // never allow updating created_by
 
     // Load multiselect config for this model
     const mastersConfig = require('../../common/utils/masters.json');
@@ -566,7 +702,6 @@ const updateMaster = async ({ model, id, updates } = {}) => {
     }
 
     // Check for unique fields if they're being updated
-    const modelAttributes = Model.rawAttributes || {};
     const uniqueFields = Object.keys(modelAttributes).filter(
         key => modelAttributes[key].unique && updates[key] && updates[key] !== record[key]
     );
@@ -625,7 +760,7 @@ const updateMaster = async ({ model, id, updates } = {}) => {
     }
 
     // Update the record
-    await record.update({ ...safeUpdates, updated_at: new Date() });
+    await record.update({ ...safeUpdates });
 
     // Helper to capitalize alias for mixin method names
     const toSetMethod = (alias) => `set${alias.charAt(0).toUpperCase()}${alias.slice(1)}`;
@@ -809,7 +944,7 @@ const generateSampleCsv = async ({ model } = {}) => {
     Object.keys(modelAttributes).forEach((fieldName) => {
         const attribute = modelAttributes[fieldName];
         // Skip internal fields
-        if (['id', 'created_at', 'updated_at', 'deleted_at'].includes(fieldName)) {
+        if (['id', 'created_at', 'updated_at', 'deleted_at', 'created_by', 'updated_by'].includes(fieldName)) {
             return;
         }
         if (attribute.autoIncrement || attribute.primaryKey) {
@@ -999,7 +1134,7 @@ const bulkUploadFromCsv = async ({ model, csvText, filename } = {}) => {
     const expectedFields = [];
     Object.keys(modelAttributes).forEach((fieldName) => {
         const attribute = modelAttributes[fieldName];
-        if (['id', 'created_at', 'updated_at', 'deleted_at'].includes(fieldName)) return;
+        if (['id', 'created_at', 'updated_at', 'deleted_at', 'created_by', 'updated_by'].includes(fieldName)) return;
         if (attribute.autoIncrement || attribute.primaryKey) return;
         if (fileUploadFields.includes(fieldName)) return;
         if (multiSelectFieldNames.has(fieldName)) return;
@@ -1075,7 +1210,7 @@ const bulkUploadFromCsv = async ({ model, csvText, filename } = {}) => {
     const headerToFieldMap = {};
     Object.keys(modelAttributes).forEach((fieldName) => {
         const attribute = modelAttributes[fieldName];
-        if (['id', 'created_at', 'updated_at', 'deleted_at'].includes(fieldName)) return;
+        if (['id', 'created_at', 'updated_at', 'deleted_at', 'created_by', 'updated_by'].includes(fieldName)) return;
         if (attribute.autoIncrement || attribute.primaryKey) return;
         if (fileUploadFields.includes(fieldName)) return;
         if (multiSelectFieldNames.has(fieldName)) return;

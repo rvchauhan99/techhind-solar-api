@@ -19,7 +19,7 @@ const create = asyncHandler(async (req, res) => {
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
-  
+
   if (req.file) {
     const mastersConfig = require('../../common/utils/masters.json');
     const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
@@ -37,19 +37,28 @@ const create = asyncHandler(async (req, res) => {
     }
   }
 
-  const created = await masterService.createMaster({ model, payload });
+  const created = await masterService.createMaster({
+    model,
+    payload,
+    userId: req.user?.id,
+  });
   return responseHandler.sendSuccess(res, created, 'Record created', 201);
 });
 
 const list = asyncHandler(async (req, res) => {
   const { model } = req.params;
-  const { page, limit, q, status } = req.query;
-  const result = await masterService.getMasterList({ 
-    model, 
-    page: parseInt(page, 10) || 1, 
-    limit: parseInt(limit, 10) || 20, 
-    q, 
-    status 
+  const query = { ...req.query };
+  const page = parseInt(query.page, 10) || 1;
+  const limit = parseInt(query.limit, 10) || 20;
+  const visibilityVal = ['active', 'inactive', 'all'].includes(query.visibility) ? query.visibility : 'active';
+  const result = await masterService.getMasterList({
+    model,
+    page,
+    limit,
+    q: query.q || null,
+    status: query.status || null,
+    visibility: visibilityVal,
+    filters: query,
   });
   return responseHandler.sendSuccess(res, result, 'Master list fetched', 200);
 });
@@ -97,7 +106,12 @@ const update = asyncHandler(async (req, res) => {
     }
   }
 
-  const updated = await masterService.updateMaster({ model, id, updates });
+  const updated = await masterService.updateMaster({
+    model,
+    id,
+    updates,
+    userId: req.user?.id,
+  });
   return responseHandler.sendSuccess(res, updated, 'Record updated', 200);
 });
 

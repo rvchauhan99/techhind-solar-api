@@ -298,5 +298,13 @@
         "required_fields": [
             "name"
         ]
+    },
+    {
+        "id": 35,
+        "name": "Panel Technology",
+        "model_name": "panel_technology.model",
+        "required_fields": [
+            "name"
+        ]
     }
 ]

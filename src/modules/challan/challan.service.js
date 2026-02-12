@@ -10,7 +10,48 @@ const {
     CompanyWarehouse,
     Product,
     ProductType,
+    Stock,
+    StockSerial,
+    User,
 } = db;
+const stockService = require("../stock/stock.service.js");
+const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
+const {
+    TRANSACTION_TYPE,
+    MOVEMENT_TYPE,
+    SERIAL_STATUS,
+} = require("../../common/utils/constants.js");
+const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
+
+const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
+const VALID_DATE_OPS = ["inRange", "equals", "before", "after"];
+
+const buildStringCondition = (field, value, op = "contains") => {
+    const val = String(value || "").trim();
+    if (!val) return null;
+    const safeOp = VALID_STRING_OPS.includes(op) ? op : "contains";
+    let pattern;
+    switch (safeOp) {
+        case "contains":
+            pattern = `%${val}%`;
+            return { [field]: { [Op.iLike]: pattern } };
+        case "notContains":
+            pattern = `%${val}%`;
+            return { [field]: { [Op.notILike]: pattern } };
+        case "equals":
+            return { [field]: { [Op.iLike]: val } };
+        case "notEquals":
+            return { [field]: { [Op.notILike]: val } };
+        case "startsWith":
+            pattern = `${val}%`;
+            return { [field]: { [Op.iLike]: pattern } };
+        case "endsWith":
+            pattern = `%${val}`;
+            return { [field]: { [Op.iLike]: pattern } };
+        default:
+            return { [field]: { [Op.iLike]: `%${val}%` } };
+    }
+};
 
 /**
  * Generate challan number: CH-MMYY####
@@ -81,15 +122,20 @@ const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
 
     const qtyNum = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
     const updatedSnapshot = order.bom_snapshot.map((line) => {
-        const quantity = qtyNum(line.quantity);
+        const baseQty =
+            line.planned_qty != null && !Number.isNaN(Number(line.planned_qty))
+                ? qtyNum(line.planned_qty)
+                : qtyNum(line.quantity);
         const shipped_qty = shippedByProduct[line.product_id] || 0;
         const returned_qty = qtyNum(line.returned_qty);
-        const pending_qty = quantity - shipped_qty + returned_qty;
+        const pending_qty = baseQty - shipped_qty + returned_qty;
         return {
             ...line,
             shipped_qty,
             returned_qty,
             pending_qty,
+            planned_qty: baseQty,
+            delivered_qty: shipped_qty,
         };
     });
 
@@ -97,9 +143,76 @@ const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
 };
 
 /**
+ * Recompute and persist order.delivery_status ('pending' | 'partial' | 'complete')
+ * based on BOM shipped and pending quantities.
+ */
+const recomputeOrderDeliveryStatus = async (orderId, transaction = null) => {
+    if (!orderId) return;
+    const order = await Order.findOne({
+        where: { id: orderId, deleted_at: null },
+        attributes: ["id", "bom_snapshot", "delivery_status"],
+        transaction,
+    });
+    if (!order || !Array.isArray(order.bom_snapshot) || order.bom_snapshot.length === 0) return;
+
+    const bom = order.bom_snapshot;
+
+    let anyShipped = false;
+    let anyPending = false;
+    let totalRequired = 0;
+
+    bom.forEach((line) => {
+        const qtyNum = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
+        const baseQty = qtyNum(line.quantity);
+        const required = line.planned_qty != null && !Number.isNaN(Number(line.planned_qty))
+            ? qtyNum(line.planned_qty)
+            : baseQty;
+        const shipped = qtyNum(line.shipped_qty);
+        const pending = line.pending_qty != null && !Number.isNaN(Number(line.pending_qty))
+            ? Number(line.pending_qty)
+            : Math.max(0, required - shipped + qtyNum(line.returned_qty));
+
+        totalRequired += required;
+        if (shipped > 0) anyShipped = true;
+        if (pending > 0) anyPending = true;
+    });
+
+    let deliveryStatus = order.delivery_status || "pending";
+    if (!anyShipped || totalRequired === 0) {
+        deliveryStatus = "pending";
+    } else if (anyPending) {
+        deliveryStatus = "partial";
+    } else {
+        deliveryStatus = "complete";
+    }
+
+    await order.update({ delivery_status: deliveryStatus }, { transaction });
+};
+
+/**
  * List challans with pagination and filtering
  */
-const listChallans = async ({ order_id, page = 1, limit = 20, search = null } = {}) => {
+const listChallans = async ({
+    order_id,
+    page = 1,
+    limit = 20,
+    search = null,
+    scope = "all",
+    user_id = null,
+    sortBy = "created_at",
+    sortOrder = "DESC",
+    challan_no: challanNo = null,
+    challan_no_op: challanNoOp = null,
+    challan_date_from: challanDateFrom = null,
+    challan_date_to: challanDateTo = null,
+    challan_date_op: challanDateOp = null,
+    order_number: orderNumber = null,
+    warehouse_name: warehouseName = null,
+    transporter = null,
+    created_at_from: createdAtFrom = null,
+    created_at_to: createdAtTo = null,
+    created_at_op: createdAtOp = null,
+} = {}) => {
     const offset = (page - 1) * limit;
     const where = { deleted_at: null };
 
@@ -109,26 +222,130 @@ const listChallans = async ({ order_id, page = 1, limit = 20, search = null } = 
 
     if (search) {
         where[Op.or] = [
-            { challan_no: { [Op.like]: `%${search}%` } },
-            { transporter: { [Op.like]: `%${search}%` } },
+            { challan_no: { [Op.iLike]: `%${search}%` } },
+            { transporter: { [Op.iLike]: `%${search}%` } },
         ];
     }
+
+    // Exact challan_no filter with operators
+    if (challanNo) {
+        where[Op.and] = where[Op.and] || [];
+        const cond = buildStringCondition("challan_no", challanNo, challanNoOp || "contains");
+        if (cond) where[Op.and].push(cond);
+    }
+
+    // challan_date filters
+    const challanDateOpSafe = VALID_DATE_OPS.includes(challanDateOp) ? challanDateOp : "inRange";
+    if (challanDateFrom || challanDateTo) {
+        where[Op.and] = where[Op.and] || [];
+        const dateCond = {};
+        if (["equals", "before", "after"].includes(challanDateOpSafe)) {
+            if (challanDateFrom) {
+                const d = new Date(challanDateFrom);
+                if (challanDateOpSafe === "equals") dateCond[Op.eq] = d;
+                else if (challanDateOpSafe === "before") dateCond[Op.lt] = d;
+                else if (challanDateOpSafe === "after") dateCond[Op.gt] = d;
+            }
+        } else {
+            if (challanDateFrom) dateCond[Op.gte] = new Date(challanDateFrom);
+            if (challanDateTo) dateCond[Op.lte] = new Date(challanDateTo);
+        }
+        if (Reflect.ownKeys(dateCond).length) {
+            where[Op.and].push({ challan_date: dateCond });
+        }
+    }
+
+    // Transporter filter (simple contains)
+    if (transporter) {
+        where[Op.and] = where[Op.and] || [];
+        const cond = buildStringCondition("transporter", transporter, "contains");
+        if (cond) where[Op.and].push(cond);
+    }
+
+    // Created_at filters
+    const createdAtOpSafe = VALID_DATE_OPS.includes(createdAtOp) ? createdAtOp : "inRange";
+    if (createdAtFrom || createdAtTo) {
+        where[Op.and] = where[Op.and] || [];
+        const createdCond = {};
+        if (["equals", "before", "after"].includes(createdAtOpSafe)) {
+            if (createdAtFrom) {
+                const d = new Date(createdAtFrom);
+                if (createdAtOpSafe === "equals") createdCond[Op.eq] = d;
+                else if (createdAtOpSafe === "before") createdCond[Op.lt] = d;
+                else if (createdAtOpSafe === "after") createdCond[Op.gt] = d;
+            }
+        } else {
+            if (createdAtFrom) createdCond[Op.gte] = new Date(createdAtFrom);
+            if (createdAtTo) createdCond[Op.lte] = new Date(createdAtTo);
+        }
+        if (Reflect.ownKeys(createdCond).length) {
+            where[Op.and].push({ created_at: createdCond });
+        }
+    }
+
+    // Scope=my or my_warehouse: restrict to warehouses managed by the current user
+    if ((scope === "my" || scope === "my_warehouse") && user_id) {
+        const managedWarehouses = await CompanyWarehouse.findAll({
+            include: [
+                {
+                    model: User,
+                    as: "managers",
+                    attributes: [],
+                    required: true,
+                    where: { id: user_id },
+                },
+            ],
+            attributes: ["id"],
+        });
+
+        const warehouseIds = managedWarehouses.map((w) => w.id);
+        if (warehouseIds.length === 0) {
+            return {
+                data: [],
+                meta: {
+                    total: 0,
+                    page,
+                    limit,
+                    pages: 0,
+                },
+            };
+        }
+
+        where.warehouse_id = { [Op.in]: warehouseIds };
+    }
+
+    // Related model filters
+    const orderWhere = orderNumber
+        ? buildStringCondition("order_number", orderNumber, "contains")
+        : null;
+    const warehouseWhere = warehouseName
+        ? buildStringCondition("name", warehouseName, "contains")
+        : null;
+
+    const sortField = ["challan_no", "challan_date", "created_at"].includes(sortBy)
+        ? sortBy
+        : "created_at";
+    const sortDir = String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
 
     const { count, rows } = await Challan.findAndCountAll({
         where,
         limit,
         offset,
-        order: [["created_at", "DESC"]],
+        order: [[sortField, sortDir]],
         include: [
             {
                 model: Order,
                 as: "order",
                 attributes: ["id", "order_number"],
+                required: !!orderWhere,
+                ...(orderWhere && { where: orderWhere }),
             },
             {
                 model: CompanyWarehouse,
                 as: "warehouse",
                 attributes: ["id", "name"],
+                required: !!warehouseWhere,
+                ...(warehouseWhere && { where: warehouseWhere }),
             },
             {
                 model: ChallanItems,
@@ -136,15 +353,31 @@ const listChallans = async ({ order_id, page = 1, limit = 20, search = null } = 
                 attributes: ["id"],
             },
         ],
+        distinct: true,
+    });
+
+    const data = (rows || []).map((c) => {
+        const row = c.toJSON();
+        return {
+            id: row.id,
+            challan_no: row.challan_no,
+            challan_date: row.challan_date,
+            transporter: row.transporter,
+            order: row.order ? { id: row.order.id, order_number: row.order.order_number } : null,
+            warehouse: row.warehouse ? { id: row.warehouse.id, name: row.warehouse.name } : null,
+            items: row.items || [],
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        };
     });
 
     return {
-        data: rows,
-        pagination: {
-            total: count,
+        data,
+        meta: {
             page,
             limit,
-            totalPages: Math.ceil(count / limit),
+            total: count,
+            pages: limit > 0 ? Math.ceil(count / limit) : 0,
         },
     };
 };
@@ -192,7 +425,7 @@ const getChallanById = async ({ id } = {}) => {
 /**
  * Create challan with items
  */
-const createChallan = async ({ payload, transaction } = {}) => {
+const createChallan = async ({ payload, user_id, transaction } = {}) => {
     const { items, ...challanData } = payload;
 
     // Validate minimum one item
@@ -203,10 +436,14 @@ const createChallan = async ({ payload, transaction } = {}) => {
     }
 
     // Validate quantities against order BOM or (fallback) quotation legacy
+    // Also enforce warehouse manager authorization and planned warehouse constraint.
+    let order = null;
+    let plannedWarehouseId = null;
+    let isFirstChallan = false;
     if (challanData.order_id) {
-        const order = await Order.findOne({
+        order = await Order.findOne({
             where: { id: challanData.order_id, deleted_at: null },
-            attributes: ["id", "bom_snapshot"],
+            attributes: ["id", "bom_snapshot", "stages", "current_stage_key", "planned_warehouse_id"],
             include: [
                 {
                     model: db.Quotation,
@@ -226,6 +463,7 @@ const createChallan = async ({ payload, transaction } = {}) => {
                     ],
                 },
             ],
+            transaction,
         });
 
         if (!order) {
@@ -234,11 +472,61 @@ const createChallan = async ({ payload, transaction } = {}) => {
             throw error;
         }
 
+        // Enforce that delivery challans are created only in Delivery stage
+        if (!(order.current_stage_key === "delivery" && order.stages?.delivery === "pending")) {
+            const error = new Error("Order is not in Delivery stage or delivery is already completed");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        plannedWarehouseId = order.planned_warehouse_id;
+        if (!plannedWarehouseId) {
+            const error = new Error("Planned warehouse is not set for this order");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        // Enforce that the current user is a manager of the planned warehouse
+        if (!user_id) {
+            const error = new Error("User context is required to create challan");
+            error.statusCode = 403;
+            throw error;
+        }
+
+        const warehouseWithManager = await CompanyWarehouse.findOne({
+            where: { id: plannedWarehouseId, deleted_at: null },
+            include: [
+                {
+                    model: User,
+                    as: "managers",
+                    attributes: ["id"],
+                    where: { id: user_id },
+                    required: true,
+                },
+            ],
+            transaction,
+        });
+
+        if (!warehouseWithManager) {
+            const error = new Error("You are not a manager of the planned warehouse for this order");
+            error.statusCode = 403;
+            throw error;
+        }
+
+        // Force challan warehouse to be the planned warehouse
+        if (challanData.warehouse_id && Number(challanData.warehouse_id) !== Number(plannedWarehouseId)) {
+            const error = new Error("Challan warehouse must match the order's planned warehouse");
+            error.statusCode = 400;
+            throw error;
+        }
+        challanData.warehouse_id = plannedWarehouseId;
+
         const previousChallans = await Challan.findAll({
             where: { order_id: challanData.order_id, deleted_at: null },
             include: [
                 { model: ChallanItems, as: "items", attributes: ["product_id", "quantity"] },
             ],
+            transaction,
         });
 
         const previousQuantities = {};
@@ -251,14 +539,22 @@ const createChallan = async ({ payload, transaction } = {}) => {
 
         const useBomSnapshot = Array.isArray(order.bom_snapshot) && order.bom_snapshot.length > 0;
 
+        // Track whether this is the first challan for this order (for stage transition)
+        isFirstChallan = previousChallans.length === 0;
+
         if (useBomSnapshot) {
             const bomByProductId = {};
+            const qtyNum = (n) => (n != null && !Number.isNaN(Number(n)) ? Number(n) : 0);
             order.bom_snapshot.forEach((line) => {
-                bomByProductId[line.product_id] = { quantity: parseFloat(line.quantity) || 0, line };
+                const quantity = qtyNum(line.quantity);
+                const planned = line.planned_qty != null && !Number.isNaN(Number(line.planned_qty))
+                    ? qtyNum(line.planned_qty)
+                    : quantity;
+                bomByProductId[line.product_id] = { maxQty: planned, line };
             });
             for (const item of items) {
-                const ordered = bomByProductId[item.product_id];
-                if (!ordered) {
+                const bomEntry = bomByProductId[item.product_id];
+                if (!bomEntry) {
                     const error = new Error(`Product id ${item.product_id} is not in order BOM`);
                     error.statusCode = 400;
                     throw error;
@@ -266,9 +562,10 @@ const createChallan = async ({ payload, transaction } = {}) => {
                 const previousQty = previousQuantities[item.product_id] || 0;
                 const currentQty = parseFloat(item.quantity) || 0;
                 const totalQty = previousQty + currentQty;
-                if (totalQty > ordered.quantity) {
+                const maxQty = bomEntry.maxQty;
+                if (totalQty > maxQty) {
                     const error = new Error(
-                        `Total quantity for product id ${item.product_id} (${totalQty}) exceeds order BOM quantity (${ordered.quantity}). Previous challan: ${previousQty}, Current: ${currentQty}`
+                        `Total quantity for product id ${item.product_id} (${totalQty}) exceeds planned quantity (${maxQty}). Previous challan: ${previousQty}, Current: ${currentQty}`
                     );
                     error.statusCode = 400;
                     throw error;
@@ -290,6 +587,7 @@ const createChallan = async ({ payload, transaction } = {}) => {
             const products = await Product.findAll({
                 where: { id: productIds, deleted_at: null },
                 include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
+                transaction,
             });
             const productMap = {};
             products.forEach((p) => { productMap[p.id] = p; });
@@ -332,27 +630,182 @@ const createChallan = async ({ payload, transaction } = {}) => {
 
     await ChallanItems.bulkCreate(itemsToCreate, { transaction });
 
-    // Auto-complete delivery stage if pending
+    // Inventory operations (OUT) for each item
+    if (challanData.order_id && plannedWarehouseId && Array.isArray(items) && items.length > 0) {
+        const productIds = [...new Set(items.map((i) => i.product_id))];
+        const products = await Product.findAll({
+            where: { id: productIds, deleted_at: null },
+            transaction,
+        });
+        const productMap = {};
+        products.forEach((p) => { productMap[p.id] = p; });
+
+        for (const item of items) {
+            const qty = Number(item.quantity);
+            if (!Number.isFinite(qty) || qty <= 0) {
+                const error = new Error(`Invalid quantity for product id ${item.product_id}`);
+                error.statusCode = 400;
+                throw error;
+            }
+            // Stocks are integer-based; enforce whole quantities
+            if (!Number.isInteger(qty)) {
+                const error = new Error(`Quantity for product id ${item.product_id} must be a whole number`);
+                error.statusCode = 400;
+                throw error;
+            }
+
+            const product = productMap[item.product_id];
+            if (!product) {
+                const error = new Error(`Product not found for id ${item.product_id}`);
+                error.statusCode = 404;
+                throw error;
+            }
+
+            const stock = await stockService.getOrCreateStock({
+                product_id: item.product_id,
+                warehouse_id: plannedWarehouseId,
+                product,
+                transaction,
+            });
+
+            if (stock.quantity_available < qty) {
+                const error = new Error(
+                    `Insufficient stock for product id ${item.product_id}. Available: ${stock.quantity_available}, Required: ${qty}`
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            const isSerialized = !!stock.serial_required || !!product.serial_required;
+            const serialsRaw = item.serials || "";
+            const serialList = serialsRaw
+                .split(",")
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+
+            if (isSerialized) {
+                if (serialList.length !== qty) {
+                    const error = new Error(
+                        `Serial count (${serialList.length}) must match quantity (${qty}) for product id ${item.product_id}`
+                    );
+                    error.statusCode = 400;
+                    throw error;
+                }
+
+                for (const serial of serialList) {
+                    const stockSerial = await StockSerial.findOne({
+                        where: {
+                            serial_number: serial,
+                            product_id: item.product_id,
+                            warehouse_id: plannedWarehouseId,
+                        },
+                        transaction,
+                    });
+
+                    if (stockSerial && stockSerial.status !== SERIAL_STATUS.AVAILABLE) {
+                        const error = new Error(
+                            `Serial ${serial} for product id ${item.product_id} is not available`
+                        );
+                        error.statusCode = 400;
+                        throw error;
+                    }
+
+                    if (stockSerial) {
+                        await stockSerial.update(
+                            {
+                                status: SERIAL_STATUS.ISSUED,
+                                outward_date: new Date(),
+                                source_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
+                                source_id: challan.id,
+                            },
+                            { transaction }
+                        );
+                    }
+
+                    await inventoryLedgerService.createLedgerEntry({
+                        product_id: item.product_id,
+                        warehouse_id: plannedWarehouseId,
+                        stock_id: stock.id,
+                        transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
+                        transaction_id: challan.id,
+                        movement_type: MOVEMENT_TYPE.OUT,
+                        quantity: 1,
+                        serial_id: stockSerial ? stockSerial.id : null,
+                        rate: null,
+                        gst_percent: null,
+                        amount: null,
+                        reason: `Delivery challan ${challan.challan_no}`,
+                        performed_by: user_id,
+                        transaction,
+                    });
+                }
+            } else {
+                await inventoryLedgerService.createLedgerEntry({
+                    product_id: item.product_id,
+                    warehouse_id: plannedWarehouseId,
+                    stock_id: stock.id,
+                    transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
+                    transaction_id: challan.id,
+                    movement_type: MOVEMENT_TYPE.OUT,
+                    quantity: qty,
+                    rate: null,
+                    gst_percent: null,
+                    amount: null,
+                    reason: `Delivery challan ${challan.challan_no}`,
+                    performed_by: user_id,
+                    transaction,
+                });
+            }
+
+            await stockService.updateStockQuantities({
+                stock,
+                quantity: qty,
+                last_updated_by: user_id,
+                isInward: false,
+                transaction,
+            });
+        }
+    }
+
+    // Update order BOM shipped quantities and recompute delivery status.
     if (challanData.order_id) {
-        const order = await Order.findOne({
+        await updateOrderBomShippedQuantities(challanData.order_id, transaction);
+
+        const freshOrder = await Order.findOne({
             where: { id: challanData.order_id, deleted_at: null },
+            attributes: ["id", "bom_snapshot", "stages", "current_stage_key", "delivery_status"],
+            transaction,
         });
 
-        if (order && order.stages && order.stages.delivery === "pending") {
-            // Mark delivery as complete and unlock fabrication
+        // On first challan only, move order to next stage (Delivery -> Fabrication)
+        if (
+            isFirstChallan &&
+            freshOrder &&
+            freshOrder.current_stage_key === "delivery" &&
+            freshOrder.stages &&
+            freshOrder.stages.delivery === "pending"
+        ) {
             const updatedStages = {
-                ...order.stages,
+                ...freshOrder.stages,
                 delivery: "completed",
-                fabrication: "pending",
+                assign_fabricator_and_installer:
+                    freshOrder.stages.assign_fabricator_and_installer === "locked" ||
+                    typeof freshOrder.stages.assign_fabricator_and_installer === "undefined"
+                        ? "pending"
+                        : freshOrder.stages.assign_fabricator_and_installer,
             };
 
-            await order.update({
-                stages: updatedStages,
-                current_stage_key: "fabrication"
-            }, { transaction });
+            await freshOrder.update(
+                {
+                    stages: updatedStages,
+                    current_stage_key: "assign_fabricator_and_installer",
+                },
+                { transaction }
+            );
         }
 
-        await updateOrderBomShippedQuantities(challanData.order_id, transaction);
+        // Always recompute delivery_status from BOM snapshot
+        await recomputeOrderDeliveryStatus(challanData.order_id, transaction);
     }
 
     // Fetch created challan with items
@@ -404,9 +857,16 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
 /**
  * Delete challan (soft delete)
  */
-const deleteChallan = async ({ id, transaction } = {}) => {
+const deleteChallan = async ({ id, user_id, transaction } = {}) => {
     const challan = await Challan.findOne({
         where: { id, deleted_at: null },
+        include: [
+            {
+                model: ChallanItems,
+                as: "items",
+            },
+        ],
+        transaction,
     });
 
     if (!challan) {
@@ -414,10 +874,133 @@ const deleteChallan = async ({ id, transaction } = {}) => {
     }
 
     const orderId = challan.order_id;
+    const warehouseId = challan.warehouse_id;
+
+    // Reverse inventory: bring stock back in and, for known serials, mark them AVAILABLE again.
+    if (warehouseId && Array.isArray(challan.items) && challan.items.length > 0) {
+        const productIds = [...new Set(challan.items.map((i) => i.product_id))];
+        const products = await Product.findAll({
+            where: { id: productIds, deleted_at: null },
+            transaction,
+        });
+        const productMap = {};
+        products.forEach((p) => { productMap[p.id] = p; });
+
+        for (const item of challan.items) {
+            const qty = Number(item.quantity);
+            if (!Number.isFinite(qty) || qty <= 0) {
+                continue;
+            }
+
+            const product = productMap[item.product_id];
+            if (!product) continue;
+
+            const stock = await stockService.getOrCreateStock({
+                product_id: item.product_id,
+                warehouse_id: warehouseId,
+                product,
+                transaction,
+            });
+
+            const isSerialized = !!stock.serial_required || !!product.serial_required;
+            const serialsRaw = item.serials || "";
+            const serialList = serialsRaw
+                .split(",")
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+
+            if (isSerialized && serialList.length > 0) {
+                for (const serial of serialList) {
+                    const stockSerial = await StockSerial.findOne({
+                        where: {
+                            serial_number: serial,
+                            product_id: item.product_id,
+                        },
+                        transaction,
+                    });
+
+                    if (stockSerial) {
+                        await stockSerial.update(
+                            {
+                                status: SERIAL_STATUS.AVAILABLE,
+                                warehouse_id: warehouseId,
+                                stock_id: stock.id,
+                                // keep outward_date as history
+                                source_type: stockSerial.source_type || TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
+                            },
+                            { transaction }
+                        );
+
+                        await inventoryLedgerService.createLedgerEntry({
+                            product_id: item.product_id,
+                            warehouse_id: warehouseId,
+                            stock_id: stock.id,
+                            transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
+                            transaction_id: challan.id,
+                            movement_type: MOVEMENT_TYPE.IN,
+                            quantity: 1,
+                            serial_id: stockSerial.id,
+                            rate: null,
+                            gst_percent: null,
+                            amount: null,
+                            reason: `Reversal for delivery challan ${challan.challan_no}`,
+                            performed_by: user_id,
+                            transaction,
+                        });
+                    } else {
+                        // Serial not found in inventory; just reverse quantity at stock level.
+                        await inventoryLedgerService.createLedgerEntry({
+                            product_id: item.product_id,
+                            warehouse_id: warehouseId,
+                            stock_id: stock.id,
+                            transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
+                            transaction_id: challan.id,
+                            movement_type: MOVEMENT_TYPE.IN,
+                            quantity: 1,
+                            serial_id: null,
+                            rate: null,
+                            gst_percent: null,
+                            amount: null,
+                            reason: `Reversal for delivery challan ${challan.challan_no}`,
+                            performed_by: user_id,
+                            transaction,
+                        });
+                    }
+                }
+            } else {
+                await inventoryLedgerService.createLedgerEntry({
+                    product_id: item.product_id,
+                    warehouse_id: warehouseId,
+                    stock_id: stock.id,
+                    transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
+                    transaction_id: challan.id,
+                    movement_type: MOVEMENT_TYPE.IN,
+                    quantity: qty,
+                    serial_id: null,
+                    rate: null,
+                    gst_percent: null,
+                    amount: null,
+                    reason: `Reversal for delivery challan ${challan.challan_no}`,
+                    performed_by: user_id,
+                    transaction,
+                });
+            }
+
+            await stockService.updateStockQuantities({
+                stock,
+                quantity: qty,
+                last_updated_by: user_id,
+                isInward: true,
+                transaction,
+            });
+        }
+    }
+
     await challan.destroy({ transaction });
 
     if (orderId) {
         await updateOrderBomShippedQuantities(orderId, transaction);
+        await recomputeOrderDeliveryStatus(orderId, transaction);
     }
 
     return { message: "Challan deleted successfully" };
@@ -555,10 +1138,17 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
     });
 
     const deliveredByProductId = {};
+    const deliveredByType = {};
     challans.forEach((c) => {
         (c.items || []).forEach((it) => {
             const pid = it.product_id;
-            deliveredByProductId[pid] = (deliveredByProductId[pid] || 0) + parseFloat(it.quantity);
+            const qty = parseFloat(it.quantity);
+            deliveredByProductId[pid] = (deliveredByProductId[pid] || 0) + qty;
+
+            if (it.product && it.product.productType) {
+                const typeName = it.product.productType.name.toLowerCase().replace(/\s+/g, "_");
+                deliveredByType[typeName] = (deliveredByType[typeName] || 0) + qty;
+            }
         });
     });
 
@@ -566,20 +1156,44 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
 
     if (useBomSnapshot) {
         const status = {};
+        const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, "_");
         order.bom_snapshot.forEach((line) => {
-            const pid = line.product_id;
-            const required = parseFloat(line.quantity) || 0;
-            const delivered = deliveredByProductId[pid] || 0;
-            const pending = (line.pending_qty != null && !Number.isNaN(Number(line.pending_qty)))
+            const product = getBomLineProduct(line);
+            const typeKey = norm(product?.product_type_name || "item");
+            const baseQty = parseFloat(line.quantity) || 0;
+            const required = line.planned_qty != null && !Number.isNaN(Number(line.planned_qty))
+                ? Number(line.planned_qty)
+                : baseQty;
+            const deliveredForProduct = deliveredByProductId[line.product_id] || 0;
+            const pendingForProduct = (line.pending_qty != null && !Number.isNaN(Number(line.pending_qty)))
                 ? Number(line.pending_qty)
-                : Math.max(0, required - delivered);
-            status[pid] = {
-                required,
-                delivered,
-                pending,
-                status: delivered >= required ? "complete" : delivered > 0 ? "partial" : "pending",
-            };
+                : Math.max(0, required - deliveredForProduct);
+
+            if (!status[typeKey]) {
+                status[typeKey] = {
+                    required: 0,
+                    delivered: 0,
+                    pending: 0,
+                    status: "pending",
+                };
+            }
+
+            status[typeKey].required += required;
+            status[typeKey].delivered += deliveredForProduct;
+            status[typeKey].pending += pendingForProduct;
         });
+
+        Object.keys(status).forEach((key) => {
+            const entry = status[key];
+            if (entry.delivered >= entry.required && entry.required > 0) {
+                entry.status = "complete";
+            } else if (entry.delivered > 0) {
+                entry.status = "partial";
+            } else {
+                entry.status = "pending";
+            }
+        });
+
         return { status };
     }
 

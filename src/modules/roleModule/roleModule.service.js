@@ -98,7 +98,7 @@ const updateRoleModule = async (id, updates, transaction = null) => {
     if (exists) throw new AppError('Role-Module link already exists', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
-  await item.update({ ...updates, updated_at: new Date() }, { transaction });
+  await item.update({ ...updates }, { transaction });
   return item.toJSON();
 };
 
