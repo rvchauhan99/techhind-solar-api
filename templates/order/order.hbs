@@ -9,10 +9,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div>
+            <div class="header-company">
+                {{#if company.logo_data_url}}
+                <img class="company-logo" src="{{company.logo_data_url}}" alt="Company Logo" />
+                {{/if}}
+                <div>
                 <h1>{{safe company.name}}</h1>
                 <p>{{safe company.email}} {{#if company.phone}}| {{safe company.phone}}{{/if}}</p>
                 <p>{{safe company.website}}</p>
+                </div>
             </div>
             <div class="meta">
                 <p><strong>Order:</strong> {{safe order.order_number}}</p>
