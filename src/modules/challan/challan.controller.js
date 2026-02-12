@@ -2,7 +2,10 @@
 
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
+const bucketService = require("../../common/services/bucket.service.js");
+const db = require("../../models/index.js");
 const challanService = require("./challan.service.js");
+const challanPdfService = require("./pdf.service.js");
 
 const list = asyncHandler(async (req, res) => {
     const {
@@ -58,6 +61,41 @@ const getById = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Challan not found", 404);
     }
     return responseHandler.sendSuccess(res, item, "Challan fetched", 200);
+});
+
+const generatePDF = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const challan = await challanService.getChallanForPdf({ id });
+    if (!challan) {
+        return responseHandler.sendError(res, "Challan not found", 404);
+    }
+
+    const company = await db.Company.findOne({ where: { deleted_at: null } });
+    let bucketClient = null;
+    try {
+        bucketClient = bucketService.getBucketForRequest(req);
+    } catch (error) {
+        // Keep PDF generation resilient when bucket is not configured.
+        bucketClient = null;
+    }
+    const pdfData = await challanPdfService.prepareChallanPdfData(
+        challan.toJSON ? challan.toJSON() : challan,
+        company ? company.toJSON() : null,
+        {
+            generatedBy: req.user?.name || req.user?.email || "",
+            bucketClient,
+        }
+    );
+    const pdfBuffer = await challanPdfService.generateChallanPDF(pdfData);
+
+    const challanNumber = (challan.challan_no || id || "unknown").toString().replace(/[^a-zA-Z0-9-_]/g, "_");
+    const filename = `delivery-challan-${challanNumber}.pdf`;
+    res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdfBuffer.length,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+    });
+    return res.end(pdfBuffer);
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -140,6 +178,7 @@ const getDeliveryStatus = asyncHandler(async (req, res) => {
 module.exports = {
     list,
     getById,
+    generatePDF,
     create,
     update,
     remove,

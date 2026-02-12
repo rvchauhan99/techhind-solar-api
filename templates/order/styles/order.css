@@ -32,6 +32,18 @@ body {
     font-size: 12px;
 }
 
+.header-company {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.company-logo {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+}
+
 .meta {
     text-align: right;
 }

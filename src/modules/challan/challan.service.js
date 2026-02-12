@@ -10,6 +10,7 @@ const {
     CompanyWarehouse,
     Product,
     ProductType,
+    MeasurementUnit,
     Stock,
     StockSerial,
     User,
@@ -392,7 +393,7 @@ const getChallanById = async ({ id } = {}) => {
             {
                 model: Order,
                 as: "order",
-                attributes: ["id", "order_number"],
+                attributes: ["id", "order_number", "consumer_no", "capacity"],
             },
             {
                 model: CompanyWarehouse,
@@ -412,11 +413,79 @@ const getChallanById = async ({ id } = {}) => {
                                 as: "productType",
                                 attributes: ["id", "name"],
                             },
+                            {
+                                model: MeasurementUnit,
+                                as: "measurementUnit",
+                                attributes: ["id", "unit"],
+                            },
                         ],
                     },
                 ],
             },
         ],
+    });
+
+    return challan;
+};
+
+/**
+ * Get challan by ID with complete printable payload.
+ */
+const getChallanForPdf = async ({ id } = {}) => {
+    const challan = await Challan.findOne({
+        where: { id, deleted_at: null },
+        include: [
+            {
+                model: Order,
+                as: "order",
+                attributes: ["id", "order_number", "consumer_no", "capacity"],
+                include: [
+                    {
+                        model: db.Customer,
+                        as: "customer",
+                        attributes: [
+                            "id",
+                            "customer_name",
+                            "mobile_number",
+                            "phone_no",
+                            "address",
+                            "landmark_area",
+                            "taluka",
+                            "district",
+                        ],
+                    },
+                    {
+                        model: User,
+                        as: "handledBy",
+                        attributes: ["id", "name"],
+                    },
+                ],
+            },
+            {
+                model: CompanyWarehouse,
+                as: "warehouse",
+                attributes: ["id", "name", "contact_person", "mobile", "phone_no", "email", "address"],
+            },
+            {
+                model: ChallanItems,
+                as: "items",
+                include: [
+                    {
+                        model: Product,
+                        as: "product",
+                        attributes: ["id", "product_name", "product_description", "hsn_ssn_code"],
+                        include: [
+                            {
+                                model: MeasurementUnit,
+                                as: "measurementUnit",
+                                attributes: ["id", "unit"],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        order: [[{ model: ChallanItems, as: "items" }, "id", "ASC"]],
     });
 
     return challan;
@@ -1259,4 +1328,5 @@ module.exports = {
     getNextChallanNumber,
     getQuotationProductsByOrderId,
     getDeliveryStatus,
+    getChallanForPdf,
 };
