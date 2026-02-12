@@ -67,6 +67,36 @@ const OrderPaymentDetail = sequelize.define(
             type: DataTypes.TEXT,
             allowNull: true,
         },
+        status: {
+            type: DataTypes.ENUM("pending_approval", "approved", "rejected"),
+            allowNull: false,
+            defaultValue: "pending_approval",
+        },
+        approved_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        approved_by: {
+            type: DataTypes.BIGINT,
+            allowNull: true,
+        },
+        rejected_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        rejected_by: {
+            type: DataTypes.BIGINT,
+            allowNull: true,
+        },
+        rejection_reason: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+        receipt_number: {
+            type: DataTypes.STRING(50),
+            allowNull: true,
+            unique: true,
+        },
         created_at: {
             type: DataTypes.DATE,
             defaultValue: DataTypes.NOW,

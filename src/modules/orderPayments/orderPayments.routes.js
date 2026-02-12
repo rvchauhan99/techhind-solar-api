@@ -10,6 +10,13 @@ router.get("/", ...requireAuthWithTenant, controller.listPayments);
 // Get receipt signed URL (before /:id)
 router.get("/:id/receipt-url", ...requireAuthWithTenant, controller.getReceiptUrl);
 
+// Approve / Reject payment
+router.post("/:id/approve", ...requireAuthWithTenant, controller.approvePayment);
+router.post("/:id/reject", ...requireAuthWithTenant, controller.rejectPayment);
+
+// Printable receipt PDF
+router.get("/:id/receipt-pdf", ...requireAuthWithTenant, controller.generateReceiptPdf);
+
 // Create payment with file upload
 router.post("/", ...requireAuthWithTenant, uploadMemory.single("receipt_cheque_file"), controller.createPayment);
 
