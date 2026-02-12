@@ -4,8 +4,34 @@ const bcrypt = require('bcrypt');
 const db = require('../../models/index.js');
 const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES, USER_STATUS } = require('../../common/utils/constants.js');
+const { clearTeamHierarchyCache } = require('../../common/utils/teamHierarchyCache.js');
 
 const User = db.User;
+
+const normalizeManagerId = (value) => {
+  if (value === "" || value === null || typeof value === "undefined") return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new AppError('Invalid manager selected', RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+  return parsed;
+};
+
+const validateManager = async (managerId, transaction = null) => {
+  if (!managerId) return null;
+  const manager = await User.findOne({
+    where: {
+      id: managerId,
+      deleted_at: null,
+      status: USER_STATUS.ACTIVE,
+    },
+    transaction,
+  });
+  if (!manager) {
+    throw new AppError('Selected manager not found or inactive', RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+  return manager;
+};
 
 const createUser = async (payload, transaction = null) => {
   // check duplicate email excluding soft-deleted
@@ -16,6 +42,9 @@ const createUser = async (payload, transaction = null) => {
   const defaultPassword = 'Admin@123';
   const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
+  const managerId = normalizeManagerId(payload.manager_id);
+  await validateManager(managerId, transaction);
+
   const createPayload = {
     name: payload.name,
     email: payload.email,
@@ -23,6 +52,7 @@ const createUser = async (payload, transaction = null) => {
 
     photo: payload.photo || null,
     role_id: payload.role_id || null,
+    manager_id: managerId,
     address: payload.address || null,
     brith_date: payload.brith_date || null,
     blood_group: payload.blood_group || null,
@@ -33,6 +63,7 @@ const createUser = async (payload, transaction = null) => {
   };
 
   const created = await User.create(createPayload, { transaction });
+  clearTeamHierarchyCache();
   // do not expose password
   const obj = created.toJSON();
   delete obj.password;
@@ -41,7 +72,14 @@ const createUser = async (payload, transaction = null) => {
 
 const getUserById = async (id, transaction = null) => {
   // include role lookup so callers receive role details alongside user
-  const user = await User.findOne({ where: { id, deleted_at: null }, transaction, include: [{ model: db.Role, as: 'role', attributes: ['id', 'name'] }] });
+  const user = await User.findOne({
+    where: { id, deleted_at: null },
+    transaction,
+    include: [
+      { model: db.Role, as: 'role', attributes: ['id', 'name'] },
+      { model: db.User, as: 'manager', attributes: ['id', 'name', 'email'] },
+    ],
+  });
   if (!user) throw new AppError('User not found', RESPONSE_STATUS_CODES.NOT_FOUND);
   const obj = user.toJSON();
   delete obj.password;
@@ -120,7 +158,21 @@ const listUsers = async ({
     ...(roleName && { where: { name: { [Op.iLike]: `%${roleName}%` } } }),
   };
 
-  const { count, rows } = await User.findAndCountAll({ where, offset, limit, order: [[sortBy, sortOrder]], include: [roleInclude], distinct: true });
+  const managerInclude = {
+    model: db.User,
+    as: 'manager',
+    attributes: ['id', 'name', 'email'],
+    required: false,
+  };
+
+  const { count, rows } = await User.findAndCountAll({
+    where,
+    offset,
+    limit,
+    order: [[sortBy, sortOrder]],
+    include: [roleInclude, managerInclude],
+    distinct: true,
+  });
 
   const data = rows.map((r) => {
     const o = r.toJSON();
@@ -145,12 +197,23 @@ const updateUser = async (id, updates, transaction = null) => {
   // Do not allow the UI to change first_login
   delete safeUpdates.first_login;
 
+  const managerId = Object.prototype.hasOwnProperty.call(safeUpdates, "manager_id")
+    ? normalizeManagerId(safeUpdates.manager_id)
+    : undefined;
+  if (typeof managerId !== "undefined") {
+    if (managerId === Number(id)) {
+      throw new AppError('A user cannot be their own manager', RESPONSE_STATUS_CODES.BAD_REQUEST);
+    }
+    await validateManager(managerId, transaction);
+  }
+
   // Only allow specific fields to be updated from UI; include new contact fields
   const allowed = {
     name: safeUpdates.name,
     email: safeUpdates.email,
     photo: safeUpdates.photo,
     role_id: safeUpdates.role_id,
+    manager_id: typeof managerId === "undefined" ? undefined : managerId,
     status: safeUpdates.status,
     address: safeUpdates.address,
     brith_date: safeUpdates.brith_date,
@@ -159,6 +222,9 @@ const updateUser = async (id, updates, transaction = null) => {
   };
 
   await user.update({ ...allowed }, { transaction });
+  if (typeof managerId !== "undefined") {
+    clearTeamHierarchyCache();
+  }
   const obj = user.toJSON();
   delete obj.password;
   return obj;
@@ -166,6 +232,7 @@ const updateUser = async (id, updates, transaction = null) => {
 
 const deleteUser = async (id, transaction = null) => {
   await User.destroy({ where: { id }, transaction });
+  clearTeamHierarchyCache();
   return true;
 };
 
@@ -202,6 +269,7 @@ const exportUsers = async (params = {}) => {
     { header: 'Name', key: 'name', width: 24 },
     { header: 'Email', key: 'email', width: 28 },
     { header: 'Role', key: 'role_name', width: 18 },
+    { header: 'Manager', key: 'manager_name', width: 24 },
     { header: 'Phone', key: 'mobile_number', width: 16 },
     { header: 'Status', key: 'status', width: 12 },
     { header: 'First Login', key: 'first_login', width: 12 },
@@ -214,6 +282,7 @@ const exportUsers = async (params = {}) => {
       name: u.name || '',
       email: u.email || '',
       role_name: u.role?.name || '',
+      manager_name: u.manager?.name || '',
       mobile_number: u.mobile_number || '',
       status: u.status || '',
       first_login: u.first_login ? 'Yes' : 'No',

@@ -196,6 +196,7 @@ const getUserProfile = asyncHandler(async (req, res) => {
     can_read: rm.can_read,
     can_update: rm.can_update,
     can_delete: rm.can_delete,
+    listing_criteria: rm.listing_criteria || "my_team",
   }));
 
   // ✅ Build a map of modules by ID
