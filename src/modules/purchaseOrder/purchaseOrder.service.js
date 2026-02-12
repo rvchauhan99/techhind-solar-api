@@ -384,7 +384,6 @@ const createPurchaseOrder = async ({ payload, transaction } = {}) => {
       amount_in_words: poData.amount_in_words || null,
       attachments: poData.attachments || null,
       status: PO_STATUS.DRAFT,
-      created_by: poData.created_by,
     };
 
     const created = await PurchaseOrder.create(purchaseOrderData, { transaction: t });
