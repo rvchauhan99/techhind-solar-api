@@ -10,6 +10,7 @@ const router = Router();
 router.get("/", ...requireAuthWithTenant, controller.list);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
 router.post("/", ...requireAuthWithTenant, uploadMemory.array("attachments", 10), controller.create);
+router.get("/:id/pdf", ...requireAuthWithTenant, controller.generatePDF);
 router.get("/:id", ...requireAuthWithTenant, controller.getById);
 router.put("/:id", ...requireAuthWithTenant, uploadMemory.array("attachments", 10), controller.update);
 router.delete("/:id", ...requireAuthWithTenant, controller.remove);

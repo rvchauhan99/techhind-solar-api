@@ -4,6 +4,7 @@ const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const AppError = require("../../common/errors/AppError.js");
 const purchaseOrderService = require("./purchaseOrder.service.js");
+const purchaseOrderPdfService = require("./pdf.service.js");
 const bucketService = require("../../common/services/bucket.service.js");
 
 const FILE_UPLOAD_UNAVAILABLE_MESSAGE =
@@ -72,12 +73,43 @@ const getById = asyncHandler(async (req, res) => {
   if (!item) {
     return responseHandler.sendError(res, "Purchase order not found", 404);
   }
-  
+
   // Note: Attachments are stored with path only (no direct URLs)
   // To access files, use the getAttachmentUrl endpoint which generates signed URLs (tokens)
   // This ensures private file access with time-limited tokens
-  
+
   return responseHandler.sendSuccess(res, item, "Purchase order fetched", 200);
+});
+
+const generatePDF = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const po = await purchaseOrderService.getPurchaseOrderById({ id });
+  if (!po) {
+    return responseHandler.sendError(res, "Purchase order not found", 404);
+  }
+
+  let bucketClient = null;
+  try {
+    bucketClient = bucketService.getBucketForRequest(req);
+  } catch (_) {
+    // PDF works without bucket (logo will fallback to company name)
+  }
+
+  const pdfData = await purchaseOrderPdfService.preparePurchaseOrderPdfData(po, { bucketClient });
+  const pdfBuffer = await purchaseOrderPdfService.generatePurchaseOrderPDF(pdfData);
+  const filename = `PO-${po.po_number || id}.pdf`;
+
+  if (req.tenant?.id) {
+    const usageService = require("../billing/usage.service.js");
+    usageService.incrementPdfGenerated(req.tenant.id).catch(() => {});
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "application/pdf",
+    "Content-Length": pdfBuffer.length,
+    "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+  });
+  return res.end(pdfBuffer);
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -347,6 +379,7 @@ module.exports = {
   list,
   exportList,
   getById,
+  generatePDF,
   create,
   update,
   approve,

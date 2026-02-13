@@ -180,7 +180,7 @@ const remove = asyncHandler(async (req, res) => {
     id,
     transaction: req.transaction,
   });
-  return responseHandler.sendSuccess(res, null, "Product deleted", 200);
+  return responseHandler.sendSuccess(res, null, "Product deactivated", 200);
 });
 
 module.exports = {
