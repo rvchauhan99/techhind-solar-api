@@ -580,12 +580,19 @@ const deleteQuotation = async ({ id, transaction } = {}) => {
 };
 
 const getProjectPrices = async ({ schemeId, transaction } = {}) => {
-    const { ProjectPrice } = db;
+    const { ProjectPrice, BillOfMaterial } = db;
     const projectPrices = await ProjectPrice.findAll({
         where: { project_for_id: schemeId },
+        include: [
+            { model: BillOfMaterial, as: "billOfMaterial", attributes: ["id", "bom_name"], required: false },
+        ],
+        transaction,
     });
-    return projectPrices
-
+    return projectPrices.map((row) => {
+        const json = row.toJSON ? row.toJSON() : row;
+        const projectName = row.billOfMaterial?.bom_name || `Project ${row.project_capacity} kW`;
+        return { ...json, name: projectName };
+    });
 };
 
 /**
@@ -818,7 +825,7 @@ const buildBomSnapshotFromQuotationProducts = async (payload, transaction) => {
 };
 
 const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
-    const { ProjectPrice, BillOfMaterial, Product, ProductType } = db;
+    const { ProjectPrice, BillOfMaterial, Product, ProductType, ProductMake } = db;
 
     const projectPrice = await ProjectPrice.findOne({
         where: { id, deleted_at: null },
@@ -835,7 +842,7 @@ const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
 
     const data = projectPrice.toJSON();
 
-    // 2) Lookup product details for each item in bom_detail
+    // 2) Lookup product details for each item in bom_detail (with product make name)
     if (data?.billOfMaterial?.bom_detail?.length) {
 
         const productIds = data.billOfMaterial.bom_detail.map(i => i.product_id);
@@ -847,13 +854,23 @@ const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
                     model: ProductType,
                     as: 'productType',
                     attributes: ['id', 'name']
+                },
+                {
+                    model: ProductMake,
+                    as: 'productMake',
+                    attributes: ['id', 'name'],
+                    required: false
                 }
             ],
             transaction
         });
 
         const productMap = {};
-        products.forEach(p => productMap[p.id] = p.toJSON());
+        products.forEach((p) => {
+            const json = p.toJSON();
+            json.product_make_name = p.productMake?.name ?? null;
+            productMap[p.id] = json;
+        });
 
         // 3) Merge product info into each bom_detail item
         data.billOfMaterial.bom_detail = data.billOfMaterial.bom_detail.map(item => ({
@@ -926,7 +943,7 @@ const getQuotationCountByInquiry = async ({ inquiry_id }) => {
 };
 
 const getAllProducts = async () => {
-    const { Product, ProductType } = db;
+    const { Product, ProductType, ProductMake } = db;
 
     const products = await Product.findAll({
         where: { deleted_at: null },
@@ -935,11 +952,27 @@ const getAllProducts = async () => {
                 model: ProductType,
                 as: 'productType',
                 attributes: ['id', 'name', 'display_order']
+            },
+            {
+                model: ProductMake,
+                as: 'productMake',
+                attributes: ['id', 'name'],
+                required: false
             }
         ]
     });
 
-    const list = products.map(p => p.toJSON());
+    const list = products.map((p) => {
+        const row = p.toJSON ? p.toJSON() : p;
+        const makeId = row.product_make_id;
+        const joinedMake = row.productMake;
+        const productMake = joinedMake
+            ? { id: joinedMake.id, name: joinedMake.name }
+            : makeId != null
+                ? { id: makeId, name: (p.productMake && (p.productMake.name ?? p.productMake.get?.('name'))) ?? null }
+                : null;
+        return { ...row, product_make_id: makeId, productMake };
+    });
     list.sort((a, b) => {
         const orderA = a.productType?.display_order != null ? Number(a.productType.display_order) : Number.MAX_SAFE_INTEGER;
         const orderB = b.productType?.display_order != null ? Number(b.productType.display_order) : Number.MAX_SAFE_INTEGER;
