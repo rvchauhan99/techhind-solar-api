@@ -383,13 +383,13 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
   const total = await Followup.count(countOptions);
 
   // Apply sorting
-  const sortByField = filters.sortBy || "created_at";
+  const sortByField = filters.sortBy || "id";
   const sortOrderDir = (filters.sortOrder || "DESC").toUpperCase();
-  let orderClause = [["created_at", "DESC"]];
+  let orderClause = [["id", "DESC"]];
   if (sortByField) {
     if (["date_of_inquiry", "status", "capacity", "estimated_cost"].includes(sortByField)) {
       orderClause = [[{ model: Inquiry, as: "inquiry" }, sortByField, sortOrderDir]];
-    } else if (["remarks", "next_reminder", "created_at", "inquiry_status"].includes(sortByField)) {
+    } else if (["remarks", "next_reminder", "created_at", "inquiry_status", "id"].includes(sortByField)) {
       orderClause = [[sortByField, sortOrderDir]];
     }
   }

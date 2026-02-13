@@ -27,7 +27,7 @@ const getSerializedInventoryReport = async ({
   start_date = null,
   end_date = null,
   product_type_id = null,
-  sortBy = "created_at",
+  sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
   const offset = (page - 1) * limit;

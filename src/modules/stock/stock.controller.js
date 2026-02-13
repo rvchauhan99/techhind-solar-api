@@ -10,6 +10,7 @@ const list = asyncHandler(async (req, res) => {
   if (params.limit) params.limit = parseInt(params.limit, 10) || 20;
   if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
   if (params.product_id) params.product_id = parseInt(params.product_id, 10);
+  if (params.product_type_id) params.product_type_id = parseInt(params.product_type_id, 10);
   const result = await stockService.listStocks(params);
   return responseHandler.sendSuccess(res, result, "Stock list fetched", 200);
 });
@@ -18,6 +19,7 @@ const exportList = asyncHandler(async (req, res) => {
   const params = { ...req.query };
   if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
   if (params.product_id) params.product_id = parseInt(params.product_id, 10);
+  if (params.product_type_id) params.product_type_id = parseInt(params.product_type_id, 10);
   const buffer = await stockService.exportStocks(params);
   const filename = `stocks-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -52,11 +54,22 @@ const getAvailableSerials = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, serials, "Available serials fetched", 200);
 });
 
+const validateSerial = asyncHandler(async (req, res) => {
+  const { serial_number, product_id, warehouse_id } = req.query;
+  const result = await stockService.validateSerialAvailable({
+    serial_number,
+    product_id: product_id != null ? parseInt(product_id, 10) : null,
+    warehouse_id: warehouse_id != null ? parseInt(warehouse_id, 10) : null,
+  });
+  return responseHandler.sendSuccess(res, result, result.valid ? "Serial is available" : result.message, 200);
+});
+
 module.exports = {
   list,
   exportList,
   getById,
   getByWarehouse,
   getAvailableSerials,
+  validateSerial,
 };
 

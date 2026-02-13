@@ -10,6 +10,7 @@ const list = asyncHandler(async (req, res) => {
     limit = 20,
     product_id = null,
     warehouse_id = null,
+    product_type_id = null,
     product_name = null,
     warehouse_name = null,
     transaction_type = null,
@@ -27,7 +28,7 @@ const list = asyncHandler(async (req, res) => {
     closing_quantity_to,
     serial_number = null,
     performed_by_name = null,
-    sortBy = "performed_at",
+    sortBy = "id",
     sortOrder = "DESC",
   } = req.query;
 
@@ -36,6 +37,7 @@ const list = asyncHandler(async (req, res) => {
     limit: parseInt(limit),
     product_id: product_id ? parseInt(product_id) : null,
     warehouse_id: warehouse_id ? parseInt(warehouse_id) : null,
+    product_type_id: product_type_id ? parseInt(product_type_id) : null,
     product_name,
     warehouse_name,
     transaction_type,
@@ -66,6 +68,7 @@ const exportList = asyncHandler(async (req, res) => {
     ...params,
     product_id: params.product_id ? parseInt(params.product_id) : null,
     warehouse_id: params.warehouse_id ? parseInt(params.warehouse_id) : null,
+    product_type_id: params.product_type_id ? parseInt(params.product_type_id) : null,
   });
   const filename = `inventory-ledger-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

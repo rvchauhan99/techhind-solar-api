@@ -9,7 +9,7 @@ const list = asyncHandler(async (req, res) => {
     page = 1,
     limit = 20,
     q = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     supplier_code: supplierCode = null,
     supplier_code_op: supplierCodeOp = null,
@@ -48,7 +48,7 @@ const list = asyncHandler(async (req, res) => {
 const exportList = asyncHandler(async (req, res) => {
   const {
     q = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     supplier_code: supplierCode = null,
     supplier_code_op: supplierCodeOp = null,

@@ -200,7 +200,7 @@ const listChallans = async ({
     search = null,
     scope = "all",
     user_id = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     challan_no: challanNo = null,
     challan_no_op: challanNoOp = null,
@@ -346,9 +346,9 @@ const listChallans = async ({
         ? buildStringCondition("name", warehouseName, "contains")
         : null;
 
-    const sortField = ["challan_no", "challan_date", "created_at"].includes(sortBy)
+    const sortField = ["challan_no", "challan_date", "created_at", "id"].includes(sortBy)
         ? sortBy
-        : "created_at";
+        : "id";
     const sortDir = String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
 
     const { count, rows } = await Challan.findAndCountAll({
@@ -792,10 +792,19 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                             product_id: item.product_id,
                             warehouse_id: plannedWarehouseId,
                         },
+                        lock: transaction.LOCK.UPDATE,
                         transaction,
                     });
 
-                    if (stockSerial && stockSerial.status !== SERIAL_STATUS.AVAILABLE) {
+                    if (!stockSerial) {
+                        const error = new Error(
+                            `Serial '${serial}' is not available at this warehouse for product id ${item.product_id}`
+                        );
+                        error.statusCode = 400;
+                        throw error;
+                    }
+
+                    if (stockSerial.status !== SERIAL_STATUS.AVAILABLE) {
                         const error = new Error(
                             `Serial ${serial} for product id ${item.product_id} is not available`
                         );
@@ -803,17 +812,15 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                         throw error;
                     }
 
-                    if (stockSerial) {
-                        await stockSerial.update(
-                            {
-                                status: SERIAL_STATUS.ISSUED,
-                                outward_date: new Date(),
-                                source_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
-                                source_id: challan.id,
-                            },
-                            { transaction }
-                        );
-                    }
+                    await stockSerial.update(
+                        {
+                            status: SERIAL_STATUS.ISSUED,
+                            outward_date: new Date(),
+                            source_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
+                            source_id: challan.id,
+                        },
+                        { transaction }
+                    );
 
                     await inventoryLedgerService.createLedgerEntry({
                         product_id: item.product_id,
@@ -823,7 +830,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                         transaction_id: challan.id,
                         movement_type: MOVEMENT_TYPE.OUT,
                         quantity: 1,
-                        serial_id: stockSerial ? stockSerial.id : null,
+                        serial_id: stockSerial.id,
                         rate: null,
                         gst_percent: null,
                         amount: null,

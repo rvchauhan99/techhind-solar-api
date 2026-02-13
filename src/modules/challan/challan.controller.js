@@ -40,7 +40,7 @@ const list = asyncHandler(async (req, res) => {
         limit = 20,
         q = null,
         scope = "all",
-        sortBy = "created_at",
+        sortBy = "id",
         sortOrder = "DESC",
         challan_no: challanNo = null,
         challan_no_op: challanNoOp = null,

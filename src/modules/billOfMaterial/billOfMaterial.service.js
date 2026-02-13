@@ -13,7 +13,7 @@ const listBillOfMaterials = async ({
   page = 1,
   limit = 20,
   q = null,
-  sortBy = "created_at",
+  sortBy = "id",
   sortOrder = "DESC",
   code = null,
   code_op = null,
@@ -61,7 +61,7 @@ const listBillOfMaterials = async ({
     name: "bom_name",
     description: "bom_description",
   };
-  const orderSortBy = sortByMap[sortBy] || sortBy || "created_at";
+  const orderSortBy = sortByMap[sortBy] || sortBy || "id";
 
   // Search functionality
   if (q) {
