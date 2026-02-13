@@ -74,7 +74,7 @@ const listOrders = async ({
     limit = 20,
     search = null,
     status = "pending",
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     order_number,
     order_date_from,

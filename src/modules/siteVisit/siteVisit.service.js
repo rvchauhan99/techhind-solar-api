@@ -136,7 +136,7 @@ const listInquiriesWithSiteVisits = async ({
   site_visit_created_at_to = null,
   site_visit_created_at_op = null,
   sortBy = null,
-  sortOrder = "asc",
+  sortOrder = "DESC",
 } = {}) => {
   const offset = (page - 1) * limit;
 
@@ -310,8 +310,8 @@ const listInquiriesWithSiteVisits = async ({
       queryOptions.order = [[sortBy, sortOrder.toUpperCase()]];
     }
   } else {
-    // Default to site visit created_at descending
-    queryOptions.order = [["created_at", "DESC"]];
+    // Default to site visit id descending (latest first, uses PK index)
+    queryOptions.order = [["id", "DESC"]];
   }
 
   // Get total count before pagination

@@ -92,7 +92,7 @@ const listSuppliers = async ({
   page = 1,
   limit = 20,
   q = null,
-  sortBy = "created_at",
+  sortBy = "id",
   sortOrder = "DESC",
   supplier_code: supplierCode = null,
   supplier_code_op: supplierCodeOp = null,
@@ -399,7 +399,7 @@ const deleteSupplier = async ({ id, transaction } = {}) => {
 
 const exportSuppliers = async ({
   q = null,
-  sortBy = "created_at",
+  sortBy = "id",
   sortOrder = "DESC",
   supplier_code: supplierCode = null,
   supplier_code_op: supplierCodeOp = null,

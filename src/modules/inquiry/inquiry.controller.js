@@ -36,7 +36,7 @@ const list = asyncHandler(async (req, res) => {
     is_dead,
     page = 1,
     limit = 20,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     inquiry_number: inquiryNumber,
     status,

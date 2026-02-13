@@ -10,7 +10,7 @@ const list = asyncHandler(async (req, res) => {
     limit = 20,
     status = null,
     adjustment_type = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     adjustment_number: adjustmentNumber = null,
     adjustment_date_from: adjustmentDateFrom = null,
@@ -44,7 +44,7 @@ const exportList = asyncHandler(async (req, res) => {
   const {
     status = null,
     adjustment_type = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     adjustment_number: adjustmentNumber = null,
     adjustment_date_from: adjustmentDateFrom = null,

@@ -25,7 +25,7 @@ const listQuotations = async ({
     inquiry_id,
     page = 1,
     limit = 20,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     quotation_number,
     quotation_date_from,
@@ -207,7 +207,7 @@ const listQuotations = async ({
         if (Reflect.ownKeys(where.created_at).length === 0) delete where.created_at;
     }
 
-    const orderClause = sortBy ? [[sortBy, (sortOrder || "DESC").toUpperCase()]] : [["created_at", "DESC"]];
+    const orderClause = sortBy ? [[sortBy, (sortOrder || "DESC").toUpperCase()]] : [["id", "DESC"]];
     const offset = (page - 1) * limit;
     const findOptions = {
         where,

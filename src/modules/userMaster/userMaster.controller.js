@@ -14,7 +14,7 @@ const list = asyncHandler(async (req, res) => {
     limit,
     q,
     status,
-    sortBy = 'created_at',
+    sortBy = 'id',
     sortOrder = 'DESC',
     name: nameFilter,
     name_op: nameOp,
@@ -44,7 +44,7 @@ const exportList = asyncHandler(async (req, res) => {
   const {
     q,
     status,
-    sortBy = 'created_at',
+    sortBy = 'id',
     sortOrder = 'DESC',
     name: nameFilter,
     name_op: nameOp,
