@@ -67,10 +67,15 @@ const listProducts = async ({
 
   const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
   const where = {};
+  // Filter by is_active for Active/Inactive (master data: no physical delete, only deactivate)
   if (visibilityVal === "active") {
+    where.is_active = true;
     where.deleted_at = null;
   } else if (visibilityVal === "inactive") {
-    where.deleted_at = { [Op.ne]: null };
+    where.is_active = false;
+    where.deleted_at = null;
+  } else {
+    where.deleted_at = null;
   }
 
   if (hsnSsnCode) {
@@ -156,9 +161,6 @@ const listProducts = async ({
     offset,
     distinct: true,
   };
-  if (visibilityVal === "inactive" || visibilityVal === "all") {
-    findOptions.paranoid = false;
-  }
 
   const { count, rows } = await Product.findAndCountAll(findOptions);
 
@@ -184,6 +186,9 @@ const listProducts = async ({
       mrp: row.mrp,
       gst_percent: row.gst_percent,
       min_stock_quantity: row.min_stock_quantity,
+      min_purchase_price: row.min_purchase_price,
+      avg_purchase_price: row.avg_purchase_price,
+      max_purchase_price: row.max_purchase_price,
       properties: row.properties,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -236,6 +241,9 @@ const getProductById = async ({ id } = {}) => {
     mrp: row.mrp,
     gst_percent: row.gst_percent,
     min_stock_quantity: row.min_stock_quantity,
+    min_purchase_price: row.min_purchase_price,
+    avg_purchase_price: row.avg_purchase_price,
+    max_purchase_price: row.max_purchase_price,
     properties: row.properties,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -376,8 +384,8 @@ const deleteProduct = async ({ id, transaction } = {}) => {
 
     if (!product) throw new Error("Product not found");
 
-    // Use destroy() for soft delete when paranoid: true is enabled
-    await product.destroy({ transaction: t });
+    // Soft delete: deactivate only (master data must not be removed due to references)
+    await product.update({ is_active: false }, { transaction: t });
 
     if (committedHere) {
       await t.commit();

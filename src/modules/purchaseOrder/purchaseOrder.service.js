@@ -263,8 +263,8 @@ const getPurchaseOrderById = async ({ id } = {}) => {
   const po = await PurchaseOrder.findOne({
     where: { id, deleted_at: null },
     include: [
-      { model: Supplier, as: "supplier", attributes: ["id", "supplier_code", "supplier_name", "contact_person", "phone", "email", "gstin"] },
-      { model: Company, as: "billTo", attributes: ["id", "company_name", "company_code", "address", "city", "state", "contact_number", "company_email"] },
+      { model: Supplier, as: "supplier", attributes: ["id", "supplier_code", "supplier_name", "contact_person", "phone", "email", "gstin", "address", "city"] },
+      { model: Company, as: "billTo", attributes: ["id", "company_name", "company_code", "address", "city", "state", "contact_number", "company_email", "logo"] },
       { model: CompanyWarehouse, as: "shipTo", attributes: ["id", "name", "address", "contact_person", "mobile"] },
       { model: User, as: "createdBy", attributes: ["id", "name", "email"] },
       { model: User, as: "approvedBy", attributes: ["id", "name", "email"] },

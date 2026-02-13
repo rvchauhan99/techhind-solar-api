@@ -665,8 +665,23 @@ const createOrder = async ({ payload, transaction } = {}) => {
             }
         }
 
+        // When order is from inquiry (direct or via quotation), carry forward inquiry_number as order_number
+        let orderNumberFromInquiry = null;
+        const inquiryIdForOrder = payload.inquiry_id || quotationForStatus?.inquiry_id;
+        if (inquiryIdForOrder) {
+            const inquiry = await Inquiry.findOne({
+                where: { id: inquiryIdForOrder, deleted_at: null },
+                attributes: ["inquiry_number"],
+                transaction: t,
+            });
+            if (inquiry?.inquiry_number) {
+                orderNumberFromInquiry = inquiry.inquiry_number;
+            }
+        }
+
         // 2) Create Order
         const orderData = {
+            ...(orderNumberFromInquiry && { order_number: orderNumberFromInquiry }),
             status: payload.status || "pending",
             inquiry_id: payload.inquiry_id || null,
             quotation_id: payload.quotation_id || null,

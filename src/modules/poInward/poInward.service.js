@@ -3,6 +3,7 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
+const { QueryTypes } = require("sequelize");
 const { RECEIPT_STATUS, RECEIPT_TYPE, PO_STATUS } = require("../../common/utils/constants.js");
 const stockService = require("../stock/stock.service.js");
 
@@ -297,12 +298,21 @@ const createPOInward = async ({ payload, transaction } = {}) => {
       const finalTrackingType = shouldBeSerial ? "SERIAL" : normalizedTrackingType;
       const finalSerialRequired = shouldBeSerial;
 
-      // Validate serial count for SERIAL tracking type (optional: 0 to accepted_quantity)
-      if (finalTrackingType === "SERIAL" && item.serials) {
-        if (item.serials.length > item.accepted_quantity) {
-          throw new Error(`Serial count (${item.serials.length}) cannot exceed accepted quantity (${item.accepted_quantity}) for serialized product`);
+      // Validate serial count for SERIAL tracking type (mandatory: exactly accepted_quantity)
+      if (finalTrackingType === "SERIAL") {
+        const serials = item.serials || [];
+        if (serials.length !== item.accepted_quantity) {
+          throw new Error(`Serialized product requires exactly ${item.accepted_quantity} serial number(s). Received ${serials.length}.`);
         }
-        // Serial numbers are optional, so 0 to accepted_quantity is valid
+        const serialNumbers = serials.map((s) => (s && typeof s.serial_number !== "undefined" ? String(s.serial_number).trim() : String(s || "").trim()));
+        const emptyIndex = serialNumbers.findIndex((sn) => !sn);
+        if (emptyIndex !== -1) {
+          throw new Error(`Serial number ${emptyIndex + 1} is required for serialized product.`);
+        }
+        const uniqueSet = new Set(serialNumbers);
+        if (uniqueSet.size !== serialNumbers.length) {
+          throw new Error("Duplicate serial numbers are not allowed for this item.");
+        }
       }
 
       const itemTaxable = item.rate * item.accepted_quantity;
@@ -357,6 +367,31 @@ const createPOInward = async ({ payload, transaction } = {}) => {
     }
     throw err;
   }
+};
+
+/**
+ * Compute min/avg/max purchase price from all approved (RECEIVED) po_inward_items for the given product IDs.
+ * Avg is quantity-weighted: SUM(rate * accepted_quantity) / SUM(accepted_quantity).
+ * Returns array of { product_id, min_purchase_price, avg_purchase_price, max_purchase_price }.
+ */
+const computeProductPurchasePriceStats = async ({ productIds, transaction } = {}) => {
+  if (!productIds || productIds.length === 0) return [];
+  const results = await db.sequelize.query(
+    `SELECT i.product_id,
+            MIN(i.rate) AS min_purchase_price,
+            MAX(i.rate) AS max_purchase_price,
+            SUM(i.rate * i.accepted_quantity) / NULLIF(SUM(i.accepted_quantity), 0) AS avg_purchase_price
+     FROM po_inward_items i
+     INNER JOIN po_inwards p ON p.id = i.po_inward_id AND p.status = :status AND p.deleted_at IS NULL
+     WHERE i.product_id IN (:productIds)
+     GROUP BY i.product_id`,
+    {
+      replacements: { status: RECEIPT_STATUS.RECEIVED, productIds },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+  return Array.isArray(results) ? results : [results];
 };
 
 const approvePOInward = async ({ id, transaction } = {}) => {
@@ -426,6 +461,23 @@ const approvePOInward = async ({ id, transaction } = {}) => {
       poInward: poInward.toJSON(),
       transaction: t,
     });
+
+    // Update product master: min/avg/max purchase price from all approved inwards
+    const productIds = [...new Set(poInward.items.map((i) => i.product_id))];
+    if (productIds.length > 0) {
+      const stats = await computeProductPurchasePriceStats({ productIds, transaction: t });
+      const statsByProduct = new Map(stats.map((s) => [s.product_id, s]));
+      for (const productId of productIds) {
+        const row = statsByProduct.get(productId);
+        const min_purchase_price = row ? parseFloat(row.min_purchase_price) : null;
+        const max_purchase_price = row ? parseFloat(row.max_purchase_price) : null;
+        const avg_purchase_price = row && row.avg_purchase_price != null ? parseFloat(row.avg_purchase_price) : null;
+        await Product.update(
+          { min_purchase_price, avg_purchase_price, max_purchase_price },
+          { where: { id: productId }, transaction: t }
+        );
+      }
+    }
 
     if (committedHere) {
       await t.commit();
@@ -520,6 +572,23 @@ const updatePOInward = async ({ id, payload, transaction } = {}) => {
         const shouldBeSerial = normalizedTrackingType === "SERIAL" || product.serial_required === true;
         const finalTrackingType = shouldBeSerial ? "SERIAL" : normalizedTrackingType;
         const finalSerialRequired = shouldBeSerial;
+
+        // Mandatory serials for SERIAL tracking (same as create)
+        if (finalTrackingType === "SERIAL") {
+          const serials = item.serials || [];
+          if (serials.length !== item.accepted_quantity) {
+            throw new Error(`Serialized product requires exactly ${item.accepted_quantity} serial number(s). Received ${serials.length}.`);
+          }
+          const serialNumbers = serials.map((s) => (s && typeof s.serial_number !== "undefined" ? String(s.serial_number).trim() : String(s || "").trim()));
+          const emptyIndex = serialNumbers.findIndex((sn) => !sn);
+          if (emptyIndex !== -1) {
+            throw new Error(`Serial number ${emptyIndex + 1} is required for serialized product.`);
+          }
+          const uniqueSet = new Set(serialNumbers);
+          if (uniqueSet.size !== serialNumbers.length) {
+            throw new Error("Duplicate serial numbers are not allowed for this item.");
+          }
+        }
 
         const itemTaxable = item.rate * item.accepted_quantity;
         const itemGst = (itemTaxable * item.gst_percent) / 100;
