@@ -2,16 +2,17 @@ const express = require("express");
 const router = express.Router();
 const controller = require("./orderPayments.controller");
 const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
-const { requireModulePermission } = require("../../common/middlewares/modulePermission.js");
+const { requireModulePermissionAny } = require("../../common/middlewares/modulePermission.js");
 const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 
-// All order payment audit routes are tied to module key `payment_audit`
+// Order payments: allow if user has the action on any of these modules (payment_audit or order-related)
+const ORDER_PAYMENT_MODULES = ["payment_audit", "confirm_orders", "closed_orders", "pending_orders", "fabrication_installation"];
 
 // List payments (before /:id)
 router.get(
   "/",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "read" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "read" }),
   controller.listPayments
 );
 
@@ -19,7 +20,7 @@ router.get(
 router.get(
   "/:id/receipt-url",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "read" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "read" }),
   controller.getReceiptUrl
 );
 
@@ -27,13 +28,13 @@ router.get(
 router.post(
   "/:id/approve",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "update" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "update" }),
   controller.approvePayment
 );
 router.post(
   "/:id/reject",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "update" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "update" }),
   controller.rejectPayment
 );
 
@@ -41,7 +42,7 @@ router.post(
 router.get(
   "/:id/receipt-pdf",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "read" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "read" }),
   controller.generateReceiptPdf
 );
 
@@ -49,7 +50,7 @@ router.get(
 router.post(
   "/",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "create" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "create" }),
   uploadMemory.single("receipt_cheque_file"),
   controller.createPayment
 );
@@ -58,7 +59,7 @@ router.post(
 router.get(
   "/:id",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "read" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "read" }),
   controller.getPaymentById
 );
 
@@ -66,7 +67,7 @@ router.get(
 router.put(
   "/:id",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "update" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "update" }),
   uploadMemory.single("receipt_cheque_file"),
   controller.updatePayment
 );
@@ -75,7 +76,7 @@ router.put(
 router.delete(
   "/:id",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_audit", action: "delete" }),
+  requireModulePermissionAny({ moduleKeys: ORDER_PAYMENT_MODULES, action: "delete" }),
   controller.deletePayment
 );
 

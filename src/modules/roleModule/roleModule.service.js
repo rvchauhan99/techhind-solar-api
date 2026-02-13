@@ -312,6 +312,44 @@ const assertModulePermission = async (
 };
 
 /**
+ * Assert that a role has permission for a given action on ANY of the given modules.
+ * requiredAction: 'read' | 'create' | 'update' | 'delete'
+ * Throws AppError(FORBIDDEN) if none of the modules grant the action. Returns the first matching permission on success.
+ */
+const assertModulePermissionAny = async (
+  { roleId, moduleKeys = [], requiredAction = "read" } = {},
+  transaction = null
+) => {
+  const actionFlagMap = {
+    read: "can_read",
+    create: "can_create",
+    update: "can_update",
+    delete: "can_delete",
+  };
+  const flagKey = actionFlagMap[requiredAction] || actionFlagMap.read;
+
+  for (const moduleKey of moduleKeys) {
+    if (!moduleKey) continue;
+    try {
+      const permission = await getPermissionForRoleAndModule(
+        { roleId, moduleKey },
+        transaction
+      );
+      if (permission && permission[flagKey]) {
+        return permission;
+      }
+    } catch {
+      // module not found or not configured for this key; try next
+    }
+  }
+
+  throw new AppError(
+    "Forbidden: insufficient permissions for this action",
+    RESPONSE_STATUS_CODES.FORBIDDEN
+  );
+};
+
+/**
  * Return normalized listing criteria for a role & module and enforce read permission.
  * If the module or role-module mapping is missing or can_read is false, throws Forbidden.
  */
@@ -344,5 +382,6 @@ module.exports = {
   getRoleModulesByRoleId,
   getPermissionForRoleAndModule,
   assertModulePermission,
+  assertModulePermissionAny,
   getListingCriteriaForRoleAndModule,
 };
