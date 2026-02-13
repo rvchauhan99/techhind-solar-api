@@ -9,7 +9,7 @@ const listInquiries = async ({
   is_dead,
   page = 1,
   limit = 20,
-  sortBy = "created_at",
+  sortBy = "id",
   sortOrder = "DESC",
   inquiry_number: inquiryNumber,
   status,
@@ -225,7 +225,7 @@ const listInquiries = async ({
   const orderClause =
     sortBy === "customer_name"
       ? [[{ model: Customer, as: "customer" }, "customer_name", sortOrder]]
-      : [[sortBy || "created_at", sortOrder]];
+      : [[sortBy || "id", sortOrder]];
 
   const { count, rows } = await Inquiry.findAndCountAll({
     where,

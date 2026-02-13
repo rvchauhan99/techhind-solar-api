@@ -17,7 +17,7 @@ const list = asyncHandler(async (req, res) => {
         inquiry_id,
         page = 1,
         limit = 20,
-        sortBy = "created_at",
+        sortBy = "id",
         sortOrder = "DESC",
         quotation_number,
         quotation_date_from,

@@ -9,7 +9,7 @@ const list = asyncHandler(async (req, res) => {
     page = 1,
     limit = 20,
     status = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     transfer_number: transferNumber = null,
     transfer_date_from: transferDateFrom = null,
@@ -35,7 +35,7 @@ const list = asyncHandler(async (req, res) => {
 const exportList = asyncHandler(async (req, res) => {
   const {
     status = null,
-    sortBy = "created_at",
+    sortBy = "id",
     sortOrder = "DESC",
     transfer_number: transferNumber = null,
     transfer_date_from: transferDateFrom = null,

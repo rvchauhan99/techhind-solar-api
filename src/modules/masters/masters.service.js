@@ -375,7 +375,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
         where,
         offset,
         limit,
-        order: [['created_at', 'DESC']],
+        order: [['id', 'DESC']],
     };
     if (visibilityVal === VISIBILITY_INACTIVE || visibilityVal === VISIBILITY_ALL) {
         findOptions.paranoid = false;

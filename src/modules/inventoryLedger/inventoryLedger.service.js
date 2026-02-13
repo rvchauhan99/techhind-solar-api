@@ -5,7 +5,7 @@ const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { TRANSACTION_TYPE, MOVEMENT_TYPE } = require("../../common/utils/constants.js");
 
-const { InventoryLedger, Stock, Product, CompanyWarehouse, User, StockSerial } = db;
+const { InventoryLedger, Stock, Product, ProductType, CompanyWarehouse, User, StockSerial } = db;
 
 // Helper function to create ledger entry
 const createLedgerEntry = async ({
@@ -149,6 +149,7 @@ const listLedgerEntries = async ({
   limit = 20,
   product_id = null,
   warehouse_id = null,
+  product_type_id = null,
   product_name = null,
   warehouse_name = null,
   transaction_type = null,
@@ -166,7 +167,7 @@ const listLedgerEntries = async ({
   closing_quantity_to,
   serial_number = null,
   performed_by_name = null,
-  sortBy = "performed_at",
+  sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
   const offset = (page - 1) * limit;
@@ -217,12 +218,17 @@ const listLedgerEntries = async ({
   addNumCond("opening_quantity", opening_quantity, opening_quantity_to, opening_quantity_op);
   addNumCond("closing_quantity", closing_quantity, closing_quantity_to, closing_quantity_op);
 
+  const productWhere = {};
+  if (product_name) productWhere.product_name = { [Op.iLike]: `%${product_name}%` };
+  if (product_type_id) productWhere.product_type_id = product_type_id;
+
   const productInclude = {
     model: Product,
     as: "product",
-    attributes: ["id", "product_name", "hsn_ssn_code"],
-    required: !!product_name,
-    ...(product_name && { where: { product_name: { [Op.iLike]: `%${product_name}%` } } }),
+    attributes: ["id", "product_name", "hsn_ssn_code", "product_type_id"],
+    required: !!product_name || !!product_type_id,
+    ...(Object.keys(productWhere).length > 0 && { where: productWhere }),
+    include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
   };
   const warehouseInclude = {
     model: CompanyWarehouse,
@@ -262,7 +268,13 @@ const listLedgerEntries = async ({
   });
 
   return {
-    data: rows.map((row) => row.toJSON()),
+    data: rows.map((row) => {
+      const json = row.toJSON();
+      return {
+        ...json,
+        product_type_name: json.product?.productType?.name ?? null,
+      };
+    }),
     meta: {
       page,
       limit,
@@ -279,6 +291,7 @@ const exportLedgerEntries = async (params = {}) => {
   const worksheet = workbook.addWorksheet("Inventory Ledger");
   worksheet.columns = [
     { header: "Product", key: "product_name", width: 24 },
+    { header: "Product Type", key: "product_type_name", width: 18 },
     { header: "Warehouse", key: "warehouse_name", width: 22 },
     { header: "Transaction Type", key: "transaction_type", width: 18 },
     { header: "Movement", key: "movement_type", width: 12 },
@@ -292,6 +305,7 @@ const exportLedgerEntries = async (params = {}) => {
   (data || []).forEach((r) => {
     worksheet.addRow({
       product_name: r.product?.product_name || "",
+      product_type_name: r.product_type_name ?? r.product?.productType?.name ?? "",
       warehouse_name: r.warehouse?.name || "",
       transaction_type: r.transaction_type || "",
       movement_type: r.movement_type || "",
@@ -311,7 +325,12 @@ const getLedgerEntryById = async ({ id } = {}) => {
   const entry = await InventoryLedger.findOne({
     where: { id },
     include: [
-      { model: Product, as: "product", attributes: ["id", "product_name", "hsn_ssn_code"] },
+      {
+        model: Product,
+        as: "product",
+        attributes: ["id", "product_name", "hsn_ssn_code", "product_type_id"],
+        include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
+      },
       { model: CompanyWarehouse, as: "warehouse", attributes: ["id", "name"] },
       { model: Stock, as: "stock", attributes: ["id"] },
       { model: User, as: "performedBy", attributes: ["id", "name", "email"] },
@@ -321,7 +340,11 @@ const getLedgerEntryById = async ({ id } = {}) => {
 
   if (!entry) return null;
 
-  return entry.toJSON();
+  const json = entry.toJSON();
+  return {
+    ...json,
+    product_type_name: json.product?.productType?.name ?? null,
+  };
 };
 
 module.exports = {

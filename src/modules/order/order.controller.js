@@ -63,7 +63,7 @@ const list = asyncHandler(async (req, res) => {
         limit = 20,
         q = null,
         status = "pending",
-        sortBy = "created_at",
+        sortBy = "id",
         sortOrder = "DESC",
         order_number,
         order_date_from,
@@ -103,7 +103,7 @@ const exportList = asyncHandler(async (req, res) => {
     const {
         q = null,
         status = "pending",
-        sortBy = "created_at",
+        sortBy = "id",
         sortOrder = "DESC",
         order_number,
         order_date_from,

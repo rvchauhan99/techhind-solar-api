@@ -6,7 +6,7 @@ const { Op } = require("sequelize");
 const { SERIAL_STATUS, TRANSACTION_TYPE } = require("../../common/utils/constants.js");
 const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
 
-const { Stock, StockSerial, Product, CompanyWarehouse, User } = db;
+const { Stock, StockSerial, Product, ProductType, CompanyWarehouse, User } = db;
 
 // Helper function to get or create stock record
 const getOrCreateStock = async ({ product_id, warehouse_id, product, transaction }) => {
@@ -129,6 +129,7 @@ const listStocks = async ({
   limit = 20,
   warehouse_id = null,
   product_id = null,
+  product_type_id = null,
   warehouse_name = null,
   product_name = null,
   quantity_on_hand,
@@ -145,7 +146,7 @@ const listStocks = async ({
   min_stock_quantity_to,
   tracking_type = null,
   low_stock = null,
-  sortBy = "created_at",
+  sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
   const offset = (page - 1) * limit;
@@ -183,12 +184,17 @@ const listStocks = async ({
     );
   }
 
+  const productWhere = {};
+  if (product_name) productWhere.product_name = { [Op.iLike]: `%${product_name}%` };
+  if (product_type_id) productWhere.product_type_id = product_type_id;
+
   const productInclude = {
     model: Product,
     as: "product",
-    attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required"],
-    required: !!product_name,
-    ...(product_name && { where: { product_name: { [Op.iLike]: `%${product_name}%` } } }),
+    attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required", "product_type_id", "avg_purchase_price"],
+    required: !!product_name || !!product_type_id,
+    ...(Object.keys(productWhere).length > 0 && { where: productWhere }),
+    include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
   };
   const warehouseInclude = {
     model: CompanyWarehouse,
@@ -209,10 +215,17 @@ const listStocks = async ({
 
   const data = rows.map((stock) => {
     const row = stock.toJSON();
+    const qty = row.quantity_on_hand || 0;
+    const avgPrice = parseFloat(row.product?.avg_purchase_price) || 0;
+    const stockValue = Math.round(qty * avgPrice * 100) / 100;
     return {
       id: row.id,
       product_id: row.product_id,
       product: row.product,
+      product_type_id: row.product?.product_type_id ?? null,
+      product_type_name: row.product?.productType?.name ?? null,
+      avg_purchase_price: row.product?.avg_purchase_price ?? null,
+      stock_value: stockValue,
       warehouse_id: row.warehouse_id,
       warehouse: row.warehouse,
       quantity_on_hand: row.quantity_on_hand,
@@ -246,10 +259,12 @@ const exportStocks = async (params = {}) => {
   const worksheet = workbook.addWorksheet("Stocks");
   worksheet.columns = [
     { header: "Product", key: "product_name", width: 24 },
+    { header: "Product Type", key: "product_type_name", width: 18 },
     { header: "Warehouse", key: "warehouse_name", width: 22 },
     { header: "On Hand", key: "quantity_on_hand", width: 12 },
     { header: "Reserved", key: "quantity_reserved", width: 12 },
     { header: "Available", key: "quantity_available", width: 12 },
+    { header: "Stock Value", key: "stock_value", width: 14 },
     { header: "Tracking Type", key: "tracking_type", width: 14 },
     { header: "Min Stock", key: "min_stock_quantity", width: 12 },
     { header: "Created At", key: "created_at", width: 22 },
@@ -259,10 +274,12 @@ const exportStocks = async (params = {}) => {
   (data || []).forEach((s) => {
     worksheet.addRow({
       product_name: s.product?.product_name || "",
+      product_type_name: s.product_type_name ?? "",
       warehouse_name: s.warehouse?.name || "",
       quantity_on_hand: s.quantity_on_hand != null ? s.quantity_on_hand : "",
       quantity_reserved: s.quantity_reserved != null ? s.quantity_reserved : "",
       quantity_available: s.quantity_available != null ? s.quantity_available : "",
+      stock_value: s.stock_value != null ? s.stock_value : "",
       tracking_type: s.tracking_type || "",
       min_stock_quantity: s.min_stock_quantity != null ? s.min_stock_quantity : "",
       created_at: s.created_at ? new Date(s.created_at).toISOString() : "",
@@ -278,7 +295,12 @@ const getStockById = async ({ id } = {}) => {
   const stock = await Stock.findOne({
     where: { id },
     include: [
-      { model: Product, as: "product", attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required"] },
+      {
+        model: Product,
+        as: "product",
+        attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required", "product_type_id", "avg_purchase_price"],
+        include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
+      },
       { model: CompanyWarehouse, as: "warehouse", attributes: ["id", "name", "address"] },
       {
         model: StockSerial,
@@ -292,7 +314,17 @@ const getStockById = async ({ id } = {}) => {
 
   if (!stock) return null;
 
-  return stock.toJSON();
+  const row = stock.toJSON();
+  const qty = row.quantity_on_hand || 0;
+  const avgPrice = parseFloat(row.product?.avg_purchase_price) || 0;
+  const stockValue = Math.round(qty * avgPrice * 100) / 100;
+  return {
+    ...row,
+    product_type_id: row.product?.product_type_id ?? null,
+    product_type_name: row.product?.productType?.name ?? null,
+    avg_purchase_price: row.product?.avg_purchase_price ?? null,
+    stock_value: stockValue,
+  };
 };
 
 const getStocksByWarehouse = async ({ warehouse_id } = {}) => {
@@ -301,16 +333,29 @@ const getStocksByWarehouse = async ({ warehouse_id } = {}) => {
   const stocks = await Stock.findAll({
     where: { warehouse_id },
     include: [
-      { 
-        model: Product, 
-        as: "product", 
-        attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required"] 
+      {
+        model: Product,
+        as: "product",
+        attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required", "product_type_id", "avg_purchase_price"],
+        include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
       },
     ],
     order: [["product_id", "ASC"]],
   });
 
-  return stocks.map((stock) => stock.toJSON());
+  return stocks.map((stock) => {
+    const row = stock.toJSON();
+    const qty = row.quantity_on_hand || 0;
+    const avgPrice = parseFloat(row.product?.avg_purchase_price) || 0;
+    const stockValue = Math.round(qty * avgPrice * 100) / 100;
+    return {
+      ...row,
+      product_type_id: row.product?.product_type_id ?? null,
+      product_type_name: row.product?.productType?.name ?? null,
+      avg_purchase_price: row.product?.avg_purchase_price ?? null,
+      stock_value: stockValue,
+    };
+  });
 };
 
 const getAvailableSerials = async ({ product_id, warehouse_id } = {}) => {
@@ -329,12 +374,39 @@ const getAvailableSerials = async ({ product_id, warehouse_id } = {}) => {
   return serials.map((serial) => serial.toJSON());
 };
 
+/**
+ * Validate that a serial is available at the given product + warehouse (status AVAILABLE).
+ * Returns { valid: true } or { valid: false, message: string }.
+ */
+const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id } = {}) => {
+  const trimmed = (serial_number != null && String(serial_number).trim()) ? String(serial_number).trim() : null;
+  if (!trimmed || product_id == null || warehouse_id == null) {
+    return { valid: false, message: "Serial number, product_id and warehouse_id are required" };
+  }
+
+  const row = await StockSerial.findOne({
+    where: {
+      serial_number: trimmed,
+      product_id: parseInt(product_id, 10),
+      warehouse_id: parseInt(warehouse_id, 10),
+      status: SERIAL_STATUS.AVAILABLE,
+    },
+    attributes: ["id"],
+  });
+
+  if (row) {
+    return { valid: true };
+  }
+  return { valid: false, message: "Serial is not available at this warehouse" };
+};
+
 module.exports = {
   listStocks,
   exportStocks,
   getStockById,
   getStocksByWarehouse,
   getAvailableSerials,
+  validateSerialAvailable,
   createStockFromPOInward,
   updateStockQuantities,
   getOrCreateStock,

@@ -97,7 +97,7 @@ const listRoleModules = async ({
   can_delete = null,
   listing_criteria = null,
   sortBy = 'id',
-  sortOrder = 'ASC',
+  sortOrder = 'DESC',
 } = {}) => {
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
@@ -219,7 +219,7 @@ const getRoleModulesByRoleId = async (roleId, transaction = null) => {
 
   const rows = await RoleModule.findAll({
     where: { role_id: roleIdNum, deleted_at: null },
-    order: [['id', 'ASC']],
+    order: [['id', 'DESC']],
     include: [
       { model: db.Role, as: 'role', attributes: ['id', 'name'] },
       { model: db.Module, as: 'module', attributes: ['id', 'name'] },

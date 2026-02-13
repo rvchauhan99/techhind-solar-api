@@ -31,7 +31,7 @@ const resolveClosedOrderVisibilityContext = async (req) => {
 };
 
 const list = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 20, q = null, sortBy = "created_at", sortOrder = "DESC" } = req.query;
+    const { page = 1, limit = 20, q = null, sortBy = "id", sortOrder = "DESC" } = req.query;
     const { enforcedHandledByIds } = await resolveClosedOrderVisibilityContext(req);
     const result = await orderService.listOrders({
         page: parseInt(page),
