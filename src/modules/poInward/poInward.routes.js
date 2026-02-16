@@ -8,6 +8,7 @@ const router = Router();
 
 router.get("/", ...requireAuthWithTenant, controller.list);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
+router.get("/po-details/:id", ...requireAuthWithTenant, controller.getPODetailsForInward);
 router.post("/", ...requireAuthWithTenant, controller.create);
 router.get("/:id", ...requireAuthWithTenant, controller.getById);
 router.put("/:id", ...requireAuthWithTenant, controller.update);

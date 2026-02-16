@@ -5,6 +5,7 @@ const responseHandler = require("../../common/utils/responseHandler.js");
 const inquiryService = require("./inquiry.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 
 const resolveInquiryVisibilityContext = async (req) => {
   const roleId = Number(req.user?.role_id);
@@ -184,6 +185,8 @@ const getById = asyncHandler(async (req, res) => {
   if (!item) {
     return responseHandler.sendError(res, "Inquiry not found", 404);
   }
+  const context = await resolveInquiryVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(item, context, { handledByField: "handled_by" });
   return responseHandler.sendSuccess(res, item, "Inquiry fetched", 200);
 });
 
@@ -198,6 +201,12 @@ const create = asyncHandler(async (req, res) => {
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const existing = await inquiryService.getInquiryById({ id });
+  if (!existing) {
+    return responseHandler.sendError(res, "Inquiry not found", 404);
+  }
+  const context = await resolveInquiryVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
   const payload = { ...req.body };
   const updated = await inquiryService.updateInquiry({
     id,

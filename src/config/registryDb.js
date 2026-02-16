@@ -26,4 +26,19 @@ function getRegistrySequelize() {
   return registrySequelize;
 }
 
-module.exports = { getRegistrySequelize };
+/**
+ * Close the registry Sequelize connection (e.g. on process shutdown / nodemon restart).
+ * Ensures connection slots are released so the next process can connect.
+ * @returns {Promise<void>}
+ */
+async function closeRegistrySequelize() {
+  if (!registrySequelize) return;
+  try {
+    await registrySequelize.close();
+  } catch (_) {
+    // ignore close errors
+  }
+  registrySequelize = null;
+}
+
+module.exports = { getRegistrySequelize, closeRegistrySequelize };

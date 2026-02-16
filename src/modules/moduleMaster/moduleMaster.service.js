@@ -175,6 +175,7 @@ const exportModules = async (params = {}) => {
     { header: 'Icon', key: 'icon', width: 14 },
     { header: 'Sequence', key: 'sequence', width: 10 },
     { header: 'Status', key: 'status', width: 12 },
+    { header: 'Authorize with params', key: 'authorize_with_params', width: 18 },
     { header: 'Created At', key: 'created_at', width: 22 },
   ];
   worksheet.getRow(1).font = { bold: true };
@@ -187,6 +188,7 @@ const exportModules = async (params = {}) => {
       icon: m.icon || '',
       sequence: m.sequence != null ? m.sequence : '',
       status: m.status || '',
+      authorize_with_params: m.authorize_with_params ? 'Yes' : 'No',
       created_at: m.created_at ? new Date(m.created_at).toISOString() : '',
     });
   });

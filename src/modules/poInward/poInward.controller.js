@@ -3,6 +3,7 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const poInwardService = require("./poInward.service.js");
+const purchaseOrderService = require("../purchaseOrder/purchaseOrder.service.js");
 
 const list = asyncHandler(async (req, res) => {
   const {
@@ -91,6 +92,16 @@ const exportList = asyncHandler(async (req, res) => {
   return res.send(buffer);
 });
 
+/** Get PO details by id for use when creating a PO Inward (does not require purchase-orders module access) */
+const getPODetailsForInward = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const po = await purchaseOrderService.getPurchaseOrderById({ id });
+  if (!po) {
+    return responseHandler.sendError(res, "Purchase order not found", 404);
+  }
+  return responseHandler.sendSuccess(res, po, "PO details fetched", 200);
+});
+
 const getById = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const item = await poInwardService.getPOInwardById({ id });
@@ -132,6 +143,7 @@ const approve = asyncHandler(async (req, res) => {
 module.exports = {
   list,
   exportList,
+  getPODetailsForInward,
   getById,
   create,
   update,

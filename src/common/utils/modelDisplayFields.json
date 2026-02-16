@@ -1,4 +1,5 @@
 {
+  "purchaseOrder.model": { "displayField": "po_number", "orderBy": "po_number" },
   "state.model": { "displayField": "name", "orderBy": "name" },
   "city.model": { "displayField": "name", "orderBy": "name" },
   "role.model": { "displayField": "name", "orderBy": "name" },

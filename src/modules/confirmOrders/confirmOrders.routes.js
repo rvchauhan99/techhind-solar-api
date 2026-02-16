@@ -7,6 +7,7 @@ const controller = require("./confirmOrders.controller.js");
 
 const router = Router();
 
-router.get("/", ...requireAuthWithTenant, requireModulePermission({ moduleKey: "confirm_orders", action: "read" }), controller.list);
+router.get("/", ...requireAuthWithTenant, requireModulePermission({ moduleRoute: "/confirm-orders", action: "read" }), controller.list);
+router.get("/:id", ...requireAuthWithTenant, requireModulePermission({ moduleRoute: "/confirm-orders", action: "read" }), controller.getById);
 
 module.exports = router;

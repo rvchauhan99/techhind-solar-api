@@ -16,6 +16,7 @@
     "db:make-seeder": "sequelize-cli seed:generate --name",
     "db:clone": "node scripts/clone-database.js",
     "db:restore": "node scripts/restore-from-backup.js",
+    "db:release-connections": "node scripts/release-db-connections.js",
     "assign-icons": "node scripts/assign-icons-to-modules.js",
     "assign-inventory-to-superadmin": "node scripts/assign-inventory-to-superadmin-once.js",
     "test:db-permissions": "node scripts/test-db-permissions.js",
