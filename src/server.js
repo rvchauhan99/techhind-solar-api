@@ -11,7 +11,8 @@ const {
   transactionMiddleware,
 } = require("./common/middlewares/transaction.js");
 const { validateEnv } = require("./config/envValidator.js");
-const { getRegistrySequelize } = require("./config/registryDb.js");
+const { getRegistrySequelize, closeRegistrySequelize } = require("./config/registryDb.js");
+const { closeAllPools } = require("./modules/tenant/dbPoolManager.js");
 const { requestContextMiddleware } = require("./common/utils/requestContext.js");
 
 dotenv.config();
@@ -60,6 +61,48 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
+let server = null;
+
+/** Graceful shutdown: close HTTP server and all DB connections so nodemon/restart doesn't leak connection slots.
+ *  Works for both dedicated (single-tenant) and shared (multi-tenant) mode:
+ *  - Dedicated: main db.sequelize is the only pool; registry + tenant pools are no-ops.
+ *  - Shared: closes main DB, registry DB, and all per-tenant pools. */
+async function gracefulShutdown(signal) {
+  const s = server;
+  server = null;
+  if (s && s.listening) {
+    console.log(`\n${signal} received, closing server and DB connections...`);
+    await new Promise((resolve) => {
+      s.close(() => {
+        console.log("HTTP server closed.");
+        resolve();
+      });
+    });
+  }
+  try {
+    await db.sequelize.close();
+    console.log("Main DB pool closed.");
+  } catch (e) {
+    // ignore
+  }
+  try {
+    await closeRegistrySequelize();
+    console.log("Registry DB pool closed.");
+  } catch (e) {
+    // ignore
+  }
+  try {
+    await closeAllPools();
+    console.log("Tenant DB pools closed.");
+  } catch (e) {
+    // ignore
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
 (async () => {
   try {
     await db.sequelize.authenticate();
@@ -98,7 +141,7 @@ const NODE_ENV = process.env.NODE_ENV || "development";
       ? tenantLogLines.join("\n")
       : tenantLogLines.join("\n");
 
-    app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       if (NODE_ENV === "development" || NODE_ENV === "test") {
         console.log(`
 ============================================

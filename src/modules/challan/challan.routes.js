@@ -7,7 +7,7 @@ const controller = require("./challan.controller.js");
 
 const router = Router();
 
-const deliveryChallans = (action) => requireModulePermission({ moduleKey: "Delivery Challans", action });
+const deliveryChallans = (action) => requireModulePermission({ moduleRoute: "/challan", action });
 
 router.get("/", ...requireAuthWithTenant, deliveryChallans("read"), controller.list);
 router.get("/next-challan-number", ...requireAuthWithTenant, deliveryChallans("read"), controller.getNextChallanNumber);

@@ -5,6 +5,7 @@ const responseHandler = require("../../common/utils/responseHandler.js");
 const orderService = require("../order/order.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 
 const resolveConfirmOrderVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
@@ -45,6 +46,18 @@ const list = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, result, "Confirmed order list fetched", 200);
 });
 
+const getById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const item = await orderService.getOrderById({ id });
+    if (!item) {
+        return responseHandler.sendError(res, "Order not found", 404);
+    }
+    const context = await resolveConfirmOrderVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(item, context, { handledByField: "handled_by" });
+    return responseHandler.sendSuccess(res, item, "Order fetched", 200);
+});
+
 module.exports = {
     list,
+    getById,
 };

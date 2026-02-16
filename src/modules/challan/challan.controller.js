@@ -8,6 +8,7 @@ const challanService = require("./challan.service.js");
 const challanPdfService = require("./pdf.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 
 const resolveDeliveryChallanVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
@@ -15,8 +16,7 @@ const resolveDeliveryChallanVisibilityContext = async (req) => {
     const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
         {
             roleId,
-            moduleRoute: "/delivery-challans",
-            moduleKey: "Delivery Challans",
+            moduleRoute: "/challan",
         },
         req.transaction
     );
@@ -88,6 +88,12 @@ const getById = asyncHandler(async (req, res) => {
     if (!item) {
         return responseHandler.sendError(res, "Challan not found", 404);
     }
+    const context = await resolveDeliveryChallanVisibilityContext(req);
+    const record = item.toJSON ? item.toJSON() : item;
+    assertRecordVisibleByListingCriteria(record, context, {
+        createdByField: "created_by",
+        orderHandledByPath: "order.handled_by",
+    });
     return responseHandler.sendSuccess(res, item, "Challan fetched", 200);
 });
 
@@ -97,6 +103,12 @@ const generatePDF = asyncHandler(async (req, res) => {
     if (!challan) {
         return responseHandler.sendError(res, "Challan not found", 404);
     }
+    const context = await resolveDeliveryChallanVisibilityContext(req);
+    const record = challan.toJSON ? challan.toJSON() : challan;
+    assertRecordVisibleByListingCriteria(record, context, {
+        createdByField: "created_by",
+        orderHandledByPath: "order.handled_by",
+    });
 
     const company = await db.Company.findOne({ where: { deleted_at: null } });
     let bucketClient = null;
@@ -149,6 +161,16 @@ const update = asyncHandler(async (req, res) => {
 
 const remove = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const item = await challanService.getChallanById({ id });
+    if (!item) {
+        return responseHandler.sendError(res, "Challan not found", 404);
+    }
+    const context = await resolveDeliveryChallanVisibilityContext(req);
+    const record = item.toJSON ? item.toJSON() : item;
+    assertRecordVisibleByListingCriteria(record, context, {
+        createdByField: "created_by",
+        orderHandledByPath: "order.handled_by",
+    });
     const result = await challanService.deleteChallan({
         id,
         user_id: req.user?.id,

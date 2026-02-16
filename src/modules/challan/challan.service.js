@@ -417,7 +417,7 @@ const getChallanById = async ({ id } = {}) => {
             {
                 model: Order,
                 as: "order",
-                attributes: ["id", "order_number", "consumer_no", "capacity"],
+                attributes: ["id", "order_number", "consumer_no", "capacity", "handled_by"],
             },
             {
                 model: CompanyWarehouse,
@@ -462,7 +462,7 @@ const getChallanForPdf = async ({ id } = {}) => {
             {
                 model: Order,
                 as: "order",
-                attributes: ["id", "order_number", "consumer_no", "capacity"],
+                attributes: ["id", "order_number", "consumer_no", "capacity", "handled_by"],
                 include: [
                     {
                         model: db.Customer,

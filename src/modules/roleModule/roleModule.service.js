@@ -13,8 +13,25 @@ const normalizeListingCriteria = (value) => {
   return VALID_LISTING_CRITERIA.has(normalized) ? normalized : 'my_team';
 };
 
+/** Normalize route: trim and ensure single leading slash for consistent lookup. */
+const normalizeRoute = (value) => {
+  if (value == null || value === "") return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+};
+
+/** Normalize key: trim and lowercase for tolerant lookup. */
+const normalizeKey = (value) => {
+  if (value == null || value === "") return null;
+  const trimmed = String(value).trim().toLowerCase();
+  return trimmed || null;
+};
+
 /**
  * Resolve a Module.id from explicit id, route, or key.
+ * Authorization is by module URL (route): when moduleRoute is provided we resolve ONLY by
+ * modules.route (module name and key are ignored). Route/key are normalized for tolerant lookup.
  * Throws Forbidden when the module cannot be resolved, so callers fail closed.
  */
 const resolveModuleIdOrThrow = async (
@@ -29,8 +46,22 @@ const resolveModuleIdOrThrow = async (
 
   const moduleWhere = { deleted_at: null };
   const moduleOr = [];
-  if (moduleRoute) moduleOr.push({ route: moduleRoute });
-  if (moduleKey) moduleOr.push({ key: moduleKey });
+
+  const normalizedRoute = normalizeRoute(moduleRoute);
+  if (normalizedRoute) {
+    // Resolve only by URL (route). Do not use key/name so auth is strictly by module URL.
+    moduleOr.push({ route: normalizedRoute });
+    const withoutLeadingSlash = normalizedRoute.replace(/^\/+/, "");
+    if (withoutLeadingSlash !== normalizedRoute) {
+      moduleOr.push({ route: withoutLeadingSlash });
+    }
+  } else {
+    // Fallback when no route given (e.g. legacy callers): resolve by key.
+    const normalizedKey = normalizeKey(moduleKey);
+    if (normalizedKey) {
+      moduleOr.push({ key: normalizedKey });
+    }
+  }
 
   if (moduleOr.length === 0) {
     throw new AppError(
@@ -315,9 +346,10 @@ const assertModulePermission = async (
  * Assert that a role has permission for a given action on ANY of the given modules.
  * requiredAction: 'read' | 'create' | 'update' | 'delete'
  * Throws AppError(FORBIDDEN) if none of the modules grant the action. Returns the first matching permission on success.
+ * Supports moduleRoutes (resolve by URL) and/or moduleKeys (resolve by key); checks all and allows if any grant the action.
  */
 const assertModulePermissionAny = async (
-  { roleId, moduleKeys = [], requiredAction = "read" } = {},
+  { roleId, moduleKeys = [], moduleRoutes = [], requiredAction = "read" } = {},
   transaction = null
 ) => {
   const actionFlagMap = {
@@ -327,6 +359,21 @@ const assertModulePermissionAny = async (
     delete: "can_delete",
   };
   const flagKey = actionFlagMap[requiredAction] || actionFlagMap.read;
+
+  for (const moduleRoute of moduleRoutes) {
+    if (!moduleRoute) continue;
+    try {
+      const permission = await getPermissionForRoleAndModule(
+        { roleId, moduleRoute, moduleKey: null },
+        transaction
+      );
+      if (permission && permission[flagKey]) {
+        return permission;
+      }
+    } catch {
+      // module not found or no permission for this route; try next
+    }
+  }
 
   for (const moduleKey of moduleKeys) {
     if (!moduleKey) continue;

@@ -90,4 +90,20 @@ function clearPool(tenantId) {
   poolCache.delete(tenantId);
 }
 
-module.exports = { getPool, isSharedMode, clearPool };
+/**
+ * Close all tenant DB pools (e.g. on process shutdown / nodemon restart).
+ * Ensures connection slots are released so the next process can connect.
+ * @returns {Promise<void>}
+ */
+async function closeAllPools() {
+  const closePromises = [];
+  for (const [tenantId, sequelize] of poolCache) {
+    if (sequelize && typeof sequelize.close === "function") {
+      closePromises.push(sequelize.close().catch(() => {}));
+    }
+  }
+  poolCache.clear();
+  await Promise.all(closePromises);
+}
+
+module.exports = { getPool, isSharedMode, clearPool, closeAllPools };

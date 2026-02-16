@@ -7,7 +7,7 @@ const controller = require("./closedOrders.controller.js");
 
 const router = Router();
 
-router.get("/", ...requireAuthWithTenant, requireModulePermission({ moduleKey: "closed_orders", action: "read" }), controller.list);
+router.get("/", ...requireAuthWithTenant, requireModulePermission({ moduleRoute: "/closed-orders", action: "read" }), controller.list);
 
 module.exports = router;
 
