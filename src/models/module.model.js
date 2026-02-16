@@ -43,6 +43,11 @@ const Module = sequelize.define(
       allowNull: false,
       defaultValue: "active",
     },
+    authorize_with_params: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,

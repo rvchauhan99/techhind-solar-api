@@ -8,7 +8,7 @@ const controller = require("./inquiry.controller.js");
 
 const router = Router();
 
-const inquiry = (action) => requireModulePermission({ moduleKey: "inquiry", action });
+const inquiry = (action) => requireModulePermission({ moduleRoute: "/inquiry", action });
 
 router.get("/", ...requireAuthWithTenant, inquiry("read"), controller.list);
 router.get("/export", ...requireAuthWithTenant, inquiry("read"), controller.exportList);

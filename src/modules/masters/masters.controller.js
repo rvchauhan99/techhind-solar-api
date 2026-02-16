@@ -147,11 +147,11 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 const getReferenceOptions = asyncHandler(async (req, res) => {
-  const { model } = req.query;
+  const { model, status } = req.query;
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
-  const options = await masterService.getReferenceOptions({ model });
+  const options = await masterService.getReferenceOptions({ model, status: status || undefined });
   return responseHandler.sendSuccess(res, options, 'Reference options fetched', 200);
 });
 

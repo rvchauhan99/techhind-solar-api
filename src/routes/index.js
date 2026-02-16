@@ -1,4 +1,6 @@
 const { Router } = require("express");
+const { requireAuthWithTenant } = require("../common/middlewares/auth.js");
+const { requireModulePermissionByMethod, requireModulePermissionAnyByMethod } = require("../common/middlewares/modulePermission.js");
 const authRoutes = require("../modules/auth/auth.routes.js");
 const moduleMasterRoutes = require("../modules/moduleMaster/moduleMaster.routes.js");
 const roleMasterRoutes = require("../modules/roleMaster/roleMaster.routes.js");
@@ -41,39 +43,44 @@ router.get("/health-check", (req, res) => {
 });
 
 router.use("/auth", authRoutes);
-router.use("/module-master", moduleMasterRoutes);
-router.use('/role-master', roleMasterRoutes);
-router.use('/role-module', roleModuleRoutes);
-router.use('/user-master', userMasterRoutes);
-router.use('/masters', mastersRoutes);
-router.use('/company', companyMasterRoutes);
-router.use('/site-visit', siteVisitRoutes);
-router.use('/site-survey', siteSurveyRoutes);
-router.use('/inquiry', inquiryRoutes);
-router.use('/followup', followupRoutes);
-router.use('/inquiry-documents', inquiryDocumentsRoutes);
-router.use('/order-documents', orderDocumentsRoutes);
-router.use('/order-payments', orderPaymentsRoutes);
-router.use('/product', productRoutes);
-router.use('/bill-of-material', billOfMaterialRoutes);
-router.use('/project-price', projectPriceRoutes);
-router.use('/quotation', quotationRoutes);
-router.use('/order', orderRoutes);
-router.use('/supplier', supplierRoutes);
-router.use('/purchase-orders', purchaseOrderRoutes);
-router.use('/po-inwards', poInwardRoutes);
-router.use('/stocks', stockRoutes);
-router.use('/inventory-ledger', inventoryLedgerRoutes);
-router.use('/stock-transfers', stockTransferRoutes);
-router.use('/stock-adjustments', stockAdjustmentRoutes);
-router.use('/confirm-orders', confirmOrdersRoutes);
-router.use('/closed-orders', closedOrdersRoutes);
-router.use('/challan', challanRoutes);
-router.use('/reports/serialized-inventory', serializedInventoryReportRoutes);
-router.use('/reports/deliveries', deliveryReportRoutes);
-router.use('/reports/payments', paymentsReportRoutes);
-router.use('/billing', billingRoutes);
-router.use('/admin', adminRoutes);
+
+// Mounts protected by module permission; resolve by modules.route (path-only, no query params).
+router.use("/module-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/module-master" }), moduleMasterRoutes);
+router.use("/role-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/role-master" }), roleMasterRoutes);
+router.use("/role-module", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/role-module" }), roleModuleRoutes);
+router.use("/user-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/user-master" }), userMasterRoutes);
+router.use("/masters", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/masters" }), mastersRoutes);
+router.use("/company", requireAuthWithTenant, companyMasterRoutes);
+router.use("/site-visit", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/site-visit" }), siteVisitRoutes);
+router.use("/site-survey", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/site-survey" }), siteSurveyRoutes);
+router.use("/followup", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/followup" }), followupRoutes);
+router.use("/inquiry-documents", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/inquiry" }), inquiryDocumentsRoutes);
+router.use("/order-documents", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/order" }), orderDocumentsRoutes);
+router.use("/product", requireAuthWithTenant, productRoutes);
+router.use("/bill-of-material", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/bill-of-material" }), billOfMaterialRoutes);
+router.use("/project-price", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/project-price" }), projectPriceRoutes);
+router.use("/quotation", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/quotation" }), quotationRoutes);
+router.use("/supplier", requireAuthWithTenant, supplierRoutes);
+router.use("/purchase-orders", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/purchase-orders" }), purchaseOrderRoutes);
+router.use("/po-inwards", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/po-inwards" }), poInwardRoutes);
+router.use("/stocks", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stocks" }), stockRoutes);
+router.use("/inventory-ledger", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/inventory-ledger" }), inventoryLedgerRoutes);
+router.use("/stock-transfers", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stock-transfers" }), stockTransferRoutes);
+router.use("/stock-adjustments", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stock-adjustments" }), stockAdjustmentRoutes);
+router.use("/reports/serialized-inventory", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/serialized-inventory" }), serializedInventoryReportRoutes);
+router.use("/reports/deliveries", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/deliveries" }), deliveryReportRoutes);
+router.use("/billing", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/billing" }), billingRoutes);
+router.use("/admin", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/admin" }), adminRoutes);
+
+// Child API mounts use parent page module: order-documents/inquiry-documents use /order and /inquiry above; order-payments uses any of order-related pages.
+// Mounts that use per-route requireModulePermission (no mount-level module check).
+router.use("/inquiry", inquiryRoutes);
+router.use("/order", orderRoutes);
+router.use("/confirm-orders", confirmOrdersRoutes);
+router.use("/closed-orders", closedOrdersRoutes);
+router.use("/challan", challanRoutes);
+router.use("/order-payments", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), orderPaymentsRoutes);
+router.use("/reports/payments", paymentsReportRoutes);
 
 router.get("/", (req, res) => res.send("API Running ✅"));
 

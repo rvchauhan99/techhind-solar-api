@@ -9,8 +9,8 @@ const installationController = require("../installation/installation.controller.
 
 const router = Router();
 
-const pendingOrders = (action) => requireModulePermission({ moduleKey: "pending_orders", action });
-const fabricationInstallation = (action) => requireModulePermission({ moduleKey: "fabrication_installation", action });
+const pendingOrders = (action) => requireModulePermission({ moduleRoute: "/order", action });
+const fabricationInstallation = (action) => requireModulePermission({ moduleRoute: "/order", action });
 
 router.get("/", ...requireAuthWithTenant, pendingOrders("read"), controller.list);
 router.get("/export", ...requireAuthWithTenant, pendingOrders("read"), controller.exportList);

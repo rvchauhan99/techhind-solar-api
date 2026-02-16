@@ -792,10 +792,10 @@ const updateMaster = async ({ model, id, updates, userId } = {}) => {
 
 /**
  * Generic function to get reference options for a model (for select dropdowns)
- * @param {Object} params - { model }
- * @returns {Array} - Array of { id, name } objects
+ * @param {Object} params - { model, status } - status is optional filter when model has status attribute
+ * @returns {Array} - Array of { id, label, value, ... } objects
  */
-const getReferenceOptions = async ({ model } = {}) => {
+const getReferenceOptions = async ({ model, status } = {}) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
@@ -812,6 +812,12 @@ const getReferenceOptions = async ({ model } = {}) => {
     const modelAttributes = Model.rawAttributes || {};
     const hasDisplayField = modelAttributes[displayField];
     const hasOrderByField = modelAttributes[orderByField];
+
+    // Build where clause
+    const where = { deleted_at: null };
+    if (status && modelAttributes.status) {
+        where.status = status;
+    }
 
     // Build order clause
     let orderBy = [['id', 'ASC']];
@@ -858,21 +864,33 @@ const getReferenceOptions = async ({ model } = {}) => {
         attributes.push('is_default');
     }
 
-    // Fetch all non-deleted records
-    const rows = await Model.findAll({
-        where: { deleted_at: null },
+    // For PurchaseOrder, include Supplier so we can show "po_number - supplier_name" in dropdown
+    const isPurchaseOrder = model === 'purchaseOrder.model' || model === 'purchase_order.model' || Model.tableName === 'purchase_orders';
+    const findOptions = {
+        where,
         order: orderBy,
         attributes: attributes,
-    });
+    };
+    if (isPurchaseOrder && db.Supplier) {
+        findOptions.include = [
+            { model: db.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
+        ];
+    }
+
+    const rows = await Model.findAll(findOptions);
 
     // Convert to options format - return all fields from the model, not just label
     const options = rows.map((row) => {
         const data = row.toJSON();
+        let label = data[displayField] || data.name || data.code || data.title || data.label || `ID: ${data.id}`;
+        if (isPurchaseOrder && data.supplier && data.supplier.supplier_name) {
+            label = `${data.po_number || data.id} - ${data.supplier.supplier_name}`;
+        }
         // Return all the data fields, so frontend can use the actual field names (name, unit, etc.)
         return {
             id: data.id,
             ...data, // Include all fields from the model (name, unit, product_type_id, etc.)
-            label: data[displayField] || data.name || data.code || data.title || data.label || `ID: ${data.id}`, // Keep label for backward compatibility
+            label,
             value: data.id,
         };
     });

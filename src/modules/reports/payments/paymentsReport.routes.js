@@ -7,18 +7,18 @@ const controller = require("./paymentsReport.controller.js");
 
 const router = Router();
 
-// Payments report is tied to module key `payment_report`
+// Payments report: authorize by module URL
 router.get(
   "/",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_report", action: "read" }),
+  requireModulePermission({ moduleRoute: "/reports/payments", action: "read" }),
   controller.list
 );
 
 router.get(
   "/export",
   ...requireAuthWithTenant,
-  requireModulePermission({ moduleKey: "payment_report", action: "read" }),
+  requireModulePermission({ moduleRoute: "/reports/payments", action: "read" }),
   controller.exportReport
 );
 
