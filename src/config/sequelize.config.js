@@ -39,10 +39,10 @@ function getDialectOptions(useSsl) {
 }
 
 // Keep pool small for managed Postgres (e.g. Aiven) – limited non-superuser connection slots.
-// In development use smaller pool so nodemon restarts don't exhaust connection slots.
+// In development use smaller pool so nodemon restarts don't exhaust connection slots when cloud + local share the same DB.
 const poolMax = parseInt(process.env.DB_POOL_MAX, 10);
 const poolMin = parseInt(process.env.DB_POOL_MIN, 10);
-const defaultMax = process.env.NODE_ENV === "development" ? 3 : 5;
+const defaultMax = process.env.NODE_ENV === "development" ? 2 : 5;
 const pool = {
     max: Number.isFinite(poolMax) ? poolMax : defaultMax,
     min: Number.isFinite(poolMin) ? poolMin : 0,

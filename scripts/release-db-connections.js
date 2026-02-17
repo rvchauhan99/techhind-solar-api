@@ -7,8 +7,9 @@
  * - By default: terminates only IDLE connections from the current user (safe).
  * - With --all: terminates ALL other connections from the current user (use after stopping the app).
  *
- * Requires at least one free slot to connect. If no slots are free, restart the DB from Aiven console
- * or wait for idle timeouts.
+ * Requires at least one free slot to connect. If this script cannot connect (all slots full):
+ * stop the API on all instances (cloud and local), then run: npm run db:release-connections -- --all.
+ * Alternatively restart the DB from Aiven console or wait for idle timeouts.
  *
  * Usage:
  *   npm run db:release-connections       # kill idle connections only
