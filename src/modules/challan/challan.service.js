@@ -536,7 +536,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
     if (challanData.order_id) {
         order = await Order.findOne({
             where: { id: challanData.order_id, deleted_at: null },
-            attributes: ["id", "bom_snapshot", "stages", "current_stage_key", "planned_warehouse_id"],
+            attributes: ["id", "bom_snapshot", "stages", "current_stage_key", "planned_warehouse_id", "status"],
             include: [
                 {
                     model: db.Quotation,
@@ -565,9 +565,9 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
             throw error;
         }
 
-        // Enforce that delivery challans are created only in Delivery stage
-        if (!(order.current_stage_key === "delivery" && order.stages?.delivery === "pending")) {
-            const error = new Error("Order is not in Delivery stage or delivery is already completed");
+        // Order must be confirmed to create delivery challan
+        if (String(order.status || "").toLowerCase() !== "confirmed") {
+            const error = new Error("Order must be confirmed to create delivery challan");
             error.statusCode = 400;
             throw error;
         }
