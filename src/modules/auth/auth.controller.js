@@ -190,14 +190,16 @@ const getUserProfile = asyncHandler(async (req, res) => {
 
   const roleModules = userProfile.role.roleModules || [];
 
-  const modules = roleModules.map((rm) => ({
-    ...rm.module, // module data
-    can_create: rm.can_create,
-    can_read: rm.can_read,
-    can_update: rm.can_update,
-    can_delete: rm.can_delete,
-    listing_criteria: rm.listing_criteria || "my_team",
-  }));
+  const modules = roleModules
+    .filter((rm) => rm?.module && rm.module.status === "active" && !!rm.can_read)
+    .map((rm) => ({
+      ...rm.module, // module data
+      can_create: rm.can_create,
+      can_read: rm.can_read,
+      can_update: rm.can_update,
+      can_delete: rm.can_delete,
+      listing_criteria: rm.listing_criteria || "my_team",
+    }));
 
   // ✅ Build a map of modules by ID
   const moduleMap = {};
@@ -212,6 +214,7 @@ const getUserProfile = asyncHandler(async (req, res) => {
     if (mod.parent_id) {
       const parent = moduleMap[mod.parent_id];
       if (parent) parent.submodules.push(mod);
+      else rootModules.push(mod);
     } else {
       rootModules.push(mod);
     }

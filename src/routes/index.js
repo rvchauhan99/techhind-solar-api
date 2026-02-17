@@ -5,6 +5,7 @@ const authRoutes = require("../modules/auth/auth.routes.js");
 const moduleMasterRoutes = require("../modules/moduleMaster/moduleMaster.routes.js");
 const roleMasterRoutes = require("../modules/roleMaster/roleMaster.routes.js");
 const roleModuleRoutes = require('../modules/roleModule/roleModule.routes.js');
+const roleModulePermissionRoutes = require("../modules/roleModule/roleModule.permission.routes.js");
 const userMasterRoutes = require('../modules/userMaster/userMaster.routes.js');
 const mastersRoutes = require('../modules/masters/masters.routes.js');
 const companyMasterRoutes = require('../modules/companyMaster/companyMaster.routes.js');
@@ -43,6 +44,9 @@ router.get("/health-check", (req, res) => {
 });
 
 router.use("/auth", authRoutes);
+
+// Runtime permission helper endpoint is auth-only.
+router.use("/role-module", roleModulePermissionRoutes);
 
 // Mounts protected by module permission; resolve by modules.route (path-only, no query params).
 router.use("/module-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/module-master" }), moduleMasterRoutes);
