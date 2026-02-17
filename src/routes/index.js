@@ -53,7 +53,7 @@ router.use("/module-master", requireAuthWithTenant, requireModulePermissionByMet
 router.use("/role-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/role-master" }), roleMasterRoutes);
 router.use("/role-module", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/role-module" }), roleModuleRoutes);
 router.use("/user-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/user-master" }), userMasterRoutes);
-router.use("/masters", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/masters" }), mastersRoutes);
+router.use("/masters", requireAuthWithTenant, mastersRoutes);
 router.use("/company", requireAuthWithTenant, companyMasterRoutes);
 router.use("/site-visit", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/site-visit" }), siteVisitRoutes);
 router.use("/site-survey", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/site-survey" }), siteSurveyRoutes);

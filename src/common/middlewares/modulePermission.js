@@ -231,11 +231,74 @@ const requireModulePermissionAnyByMethod = ({ moduleRoutes = [], moduleKeys = []
   };
 };
 
+const normalizeModuleRoute = (value) => {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  const compact = raw.replace(/\/+/g, "/");
+  const withLeading = compact.startsWith("/") ? compact : `/${compact}`;
+  return withLeading === "/" ? withLeading : withLeading.replace(/\/$/, "");
+};
+
+/**
+ * Read-only authorization for shared reference-data APIs.
+ * Uses the currently opened module route from browser context so dependent
+ * APIs (masters/company/product/supplier refs) are authorized by page module.
+ *
+ * Accepts:
+ * - header: x-current-module-route
+ * - query fallback: current_module_route
+ * - fallbackModuleRoute option when context is unavailable
+ */
+const requireOpenedModuleReadPermission = ({ fallbackModuleRoute = null } = {}) => {
+  return async (req, res, next) => {
+    try {
+      const roleId = req.user?.role_id;
+      if (!roleId) {
+        return next(
+          new AppError("Unauthorized", RESPONSE_STATUS_CODES.UNAUTHORIZED)
+        );
+      }
+
+      const headerRoute = req.headers?.["x-current-module-route"];
+      const queryRoute = req.query?.current_module_route;
+      const resolvedRoute =
+        normalizeModuleRoute(headerRoute) ||
+        normalizeModuleRoute(queryRoute) ||
+        normalizeModuleRoute(fallbackModuleRoute);
+
+      if (!resolvedRoute) {
+        return next(
+          new AppError(
+            "Forbidden: missing opened module context for reference access",
+            RESPONSE_STATUS_CODES.FORBIDDEN
+          )
+        );
+      }
+
+      await roleModuleService.assertModulePermission(
+        {
+          roleId,
+          moduleRoute: resolvedRoute,
+          moduleKey: null,
+          requiredAction: "read",
+        },
+        req.transaction || null
+      );
+
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  };
+};
+
 module.exports = {
   requireModulePermission,
   requireModulePermissionAny,
   requireModulePermissionByMethod,
   requireModulePermissionAnyByMethod,
+  requireOpenedModuleReadPermission,
   methodToAction,
   REFERENCE_PRODUCT_CONSUMERS,
   REFERENCE_SUPPLIER_CONSUMERS,
