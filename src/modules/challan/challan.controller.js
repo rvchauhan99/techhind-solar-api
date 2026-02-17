@@ -10,13 +10,16 @@ const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 
+/** Parent modules that authorize challan access (same as mount in routes). Resolve listing criteria from first matching. */
+const CHALLAN_PARENT_MODULE_ROUTES = ["/confirm-orders", "/order", "/closed-orders"];
+
 const resolveDeliveryChallanVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
     const userId = Number(req.user?.id);
-    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModuleAny(
         {
             roleId,
-            moduleRoute: "/challan",
+            moduleRoutes: CHALLAN_PARENT_MODULE_ROUTES,
         },
         req.transaction
     );
