@@ -1,4 +1,5 @@
 const orderPaymentService = require("./orderPayments.service");
+const orderDocumentsService = require("../orderDocuments/orderDocuments.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const bucketService = require("../../common/services/bucket.service.js");
 const paymentReceiptPdfService = require("./pdf.service.js");
@@ -169,6 +170,26 @@ const orderPaymentsController = {
                 userId,
                 transaction: req.transaction,
             });
+            if (payment && payment.receipt_cheque_file && payment.order_id) {
+                const existingList = await orderDocumentsService.listOrderDocuments({
+                    order_id: payment.order_id,
+                    limit: 1000,
+                }, req.transaction);
+                const alreadyLinked = (existingList?.data || []).some(
+                    (d) => d.document_path === payment.receipt_cheque_file
+                );
+                if (!alreadyLinked) {
+                    await orderDocumentsService.createOrderDocument(
+                        {
+                            order_id: payment.order_id,
+                            doc_type: "Payment Receipt",
+                            document_path: payment.receipt_cheque_file,
+                            remarks: payment.receipt_number || `Payment #${payment.id}`,
+                        },
+                        req.transaction
+                    );
+                }
+            }
             res.json({ success: true, result: orderPaymentService.formatPaymentResponse(payment) });
         } catch (error) {
             console.error("Error approving payment:", error);

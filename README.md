@@ -66,7 +66,7 @@ The API supports two deployment modes:
 - **Single-tenant (dedicated):** One API instance and one database. Leave `TENANT_REGISTRY_DB_URL` unset. See [Single-tenant (dedicated) deployment](docs/deploy-single-tenant.md).
 - **Multi-tenant (shared):** One API instance, a Registry database, and one database per tenant. Set `TENANT_REGISTRY_DB_URL` and `MASTER_ENCRYPTION_KEY`. See [Multi-tenant (shared) deployment](docs/deploy-multi-tenant.md).
 
-**Connection pools:** Use `DB_POOL_MAX` and `DB_POOL_MIN` (defaults 5 and 0) to stay within managed Postgres connection limits (e.g. Aiven). Keeping these low avoids errors like "remaining connection slots are reserved for roles with the SUPERUSER attribute". See the deploy guides for details.
+**Connection pools:** Use `DB_POOL_MAX` and `DB_POOL_MIN` (defaults: development 2, production 5; min 0) to stay within managed Postgres connection limits (e.g. Aiven). When cloud and local share the same DB, set `DB_POOL_MAX=2` (or 3) for local so total connections stay under the limit. Stop the API on all instances before running `npm run db:release-connections -- --all`. Prefer Ctrl+C or SIGTERM to stop the server so connections close; avoid `kill -9`. See `.env.example` and the deploy guides for details.
 
 ## Database Management
 
