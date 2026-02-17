@@ -78,7 +78,7 @@ router.use("/inquiry", inquiryRoutes);
 router.use("/order", orderRoutes);
 router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
-router.use("/challan", challanRoutes);
+router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), challanRoutes);
 router.use("/order-payments", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), orderPaymentsRoutes);
 router.use("/reports/payments", paymentsReportRoutes);
 
