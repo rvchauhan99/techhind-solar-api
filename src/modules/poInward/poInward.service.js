@@ -146,7 +146,7 @@ const exportPOInwards = async (params = {}) => {
       status: p.status || "",
       total_received_quantity: p.total_received_quantity != null ? p.total_received_quantity : "",
       total_accepted_quantity: p.total_accepted_quantity != null ? p.total_accepted_quantity : "",
-      received_at: p.received_at ? new Date(p.received_at).toISOString() : "",
+      received_at: p.received_at ? new Date(p.received_at).toISOString().split("T")[0] : "",
       created_at: p.created_at ? new Date(p.created_at).toISOString() : "",
     });
   });
@@ -382,7 +382,7 @@ const computeProductPurchasePriceStats = async ({ productIds, transaction } = {}
             MAX(i.rate) AS max_purchase_price,
             SUM(i.rate * i.accepted_quantity) / NULLIF(SUM(i.accepted_quantity), 0) AS avg_purchase_price
      FROM po_inward_items i
-     INNER JOIN po_inwards p ON p.id = i.po_inward_id AND p.status = :status AND p.deleted_at IS NULL
+     INNER JOIN po_inwards p ON p.id = i.po_inward_id AND p.status = :status
      WHERE i.product_id IN (:productIds)
      GROUP BY i.product_id`,
     {
