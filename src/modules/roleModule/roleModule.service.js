@@ -418,6 +418,42 @@ const getListingCriteriaForRoleAndModule = async (
   return normalizeListingCriteria(permission?.listing_criteria);
 };
 
+/**
+ * Return listing criteria for a role using the first of the given modules that the role has read access to.
+ * Used for child APIs (e.g. challan) that are authorized by "any of" parent modules; no separate module row needed.
+ * Tries moduleRoutes first, then moduleKeys. If none resolve, returns "all" so mount-authorized users are not blocked.
+ */
+const getListingCriteriaForRoleAndModuleAny = async (
+  { roleId, moduleRoutes = [], moduleKeys = [] } = {},
+  transaction = null
+) => {
+  for (const moduleRoute of moduleRoutes) {
+    if (!moduleRoute) continue;
+    try {
+      const criteria = await getListingCriteriaForRoleAndModule(
+        { roleId, moduleRoute, moduleKey: null },
+        transaction
+      );
+      if (criteria != null) return criteria;
+    } catch {
+      // try next
+    }
+  }
+  for (const moduleKey of moduleKeys) {
+    if (!moduleKey) continue;
+    try {
+      const criteria = await getListingCriteriaForRoleAndModule(
+        { roleId, moduleKey, moduleRoute: null },
+        transaction
+      );
+      if (criteria != null) return criteria;
+    } catch {
+      // try next
+    }
+  }
+  return "all";
+};
+
 module.exports = {
   createRoleModule,
   getRoleModuleById,
@@ -431,4 +467,5 @@ module.exports = {
   assertModulePermission,
   assertModulePermissionAny,
   getListingCriteriaForRoleAndModule,
+  getListingCriteriaForRoleAndModuleAny,
 };

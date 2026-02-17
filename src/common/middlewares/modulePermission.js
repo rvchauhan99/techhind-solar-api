@@ -68,6 +68,7 @@ const REFERENCE_SUPPLIER_CONSUMER_ROUTES = ["/supplier", "/purchase-orders", "/p
 
 const REFERENCE_COMPANY_CONSUMER_ROUTES = [
   "/company",
+  "/company-profile",
   "/purchase-orders",
   "/po-inwards",
   "/confirm-orders",

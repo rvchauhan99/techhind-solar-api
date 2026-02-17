@@ -11,7 +11,8 @@ const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 const router = Router();
 
 const refRead = requireModulePermissionAny({ moduleRoutes: REFERENCE_COMPANY_CONSUMER_ROUTES, action: "read" });
-const company = (action) => requireModulePermission({ moduleRoute: "/company", action });
+// Use moduleKey so company profile permission works regardless of module.route (e.g. /company or /company-profile)
+const company = (action) => requireModulePermission({ moduleKey: "company_profile", action });
 
 // Company Profile: reference read for GET (forms/dropdowns), own module for update
 router.get("/profile", ...requireAuthWithTenant, refRead, controller.getProfile);
