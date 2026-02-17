@@ -10,27 +10,33 @@ const modelDisplayFields = require('../../common/utils/modelDisplayFields.json')
  * @returns {Object} - Sequelize Model
  */
 const getModelByName = (model) => {
-    let modelName = model.replace(/\.model$/i, '');
-    modelName = modelName
-        .split(/[-_]/)
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join('');
+    const raw = String(model || "").replace(/\.model$/i, "").trim();
+    const normalize = (s) => String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 
-    let Model = db[modelName];
-    if (!Model) {
-        const altModelName = modelName.charAt(0).toLowerCase() + modelName.slice(1);
-        const AltModel = db[altModelName];
-        if (AltModel) {
-            Model = AltModel;
-        } else {
-            const availableModels = Object.keys(db).filter(key => !['sequelize', 'Sequelize'].includes(key));
-            throw new AppError(
-                `Model "${modelName}" not found. Available models: ${availableModels.join(', ')}`,
-                RESPONSE_STATUS_CODES.NOT_FOUND
-            );
-        }
+    // Build tolerant candidates for direct key lookup.
+    const pascal = raw
+        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+        .split(/[-_/.\s]+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join("");
+    const camel = pascal ? pascal.charAt(0).toLowerCase() + pascal.slice(1) : "";
+
+    const directCandidates = [...new Set([raw, pascal, camel].filter(Boolean))];
+    for (const candidate of directCandidates) {
+        if (db[candidate]) return db[candidate];
     }
-    return Model;
+
+    // Fuzzy match against db model keys (handles PurchaseOrder, POInward, etc.).
+    const availableModels = Object.keys(db).filter((key) => !["sequelize", "Sequelize"].includes(key));
+    const normalizedRaw = normalize(raw);
+    const fuzzyKey = availableModels.find((key) => normalize(key) === normalizedRaw);
+    if (fuzzyKey && db[fuzzyKey]) return db[fuzzyKey];
+
+    throw new AppError(
+        `Model "${pascal || raw}" not found. Available models: ${availableModels.join(", ")}`,
+        RESPONSE_STATUS_CODES.NOT_FOUND
+    );
 };
 
 const VISIBILITY_ACTIVE = 'active';

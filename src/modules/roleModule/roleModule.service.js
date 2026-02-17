@@ -1,5 +1,5 @@
 const ExcelJS = require("exceljs");
-const { Op } = require("sequelize");
+const { Op, fn, col, where: sequelizeWhere } = require("sequelize");
 const db = require("../../models/index.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
@@ -29,9 +29,33 @@ const normalizeKey = (value) => {
 };
 
 /**
+ * Derive tolerant key candidates from a route string.
+ * Example: /reports/serialized-inventory -> ["reports_serialized_inventory", "serialized_inventory", "reports/serialized-inventory", "serialized-inventory"]
+ */
+const deriveKeyCandidatesFromRoute = (moduleRoute) => {
+  const normalizedRoute = normalizeRoute(moduleRoute);
+  if (!normalizedRoute) return [];
+  const withoutLeadingSlash = normalizedRoute.replace(/^\/+/, "");
+  if (!withoutLeadingSlash) return [];
+
+  const lastSegment = withoutLeadingSlash.split("/").filter(Boolean).pop() || "";
+  const routeAsSnake = withoutLeadingSlash
+    .toLowerCase()
+    .replace(/[\/\s-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const lastAsSnake = lastSegment
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return [...new Set([routeAsSnake, lastAsSnake, withoutLeadingSlash.toLowerCase(), lastSegment.toLowerCase()].filter(Boolean))];
+};
+
+/**
  * Resolve a Module.id from explicit id, route, or key.
- * Authorization is by module URL (route): when moduleRoute is provided we resolve ONLY by
- * modules.route (module name and key are ignored). Route/key are normalized for tolerant lookup.
+ * Resolution prefers route first and then performs tolerant fallback (case-insensitive route, then key candidates).
  * Throws Forbidden when the module cannot be resolved, so callers fail closed.
  */
 const resolveModuleIdOrThrow = async (
@@ -44,48 +68,113 @@ const resolveModuleIdOrThrow = async (
     return resolvedModuleId;
   }
 
-  const moduleWhere = { deleted_at: null };
-  const moduleOr = [];
-
   const normalizedRoute = normalizeRoute(moduleRoute);
   if (normalizedRoute) {
-    // Resolve only by URL (route). Do not use key/name so auth is strictly by module URL.
-    moduleOr.push({ route: normalizedRoute });
+    const routeCandidates = [];
+    routeCandidates.push(normalizedRoute);
     const withoutLeadingSlash = normalizedRoute.replace(/^\/+/, "");
     if (withoutLeadingSlash !== normalizedRoute) {
-      moduleOr.push({ route: withoutLeadingSlash });
+      routeCandidates.push(withoutLeadingSlash);
     }
-  } else {
-    // Fallback when no route given (e.g. legacy callers): resolve by key.
-    const normalizedKey = normalizeKey(moduleKey);
-    if (normalizedKey) {
-      moduleOr.push({ key: normalizedKey });
+
+    // 1) Exact route match first.
+    const exactRouteOr = [...new Set(routeCandidates)].map((route) => ({ route }));
+    let moduleRows = await db.Module.findAll({
+      where: { deleted_at: null, [Op.or]: exactRouteOr },
+      attributes: ["id", "route", "key"],
+      order: [["id", "ASC"]],
+      transaction,
+    });
+
+    // 2) Case-insensitive route match.
+    if (!moduleRows.length) {
+      const routeCiOr = [...new Set(routeCandidates)].map((route) =>
+        sequelizeWhere(fn("lower", col("route")), route.toLowerCase())
+      );
+      moduleRows = await db.Module.findAll({
+        where: { deleted_at: null, [Op.or]: routeCiOr },
+        attributes: ["id", "route", "key"],
+        order: [["id", "ASC"]],
+        transaction,
+      });
     }
+
+    // 3) Tolerant fallback: derive key candidates from route.
+    if (!moduleRows.length) {
+      const keyCandidates = deriveKeyCandidatesFromRoute(normalizedRoute);
+      if (keyCandidates.length) {
+        moduleRows = await db.Module.findAll({
+          where: {
+            deleted_at: null,
+            [Op.or]: keyCandidates.map((candidate) =>
+              sequelizeWhere(fn("lower", col("key")), candidate)
+            ),
+          },
+          attributes: ["id", "route", "key"],
+          order: [["id", "ASC"]],
+          transaction,
+        });
+      }
+    }
+
+    if (!moduleRows.length) {
+      throw new AppError(
+        "Forbidden: module not found or not configured",
+        RESPONSE_STATUS_CODES.FORBIDDEN
+      );
+    }
+
+    if (moduleRows.length > 1) {
+      console.warn("[rbac] Ambiguous module resolution by route, selecting lowest id", {
+        moduleRoute,
+        normalizedRoute,
+        candidateCount: moduleRows.length,
+        candidateIds: moduleRows.map((m) => m.id),
+      });
+    }
+
+    return moduleRows[0].id;
   }
 
-  if (moduleOr.length === 0) {
+  // Fallback when no route given (legacy callers): resolve by key.
+  const normalizedKey = normalizeKey(moduleKey);
+  if (!normalizedKey) {
     throw new AppError(
       "Forbidden: module route/key not provided",
       RESPONSE_STATUS_CODES.FORBIDDEN
     );
   }
 
-  moduleWhere[Op.or] = moduleOr;
-
-  const moduleRow = await db.Module.findOne({
-    where: moduleWhere,
-    attributes: ["id"],
+  const moduleRows = await db.Module.findAll({
+    where: {
+      deleted_at: null,
+      [Op.or]: [
+        { key: normalizedKey },
+        sequelizeWhere(fn("lower", col("key")), normalizedKey),
+      ],
+    },
+    attributes: ["id", "route", "key"],
+    order: [["id", "ASC"]],
     transaction,
   });
 
-  if (!moduleRow) {
+  if (!moduleRows.length) {
     throw new AppError(
       "Forbidden: module not found or not configured",
       RESPONSE_STATUS_CODES.FORBIDDEN
     );
   }
 
-  return moduleRow.id;
+  if (moduleRows.length > 1) {
+    console.warn("[rbac] Ambiguous module resolution by key, selecting lowest id", {
+      moduleKey,
+      normalizedKey,
+      candidateCount: moduleRows.length,
+      candidateIds: moduleRows.map((m) => m.id),
+    });
+  }
+
+  return moduleRows[0].id;
 };
 
 const createRoleModule = async (payload, transaction = null) => {
@@ -274,21 +363,103 @@ const getPermissionForRoleAndModule = async (
     return null;
   }
 
-  const resolvedModuleId = await resolveModuleIdOrThrow(
-    { moduleId, moduleRoute, moduleKey },
-    transaction
-  );
+  let permission = null;
 
-  const permission = await RoleModule.findOne({
-    where: {
-      role_id: roleIdNum,
-      module_id: resolvedModuleId,
-      deleted_at: null,
-    },
-    transaction,
-  });
+  if (moduleRoute) {
+    // Route may match duplicate module rows in legacy data.
+    // Prefer the candidate that is actually assigned to the current role.
+    const normalizedRoute = normalizeRoute(moduleRoute);
+    const routeCandidates = [];
+    if (normalizedRoute) {
+      routeCandidates.push(normalizedRoute);
+      const withoutLeadingSlash = normalizedRoute.replace(/^\/+/, "");
+      if (withoutLeadingSlash !== normalizedRoute) routeCandidates.push(withoutLeadingSlash);
+    }
+
+    const candidateRows = await db.Module.findAll({
+      where: {
+        deleted_at: null,
+        [Op.or]: [
+          ...[...new Set(routeCandidates)].map((route) => ({ route })),
+          ...[...new Set(routeCandidates)].map((route) =>
+            sequelizeWhere(fn("lower", col("route")), route.toLowerCase())
+          ),
+        ],
+      },
+      attributes: ["id", "route", "key"],
+      order: [["id", "ASC"]],
+      transaction,
+    });
+
+    if (!candidateRows.length) {
+      // keep existing tolerant behavior for route->key fallback
+      const resolvedModuleId = await resolveModuleIdOrThrow(
+        { moduleId, moduleRoute, moduleKey },
+        transaction
+      );
+      permission = await RoleModule.findOne({
+        where: {
+          role_id: roleIdNum,
+          module_id: resolvedModuleId,
+          deleted_at: null,
+        },
+        transaction,
+      });
+    } else {
+      const candidateIds = candidateRows.map((m) => m.id);
+      permission = await RoleModule.findOne({
+        where: {
+          role_id: roleIdNum,
+          module_id: { [Op.in]: candidateIds },
+          deleted_at: null,
+        },
+        order: [["module_id", "ASC"]],
+        transaction,
+      });
+
+      if (!permission) {
+        // Preserve old failure semantics but use deterministic first candidate.
+        permission = await RoleModule.findOne({
+          where: {
+            role_id: roleIdNum,
+            module_id: candidateIds[0],
+            deleted_at: null,
+          },
+          transaction,
+        });
+      }
+
+      if (candidateRows.length > 1 && permission) {
+        console.warn("[rbac] Resolved ambiguous route using role-module mapping", {
+          roleId: roleIdNum,
+          moduleRoute,
+          candidateIds,
+          selectedModuleId: permission.module_id,
+        });
+      }
+    }
+  } else {
+    const resolvedModuleId = await resolveModuleIdOrThrow(
+      { moduleId, moduleRoute, moduleKey },
+      transaction
+    );
+    permission = await RoleModule.findOne({
+      where: {
+        role_id: roleIdNum,
+        module_id: resolvedModuleId,
+        deleted_at: null,
+      },
+      transaction,
+    });
+  }
 
   if (!permission) {
+    console.warn("[rbac] Missing role-module mapping", {
+      roleId: roleIdNum,
+      moduleId: moduleId ?? null,
+      moduleRoute: moduleRoute || null,
+      moduleKey: moduleKey || null,
+    });
     return null;
   }
 
@@ -333,6 +504,14 @@ const assertModulePermission = async (
   const allowed = permission[flagKey];
 
   if (!allowed) {
+    console.warn("[rbac] Action denied by role-module flags", {
+      roleId: Number(roleId) || null,
+      moduleId: permission?.module_id ?? moduleId ?? null,
+      moduleRoute: moduleRoute || null,
+      moduleKey: moduleKey || null,
+      requiredAction,
+      deniedFlag: flagKey,
+    });
     throw new AppError(
       "Forbidden: insufficient permissions for this action",
       RESPONSE_STATUS_CODES.FORBIDDEN

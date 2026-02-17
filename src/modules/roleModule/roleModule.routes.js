@@ -7,7 +7,6 @@ const router = Router();
 router.get('/list', ...requireAuthWithTenant, controller.list);
 router.get('/export', ...requireAuthWithTenant, controller.exportList);
 router.get('/role/:roleId', ...requireAuthWithTenant, controller.getByRoleId);
-router.get('/permission/:moduleId', ...requireAuthWithTenant, controller.getPermission);
 router.post('/create', ...requireAuthWithTenant, controller.create);
 router.get('/:id', ...requireAuthWithTenant, controller.getById);
 router.put('/:id', ...requireAuthWithTenant, controller.update);
