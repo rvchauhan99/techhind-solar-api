@@ -190,6 +190,9 @@ const getById = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, item, "Inquiry fetched", 200);
 });
 
+// Note: create is intentionally NOT restricted by listing criteria.
+// Any role that has create permission on the /inquiry module may add inquiries,
+// regardless of whether their listing criteria is "my_team" or "all".
 const create = asyncHandler(async (req, res) => {
   const payload = { ...req.body };
   const created = await inquiryService.createInquiry({
