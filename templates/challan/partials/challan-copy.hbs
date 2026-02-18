@@ -80,6 +80,18 @@
     </tfoot>
   </table>
 
+  {{#if items_with_serials.length}}
+  <div class="serial-numbers-section">
+    <h4>Serial Numbers Captured</h4>
+    {{#each items_with_serials}}
+    <div class="serial-numbers-block">
+      <strong>{{safe product_name}}</strong> <span class="serial-qty">({{serial_numbers.length}})</span>
+      <p class="serial-list">{{safe serial_numbers_display}}</p>
+    </div>
+    {{/each}}
+  </div>
+  {{/if}}
+
   <div class="notes-signatures">
     <article class="note">
       <h4>Note</h4>

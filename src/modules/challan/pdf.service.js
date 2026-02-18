@@ -78,6 +78,12 @@ const toItemLine = (rawItem = {}, index = 0) => {
     const product = rawItem.product || {};
     const snapshot = rawItem.product_snapshot || {};
     const quantity = Number(rawItem.quantity) || 0;
+    const serialsRaw = rawItem.serials || "";
+    const serialNumbers = serialsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+    const serialNumbersDisplay = serialNumbers.length > 0 ? serialNumbers.join(", ") : "-";
     return {
         index: index + 1,
         hsn: product.hsn_ssn_code || snapshot.hsn_ssn_code || "-",
@@ -85,6 +91,8 @@ const toItemLine = (rawItem = {}, index = 0) => {
         description: product.product_description || snapshot.product_description || rawItem.remarks || "",
         quantity,
         uom: product.measurementUnit?.unit || snapshot.uom || "Nos",
+        serial_numbers: serialNumbers,
+        serial_numbers_display: serialNumbersDisplay,
     };
 };
 
@@ -96,6 +104,9 @@ const prepareChallanPdfData = async (challan, company, options = {}) => {
     const itemLines = Array.isArray(challan?.items)
         ? challan.items.map((item, index) => toItemLine(item, index))
         : [];
+    const itemsWithSerials = itemLines.filter(
+        (line) => Array.isArray(line.serial_numbers) && line.serial_numbers.length > 0
+    );
     const totalQuantity = itemLines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
     const companyLogoPath = company?.logo || "";
     const logoExt = path.extname(companyLogoPath || "").toLowerCase();
@@ -147,6 +158,7 @@ const prepareChallanPdfData = async (challan, company, options = {}) => {
         },
         generated_by: generatedBy,
         items: itemLines,
+        items_with_serials: itemsWithSerials,
         total_quantity: totalQuantity,
         copies: ["Original", "Duplicate"],
     };

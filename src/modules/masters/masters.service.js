@@ -798,10 +798,10 @@ const updateMaster = async ({ model, id, updates, userId } = {}) => {
 
 /**
  * Generic function to get reference options for a model (for select dropdowns)
- * @param {Object} params - { model, status } - status is optional filter when model has status attribute
+ * @param {Object} params - { model, status, q, limit, id } - status optional; q search term (optional); limit max results (optional, default 20 when q present); id optional single id to fetch one option
  * @returns {Array} - Array of { id, label, value, ... } objects
  */
-const getReferenceOptions = async ({ model, status } = {}) => {
+const getReferenceOptions = async ({ model, status, q = null, limit = null, id: idParam = null } = {}) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
@@ -823,6 +823,27 @@ const getReferenceOptions = async ({ model, status } = {}) => {
     const where = { deleted_at: null };
     if (status && modelAttributes.status) {
         where.status = status;
+    }
+
+    // Fetch by id: when id is provided, filter by primary key and return at most one option
+    const parsedId = idParam != null && idParam !== '' ? (Number(idParam) || idParam) : null;
+    if (parsedId != null) {
+        where.id = parsedId;
+    }
+
+    // Search: when q is provided, filter by display field and other searchable string fields
+    const searchTerm = typeof q === 'string' ? q.trim() : '';
+    if (searchTerm.length > 0) {
+        const searchableFields = [];
+        const stringFields = ['name', 'code', 'title', 'label', 'username', 'po_number'];
+        for (const field of stringFields) {
+            if (modelAttributes[field]) {
+                searchableFields.push({ [field]: { [Op.iLike]: `%${searchTerm}%` } });
+            }
+        }
+        if (searchableFields.length > 0) {
+            where[Op.or] = searchableFields;
+        }
     }
 
     // Build order clause
@@ -881,6 +902,12 @@ const getReferenceOptions = async ({ model, status } = {}) => {
         findOptions.include = [
             { model: db.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
         ];
+    }
+
+    // Apply limit: when id is present return at most one; when q is present default to 20, otherwise use provided limit or no limit (backward compat)
+    const effectiveLimit = parsedId != null ? 1 : (limit != null ? Number(limit) : (searchTerm.length > 0 ? 20 : undefined));
+    if (effectiveLimit != null && !Number.isNaN(effectiveLimit) && effectiveLimit > 0) {
+        findOptions.limit = Math.min(effectiveLimit, 100);
     }
 
     const rows = await Model.findAll(findOptions);
