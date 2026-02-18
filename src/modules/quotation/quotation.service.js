@@ -51,6 +51,7 @@ const listQuotations = async ({
     created_at_to,
     status,
     include_converted,
+    enforced_user_ids: enforcedUserIds,
 } = {}) => {
     const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, ProjectPrice, Inquiry, ProductMake } = db;
     const { Op } = db.Sequelize;
@@ -205,6 +206,14 @@ const listQuotations = async ({
         if (created_at_from) where.created_at[Op.gte] = created_at_from;
         if (created_at_to) where.created_at[Op.lte] = created_at_to;
         if (Reflect.ownKeys(where.created_at).length === 0) delete where.created_at;
+    }
+
+    if (Array.isArray(enforcedUserIds)) {
+        if (enforcedUserIds.length === 0) {
+            where.user_id = { [Op.in]: [-1] };
+        } else {
+            where.user_id = { [Op.in]: enforcedUserIds };
+        }
     }
 
     const orderClause = sortBy ? [[sortBy, (sortOrder || "DESC").toUpperCase()]] : [["id", "DESC"]];
