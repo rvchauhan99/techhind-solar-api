@@ -2,14 +2,40 @@
 
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
-const AppError = require("../../common/errors/AppError.js");
 const quotationService = require("./quotation.service.js");
+const roleModuleService = require("../roleModule/roleModule.service.js");
+const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 const pdfService = require("./pdf.service.js");
 const bucketService = require("../../common/services/bucket.service.js");
 const db = require("../../models/index.js");
 
 const FILE_UNAVAILABLE_MESSAGE =
     "We couldn't save your documents right now. Please try again in a few minutes.";
+
+const resolveQuotationVisibilityContext = async (req) => {
+    const roleId = Number(req.user?.role_id);
+    const userId = Number(req.user?.id);
+    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+        {
+            roleId,
+            moduleRoute: "/quotation",
+            moduleKey: "quotation",
+        },
+        req.transaction
+    );
+
+    if (listingCriteria !== "my_team") {
+        return { listingCriteria, enforcedHandledByIds: null };
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+        return { listingCriteria, enforcedHandledByIds: [] };
+    }
+    const teamUserIds = await getTeamHierarchyUserIds(userId, {
+        transaction: req.transaction,
+    });
+    return { listingCriteria, enforcedHandledByIds: teamUserIds };
+};
 
 const list = asyncHandler(async (req, res) => {
     const {
@@ -44,6 +70,7 @@ const list = asyncHandler(async (req, res) => {
         status,
         include_converted,
     } = req.query;
+    const { enforcedHandledByIds } = await resolveQuotationVisibilityContext(req);
     const items = await quotationService.listQuotations({
         search: q,
         inquiry_id: inquiry_id ? parseInt(inquiry_id, 10) : undefined,
@@ -75,6 +102,7 @@ const list = asyncHandler(async (req, res) => {
         created_at_to,
         status,
         include_converted: include_converted === "true" || include_converted === true,
+        enforced_user_ids: enforcedHandledByIds,
     });
     return responseHandler.sendSuccess(res, items, "Quotation list fetched", 200);
 });
@@ -108,6 +136,7 @@ const exportList = asyncHandler(async (req, res) => {
         status,
         include_converted,
     } = req.query;
+    const { enforcedHandledByIds } = await resolveQuotationVisibilityContext(req);
     const buffer = await quotationService.exportQuotations({
         search: q,
         inquiry_id: inquiry_id ? parseInt(inquiry_id, 10) : undefined,
@@ -135,6 +164,7 @@ const exportList = asyncHandler(async (req, res) => {
         inquiry_number,
         created_at_from,
         created_at_to,
+        enforced_user_ids: enforcedHandledByIds,
     });
     const filename = `quotations-${new Date().toISOString().split("T")[0]}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -148,6 +178,8 @@ const getById = asyncHandler(async (req, res) => {
     if (!item) {
         return responseHandler.sendError(res, "Quotation not found", 404);
     }
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(item, context, { handledByField: "user_id" });
     return responseHandler.sendSuccess(res, item, "Quotation fetched", 200);
 });
 
@@ -162,6 +194,12 @@ const create = asyncHandler(async (req, res) => {
 
 const update = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const existing = await quotationService.getQuotationById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation not found", 404);
+    }
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "user_id" });
     const payload = { ...req.body };
     const updated = await quotationService.updateQuotation({
         id,
@@ -173,6 +211,12 @@ const update = asyncHandler(async (req, res) => {
 
 const remove = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const existing = await quotationService.getQuotationById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation not found", 404);
+    }
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "user_id" });
     const result = await quotationService.deleteQuotation({
         id,
         transaction: req.transaction,
@@ -182,6 +226,12 @@ const remove = asyncHandler(async (req, res) => {
 
 const approve = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const existing = await quotationService.getQuotationById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation not found", 404);
+    }
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "user_id" });
     const item = await quotationService.approveQuotation({
         id,
         transaction: req.transaction,
@@ -191,6 +241,12 @@ const approve = asyncHandler(async (req, res) => {
 
 const unapprove = asyncHandler(async (req, res) => {
     const { id } = req.params;
+    const existing = await quotationService.getQuotationById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation not found", 404);
+    }
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "user_id" });
     const item = await quotationService.unapproveQuotation({
         id,
         transaction: req.transaction,
@@ -254,6 +310,8 @@ const generatePDF = asyncHandler(async (req, res) => {
     if (!quotation) {
         return responseHandler.sendError(res, "Quotation not found", 404);
     }
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(quotation, context, { handledByField: "user_id" });
 
     // Get company profile
     const { Company, CompanyBankAccount, ProductMake } = db;
