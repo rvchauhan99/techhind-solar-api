@@ -5,6 +5,7 @@ const responseHandler = require("../../common/utils/responseHandler.js");
 const bucketService = require("../../common/services/bucket.service.js");
 const orderService = require("./order.service.js");
 const orderPdfService = require("./pdf.service.js");
+const companyService = require("../companyMaster/companyMaster.service.js");
 const db = require("../../models/index.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
@@ -264,6 +265,36 @@ const update = asyncHandler(async (req, res) => {
     const context = await resolveOrderVisibilityContext(req);
     assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
     const payload = { ...req.body };
+
+    const touchesFabricatorInstallerAssignment =
+        payload.fabricator_installer_id !== undefined ||
+        payload.fabricator_id !== undefined ||
+        payload.installer_id !== undefined ||
+        payload.fabricator_installer_are_same !== undefined ||
+        (payload.stages && payload.stages.assign_fabricator_and_installer !== undefined) ||
+        (payload.current_stage_key && payload.current_stage_key !== existing.current_stage_key);
+
+    const plannedWarehouseId = existing.planned_warehouse_id || payload.planned_warehouse_id;
+    if (touchesFabricatorInstallerAssignment && plannedWarehouseId && req.user?.id) {
+        try {
+            const managers = await companyService.getWarehouseManagers(plannedWarehouseId, req.transaction);
+            const managerIds = (managers || []).map((m) => Number(m.id));
+            const userId = Number(req.user.id);
+            if (!managerIds.includes(userId)) {
+                return responseHandler.sendError(
+                    res,
+                    "Only warehouse managers of the order's planned warehouse can perform this assignment.",
+                    403
+                );
+            }
+        } catch (err) {
+            if (err.statusCode === 404) {
+                return responseHandler.sendError(res, "Planned warehouse not found.", 404);
+            }
+            throw err;
+        }
+    }
+
     const updated = await orderService.updateOrder({
         id,
         payload,
