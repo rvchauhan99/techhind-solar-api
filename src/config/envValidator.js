@@ -43,14 +43,28 @@ const validateEnv = () => {
   const required = requiredEnvVars[env] || requiredEnvVars.development;
   const missing = [];
 
-  required.forEach((varName) => {
-    if (!process.env[varName]) {
-      missing.push(varName);
-    }
-  });
+  // DB: require either DATABASE_URL or all of DB_HOST, DB_NAME, DB_USER, DB_PASS
+  const hasDatabaseUrl = !!process.env.DATABASE_URL;
+  const hasDbVars = !!(process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER);
+  if (!hasDatabaseUrl && !hasDbVars) {
+    missing.push("DATABASE_URL or (DB_HOST, DB_NAME, DB_USER, DB_PASS)");
+  } else {
+    // Skip DB_* in required check when DATABASE_URL is used
+    required.forEach((varName) => {
+      if (varName.startsWith("DB_") && hasDatabaseUrl) return;
+      if (!process.env[varName]) {
+        missing.push(varName);
+      }
+    });
+  }
 
   if (process.env.TENANT_REGISTRY_DB_URL && !process.env.MASTER_ENCRYPTION_KEY) {
     missing.push("MASTER_ENCRYPTION_KEY (required when TENANT_REGISTRY_DB_URL is set)");
+  }
+
+  // Production: warn if DB_SSL_CA not set (less secure connection)
+  if (env === "production" && !process.env.DB_SSL_CA && !process.env.DB_SSL_CA_PATH) {
+    console.warn("⚠️  DB_SSL_CA or DB_SSL_CA_PATH not set in production. Consider setting for certificate verification.");
   }
 
   if (missing.length > 0) {

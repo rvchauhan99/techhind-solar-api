@@ -99,6 +99,8 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
           throw new Error(`Serial number ${serial.serial_number} already exists`);
         }
 
+        const unitPrice =
+          item.purchaseOrderItem?.rate != null ? item.purchaseOrderItem.rate : null;
         await StockSerial.create(
           {
             product_id: item.product_id,
@@ -109,6 +111,7 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
             source_type: TRANSACTION_TYPE.PO_INWARD,
             source_id: poInward.id,
             inward_date: new Date(),
+            unit_price: unitPrice,
           },
           { transaction: t }
         );

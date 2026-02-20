@@ -167,7 +167,7 @@ const listShipTos = async ({ client_id, page = 1, limit = 100 }) => {
 
   const { count, rows } = await B2BClientShipTo.findAndCountAll({
     where,
-    order: [["id", "ASC"]],
+    order: [["id", "DESC"]],
     limit,
     offset,
   });

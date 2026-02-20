@@ -1,4 +1,6 @@
 const bcrypt = require("bcrypt");
+const { Sequelize } = require("sequelize");
+const { Op } = require("sequelize");
 const { authenticator } = require("otplib");
 const qrcode = require("qrcode");
 const AppError = require("../../common/errors/AppError.js");
@@ -8,6 +10,8 @@ const {
   USER_STATUS,
   RESPONSE_STATUS_CODES,
 } = require("../../common/utils/constants.js");
+
+const normalizeEmail = (email) => (email && String(email).trim().toLowerCase()) || "";
 
 const checkedToken = async (access_token) => {
   const token = await db.UserToken.findOne({
@@ -36,10 +40,11 @@ const loginUser = async (email, password, transaction) => {
  * @returns {Promise<object>}
  */
 const loginUserWithTenant = async (tenantSequelize, email, password) => {
+  const normalizedEmail = normalizeEmail(email);
   const users = await tenantSequelize.query(
     `SELECT id, email, password, role_id, two_factor_enabled, first_login, status
-     FROM users WHERE email = :email LIMIT 1`,
-    { replacements: { email }, type: tenantSequelize.QueryTypes.SELECT }
+     FROM users WHERE LOWER(email) = LOWER(:email) LIMIT 1`,
+    { replacements: { email: normalizedEmail }, type: tenantSequelize.QueryTypes.SELECT }
   );
   const row = Array.isArray(users) ? users[0] : users;
   if (!row) throw new AppError("Invalid credentials", 401);
@@ -100,9 +105,15 @@ const deleteExistingTokens = async (user_id, transaction) => {
 };
 
 const chcekUserByEmail = async (email, transaction) => {
+  const normalizedEmail = normalizeEmail(email);
   const user = await db.User.findOne(
     {
-      where: { email, status: USER_STATUS.ACTIVE },
+      where: {
+        [Op.and]: [
+          Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), normalizedEmail),
+          { status: USER_STATUS.ACTIVE },
+        ],
+      },
     },
     { transaction }
   );

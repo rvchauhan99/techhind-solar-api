@@ -3,6 +3,7 @@
 const { Sequelize } = require("sequelize");
 const tenantRegistryService = require("./tenantRegistry.service.js");
 const { getRegistrySequelize } = require("../../config/registryDb.js");
+const { getDialectOptions } = require("../../config/dbSsl.js");
 const defaultSequelize = require("../../config/db.js");
 
 const poolCache = new Map();
@@ -66,13 +67,14 @@ function getOrCreateTenantPool(tenantId, config) {
     throw err;
   }
 
+  const isProduction = process.env.NODE_ENV === "production";
   const sequelize = new Sequelize(db_name, db_user, db_password || undefined, {
     host: db_host,
     port: db_port || 5432,
     dialect: "postgres",
     logging: false,
     pool: defaultPoolConfig,
-    dialectOptions: process.env.NODE_ENV === "production" ? { ssl: { require: true, rejectUnauthorized: false } } : {},
+    dialectOptions: isProduction ? getDialectOptions(true) : {},
   });
   poolCache.set(tenantId, sequelize);
   return sequelize;
