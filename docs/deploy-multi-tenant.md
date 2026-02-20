@@ -111,7 +111,7 @@ Or:
 node src/server.js
 ```
 
-**Docker:** The image runs `node src/server.js` only. Do not run migrations in the container; run Registry and tenant migrations in your pipeline or a separate job.
+**Docker:** The image runs tenant migrations on start (via the entrypoint), then starts the server. Run **Registry** migrations (`npm run db:registry-migrate`) separately when the Registry schema changes; tenant DB migrations run automatically on each container start.
 
 ---
 
@@ -142,6 +142,6 @@ See [admin-tenant-management.md](admin-tenant-management.md) for the full API co
 1. Create the Registry DB; set **TENANT_REGISTRY_DB_URL** and **MASTER_ENCRYPTION_KEY**; run **npm run db:registry-migrate**.
 2. Register tenants in the Registry (encrypted DB credentials, `mode = 'shared'`, `status = 'active'`).
 3. Set API env (Registry URL, encryption key, JWT secrets, DB_* for app config, PORT, FRONTEND_URL).
-4. Run **npm run db:tenant-migrate** as a separate job so every tenant DB has the app schema.
+4. Run **npm run db:tenant-migrate** as a separate job only if you need to migrate without starting the API; otherwise the Docker image runs tenant migrations on each container start.
 5. Start the API with **npm start** or Docker.
 6. Point the frontend at this API and ensure login sends **tenant_key** (via `NEXT_PUBLIC_TENANT_KEY` or a tenant field on the login form).
