@@ -1,8 +1,17 @@
 "use strict";
 
 const path = require("path");
+const fs = require("fs");
 
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+
+/** Resolve DB_SSL_CA_PATH relative to project root (same as src/config/dbSsl.js) so migrations work on DO. */
+function resolveCaPath(envPath) {
+  if (!envPath || !envPath.trim()) return null;
+  const raw = envPath.trim();
+  if (path.isAbsolute(raw)) return raw;
+  return path.resolve(__dirname, "..", raw.replace(/^\.\//, ""));
+}
 
 function getDialectOptions(useSsl) {
   if (!useSsl) return {};
@@ -10,12 +19,16 @@ function getDialectOptions(useSsl) {
   if (process.env.DB_SSL_CA) {
     sslCA = (process.env.DB_SSL_CA || "").replace(/\\n/g, "\n").trim();
   } else if (process.env.DB_SSL_CA_PATH) {
-    try {
-      const fs = require("fs");
-      const caPath = path.resolve(process.env.DB_SSL_CA_PATH);
-      sslCA = fs.readFileSync(caPath, "utf8");
-    } catch (e) {
-      return {};
+    const raw = process.env.DB_SSL_CA_PATH.trim();
+    if (raw.includes("-----BEGIN")) {
+      sslCA = raw.replace(/\\n/g, "\n").trim();
+    } else {
+      try {
+        const caPath = resolveCaPath(raw);
+        if (caPath) sslCA = fs.readFileSync(caPath, "utf8");
+      } catch (e) {
+        return { ssl: { require: true, rejectUnauthorized: false } };
+      }
     }
   }
   return {
