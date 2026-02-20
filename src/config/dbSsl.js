@@ -26,8 +26,8 @@ function normalizePem(value) {
 }
 
 /**
- * Build dialectOptions.ssl for PostgreSQL.
- * Uses DB_SSL_CA (env) or DB_SSL_CA_PATH (path to file, or inline PEM if value contains -----BEGIN).
+ * Build dialectOptions.ssl for PostgreSQL (production: Digital Ocean, Aiven, etc.).
+ * Uses DB_SSL_CA (env) or DB_SSL_CA_PATH (path to .crt or .pem file, or inline PEM if value contains -----BEGIN).
  * @param {boolean} useSsl - whether SSL should be enabled (e.g. NODE_ENV === "production")
  * @returns {object} dialectOptions.ssl or empty object
  */
