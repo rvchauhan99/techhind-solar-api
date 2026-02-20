@@ -115,6 +115,10 @@ const TRANSACTION_TYPE = {
   DELIVERY_CHALLAN_OUT: "DELIVERY_CHALLAN_OUT",
   // Inward movement when cancelling/reversing a delivery challan
   DELIVERY_CHALLAN_CANCEL_IN: "DELIVERY_CHALLAN_CANCEL_IN",
+  // B2B shipment outward
+  B2B_SHIPMENT_OUT: "B2B_SHIPMENT_OUT",
+  // B2B shipment cancel reversal
+  B2B_SHIPMENT_CANCEL_IN: "B2B_SHIPMENT_CANCEL_IN",
 };
 
 const MOVEMENT_TYPE = {
