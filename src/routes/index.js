@@ -31,6 +31,11 @@ const stockAdjustmentRoutes = require('../modules/stockAdjustment/stockAdjustmen
 const confirmOrdersRoutes = require('../modules/confirmOrders/confirmOrders.routes.js');
 const closedOrdersRoutes = require('../modules/closedOrders/closedOrders.routes.js');
 const challanRoutes = require('../modules/challan/challan.routes.js');
+const b2bClientsRoutes = require('../modules/b2bClients/b2bClients.routes.js');
+const b2bSalesQuotesRoutes = require('../modules/b2bSalesQuotes/b2bSalesQuotes.routes.js');
+const b2bSalesOrdersRoutes = require('../modules/b2bSalesOrders/b2bSalesOrders.routes.js');
+const b2bShipmentsRoutes = require('../modules/b2bShipments/b2bShipments.routes.js');
+const b2bInvoicesRoutes = require('../modules/b2bInvoices/b2bInvoices.routes.js');
 const serializedInventoryReportRoutes = require('../modules/reports/serializedInventory/serializedInventory.routes.js');
 const deliveryReportRoutes = require('../modules/reports/deliveryReport/deliveryReport.routes.js');
 const paymentsReportRoutes = require('../modules/reports/payments/paymentsReport.routes.js');
@@ -84,6 +89,12 @@ router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
 router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), challanRoutes);
 router.use("/order-payments", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), orderPaymentsRoutes);
+
+router.use("/b2b-clients", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-clients" }), b2bClientsRoutes);
+router.use("/b2b-sales-quotes", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-sales-quotes" }), b2bSalesQuotesRoutes);
+router.use("/b2b-sales-orders", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-sales-orders" }), b2bSalesOrdersRoutes);
+router.use("/b2b-shipments", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-shipments" }), b2bShipmentsRoutes);
+router.use("/b2b-invoices", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-invoices" }), b2bInvoicesRoutes);
 router.use("/reports/payments", paymentsReportRoutes);
 
 router.get("/", (req, res) => res.send("API Running ✅"));

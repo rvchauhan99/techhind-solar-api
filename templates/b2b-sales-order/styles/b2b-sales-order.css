@@ -7,10 +7,6 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   color: #111827;
   font-size: 12px;
-}
-
-.challan-copy {
-  min-height: 100vh;
   padding: 10px 2px;
 }
 
@@ -67,9 +63,12 @@ body {
 
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
   margin-top: 8px;
+}
+
+.grid-3 {
+  grid-template-columns: 1fr 1fr 1fr;
 }
 
 .card {
@@ -97,28 +96,29 @@ body {
   border-collapse: collapse;
   margin-top: 8px;
   border: 1px solid #d1d5db;
+  font-size: 11px;
 }
 
 .items-table th,
 .items-table td {
   border: 1px solid #d1d5db;
-  padding: 6px;
+  padding: 5px;
   vertical-align: top;
 }
 
 .items-table thead th {
   background: #f3f4f6;
   text-align: left;
+  white-space: nowrap;
 }
 
 .items-table .num {
   text-align: right;
-  width: 70px;
+  white-space: nowrap;
 }
 
-.items-table .empty {
-  text-align: center;
-  color: #6b7280;
+.items-table .wrap {
+  word-break: break-word;
 }
 
 .items-table tfoot td {
@@ -136,10 +136,6 @@ body {
   color: #1f2937;
 }
 
-.group-name {
-  display: inline-block;
-}
-
 .group-meta {
   margin-left: 8px;
   font-weight: 400;
@@ -147,86 +143,36 @@ body {
   font-size: 11px;
 }
 
-.serial-numbers-section {
-  margin-top: 10px;
-  border: 1px solid #d1d5db;
-  padding: 8px;
-  background: #f9fafb;
+.items-table tbody tr:nth-child(even):not(.group-row) td {
+  background: #fcfcfd;
 }
 
-.serial-numbers-section h4 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: #374151;
-}
-
-.serial-numbers-block {
-  margin-bottom: 10px;
-  break-inside: avoid;
-}
-
-.serial-numbers-block:last-child {
-  margin-bottom: 0;
-}
-
-.serial-header {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.serial-qty {
-  font-weight: normal;
-  color: #6b7280;
-  font-size: 11px;
-}
-
-.serial-grid {
-  margin: 6px 0 0 0;
-  padding-left: 16px;
-  columns: 3;
-  column-gap: 14px;
-  list-style: disc;
-}
-
-.serial-grid li {
-  margin: 2px 0;
-  font-size: 11px;
-  line-height: 1.35;
-  color: #111827;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  break-inside: avoid;
+.items-table tfoot tr.grand-total td {
+  background: #f3f4f6;
 }
 
 .notes-signatures {
   margin-top: 10px;
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
-.note,
-.sign {
+.notes-signatures .sign {
   border: 1px solid #d1d5db;
   min-height: 110px;
   padding: 8px;
 }
 
-.note h4,
-.sign h4 {
+.notes-signatures .sign h4 {
   margin: 0 0 6px;
   font-size: 12px;
 }
 
-.note p,
-.sign p {
+.notes-signatures .sign p {
   margin: 5px 0;
 }
 
 .muted {
   color: #6b7280;
-}
-
-.page-break {
-  page-break-after: always;
 }

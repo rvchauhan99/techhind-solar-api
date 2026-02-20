@@ -74,6 +74,24 @@ const compactAddress = (...parts) =>
         .filter(Boolean)
         .join(", ");
 
+const groupItems = (items = []) => {
+    const map = {};
+    const order = [];
+    (items || []).forEach((it) => {
+        const name = String(it.product_type || "Other").trim() || "Other";
+        if (!map[name]) {
+            map[name] = [];
+            order.push(name);
+        }
+        map[name].push(it);
+    });
+    return order.map((group_name) => {
+        const groupItemsList = map[group_name] || [];
+        const group_qty = groupItemsList.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+        return { group_name, group_qty, items: groupItemsList };
+    });
+};
+
 const toItemLine = (rawItem = {}, index = 0) => {
     const product = rawItem.product || {};
     const snapshot = rawItem.product_snapshot || {};
@@ -88,6 +106,7 @@ const toItemLine = (rawItem = {}, index = 0) => {
         index: index + 1,
         hsn: product.hsn_ssn_code || snapshot.hsn_ssn_code || "-",
         product_name: product.product_name || snapshot.product_name || "-",
+        product_type: product.productType?.name || snapshot.product_type_name || "Other",
         description: product.product_description || snapshot.product_description || rawItem.remarks || "",
         quantity,
         uom: product.measurementUnit?.unit || snapshot.uom || "Nos",
@@ -158,6 +177,7 @@ const prepareChallanPdfData = async (challan, company, options = {}) => {
         },
         generated_by: generatedBy,
         items: itemLines,
+        items_grouped: groupItems(itemLines),
         items_with_serials: itemsWithSerials,
         total_quantity: totalQuantity,
         copies: ["Original", "Duplicate"],

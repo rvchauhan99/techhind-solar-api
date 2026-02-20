@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tax Invoice - {{invoice_no}}</title>
+  <style>{{{styles}}}</style>
+</head>
+<body>
+  <header class="copy-header">
+    <section class="company-block">
+      {{#if company.logo_data_url}}
+        <img class="logo" src="{{company.logo_data_url}}" alt="Company Logo" />
+      {{/if}}
+      <div class="company-text">
+        <div class="company-name">{{safe company.name}}</div>
+        <div class="company-sub">{{safe company.address}}</div>
+        <div class="company-sub">
+          {{#if company.phone}}Ph: {{safe company.phone}}{{/if}}
+          {{#if company.email}}{{#if company.phone}} | {{/if}}{{safe company.email}}{{/if}}
+        </div>
+        <div class="company-sub">GSTIN: {{safe company.gstin}}</div>
+      </div>
+    </section>
+
+    <section class="meta-block">
+      <div class="title">TAX INVOICE</div>
+      <div class="meta-row"><span>Invoice No</span><strong>{{safe invoice_no}}</strong></div>
+      <div class="meta-row"><span>Date</span><strong>{{formatDate invoice_date}}</strong></div>
+      <div class="meta-row"><span>Order No</span><strong>{{safe order_no}}</strong></div>
+      <div class="meta-row"><span>Shipment No</span><strong>{{safe shipment_no}}</strong></div>
+      <div class="meta-row"><span>GST Type</span><strong>{{safe gst_type}}</strong></div>
+      <div class="meta-row"><span>Place of Supply</span><strong>{{safe place_of_supply}}</strong></div>
+    </section>
+  </header>
+
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-title">Bill To</div>
+      <div class="card-strong">{{safe bill_to.name}}</div>
+      <div class="card-sub">{{safe bill_to.address}}</div>
+      <div class="card-sub">GSTIN: {{safe bill_to.gstin}}</div>
+      <div class="card-sub">PAN: {{safe bill_to.pan}}</div>
+    </article>
+
+    <article class="card">
+      <div class="card-title">Ship To</div>
+      <div class="card-strong">{{safe ship_to.name}}</div>
+      <div class="card-sub">{{safe ship_to.address}}</div>
+      {{#if ship_to.state}}<div class="card-sub">State: {{safe ship_to.state}}</div>{{/if}}
+    </article>
+  </section>
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>HSN</th>
+        <th>Description</th>
+        <th class="num">Qty</th>
+        <th>UOM</th>
+        <th class="num">Rate</th>
+        <th class="num">Disc%</th>
+        <th class="num">Taxable</th>
+        {{#if is_igst}}
+          <th class="num">IGST%</th>
+          <th class="num">IGST Amt</th>
+        {{else}}
+          <th class="num">CGST%</th>
+          <th class="num">CGST Amt</th>
+          <th class="num">SGST%</th>
+          <th class="num">SGST Amt</th>
+        {{/if}}
+        <th class="num">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items}}
+      <tr>
+        <td>{{add @index 1}}</td>
+        <td>{{safe hsn_code}}</td>
+        <td>
+          <div class="item-name">{{safe product_name}}</div>
+          {{#if product_type_name}}<div class="item-sub">{{safe product_type_name}}</div>{{/if}}
+        </td>
+        <td class="num">{{quantity}}</td>
+        <td>{{safe uom_name}}</td>
+        <td class="num">{{formatCurrency unit_price}}</td>
+        <td class="num">{{discount_percent}}</td>
+        <td class="num">{{formatCurrency taxable_amount}}</td>
+        {{#if ../is_igst}}
+          <td class="num">{{igst_percent}}</td>
+          <td class="num">{{formatCurrency igst_amount}}</td>
+        {{else}}
+          <td class="num">{{cgst_percent}}</td>
+          <td class="num">{{formatCurrency cgst_amount}}</td>
+          <td class="num">{{sgst_percent}}</td>
+          <td class="num">{{formatCurrency sgst_amount}}</td>
+        {{/if}}
+        <td class="num">{{formatCurrency total_amount}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <section class="totals-wrap">
+    <div class="totals">
+      <div class="trow"><span>Taxable Amount</span><strong>{{formatCurrency taxable_amount}}</strong></div>
+      {{#if is_igst}}
+        <div class="trow"><span>IGST</span><strong>{{formatCurrency igst_amount_total}}</strong></div>
+      {{else}}
+        <div class="trow"><span>CGST</span><strong>{{formatCurrency cgst_amount_total}}</strong></div>
+        <div class="trow"><span>SGST</span><strong>{{formatCurrency sgst_amount_total}}</strong></div>
+      {{/if}}
+      <div class="trow"><span>Total GST</span><strong>{{formatCurrency total_gst_amount}}</strong></div>
+      <div class="trow"><span>Round Off</span><strong>{{formatCurrency round_off}}</strong></div>
+      <div class="trow grand"><span>Grand Total</span><strong>{{formatCurrency grand_total}}</strong></div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-left">This is a computer-generated invoice.</div>
+    <div class="footer-right">
+      <div class="sign-label">For {{safe company.name}}</div>
+      <div class="sign-space"></div>
+      <div class="sign-label">Authorized Signatory</div>
+    </div>
+  </footer>
+</body>
+</html>

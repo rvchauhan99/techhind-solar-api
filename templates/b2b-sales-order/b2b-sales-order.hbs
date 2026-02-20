@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>B2B Sales Order</title>
+  <style>{{{styles}}}</style>
+</head>
+<body>
+  <header class="copy-header">
+    <div class="company-block">
+      {{#if company.logo_data_url}}
+      <img class="logo" src="{{company.logo_data_url}}" alt="Company Logo" />
+      {{/if}}
+      <div>
+        <h1>{{safe company.name}}</h1>
+        <p>{{safe company.address}}</p>
+        <p>{{safe company.phone}} {{#if company.email}}| {{company.email}}{{/if}}</p>
+        {{#if company.website}}<p>{{company.website}}</p>{{/if}}
+      </div>
+    </div>
+    <div class="copy-meta">
+      <div class="copy-label">SALES ORDER</div>
+      <div class="meta-row"><span>Order No</span><strong>{{safe order_no}}</strong></div>
+      <div class="meta-row"><span>Date</span><strong>{{formatDate order_date}}</strong></div>
+      <div class="meta-row"><span>Status</span><strong>{{safe status}}</strong></div>
+    </div>
+  </header>
+
+  <div class="grid grid-3">
+    <article class="card">
+      <h3>Bill To</h3>
+      <p><strong>{{safe client.client_name}}</strong></p>
+      <p>{{safe client.billing_address}}</p>
+      <p>{{safe client.billing_city}}{{#if client.billing_state}}, {{client.billing_state}}{{/if}} {{client.billing_pincode}}</p>
+      {{#if client.gstin}}<p>GSTIN: {{client.gstin}}</p>{{/if}}
+    </article>
+    <article class="card">
+      <h3>Ship To</h3>
+      {{#if shipTo}}
+        <p><strong>{{safe shipTo.ship_to_name}}</strong></p>
+        <p>{{safe shipTo.address}}</p>
+        <p>{{safe shipTo.city}}{{#if shipTo.state}}, {{shipTo.state}}{{/if}} {{shipTo.pincode}}</p>
+      {{else}}
+        <p class="muted">-</p>
+      {{/if}}
+    </article>
+    <article class="card">
+      <h3>Terms</h3>
+      <p><span>Payment</span><strong>{{safe payment_terms}}</strong></p>
+      <p><span>Delivery</span><strong>{{safe delivery_terms}}</strong></p>
+      {{#if remarks}}<p><span>Remarks</span><strong>{{safe remarks}}</strong></p>{{/if}}
+    </article>
+  </div>
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>HSN</th>
+        <th>Product</th>
+        <th class="num">Qty</th>
+        <th class="num">Rate</th>
+        <th class="num">Discount %</th>
+        <th class="num">GST %</th>
+        <th class="num">Taxable</th>
+        <th class="num">GST Amt</th>
+        <th class="num">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#if items_grouped.length}}
+        {{#each items_grouped}}
+          <tr class="group-row">
+            <td colspan="10">
+              <span class="group-name">{{safe group_name}}</span>
+              <span class="group-meta">({{group_qty}} Qty)</span>
+            </td>
+          </tr>
+          {{#each items}}
+          <tr>
+            <td>{{add @index 1}}</td>
+            <td>{{safe hsn_code}}</td>
+            <td class="wrap">{{safe product.product_name}}</td>
+            <td class="num">{{quantity}}</td>
+            <td class="num">{{formatCurrency unit_rate}}</td>
+            <td class="num">{{discount_percent}}</td>
+            <td class="num">{{gst_percent}}</td>
+            <td class="num">{{formatCurrency taxable_amount}}</td>
+            <td class="num">{{formatCurrency gst_amount}}</td>
+            <td class="num">{{formatCurrency total_amount}}</td>
+          </tr>
+          {{/each}}
+        {{/each}}
+      {{else}}
+        {{#each items}}
+        <tr>
+          <td>{{add @index 1}}</td>
+          <td>{{safe hsn_code}}</td>
+          <td class="wrap">{{safe product.product_name}}</td>
+          <td class="num">{{quantity}}</td>
+          <td class="num">{{formatCurrency unit_rate}}</td>
+          <td class="num">{{discount_percent}}</td>
+          <td class="num">{{gst_percent}}</td>
+          <td class="num">{{formatCurrency taxable_amount}}</td>
+          <td class="num">{{formatCurrency gst_amount}}</td>
+          <td class="num">{{formatCurrency total_amount}}</td>
+        </tr>
+        {{/each}}
+      {{/if}}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="7" class="total-label">Subtotal</td>
+        <td class="num" colspan="2">{{formatCurrency subtotal_amount}}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td colspan="7" class="total-label">Total GST</td>
+        <td class="num" colspan="2">{{formatCurrency total_gst_amount}}</td>
+        <td></td>
+      </tr>
+      <tr class="grand-total">
+        <td colspan="7" class="total-label">Grand Total</td>
+        <td class="num" colspan="2"><strong>{{formatCurrency grand_total}}</strong></td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="notes-signatures single-sign">
+    <article class="sign">
+      <h4>Authorized Signatory</h4>
+      <p>Name: _______________________</p>
+      <p>Signature: ___________________</p>
+    </article>
+  </div>
+</body>
+</html>

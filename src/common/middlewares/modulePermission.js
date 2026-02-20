@@ -21,6 +21,11 @@ const REFERENCE_PRODUCT_CONSUMERS = [
   "bill_of_materials",
   "serialized_inventory",
   "delivery_report",
+  "b2b_clients",
+  "b2b_sales_quotes",
+  "b2b_sales_orders",
+  "b2b_shipments",
+  "b2b_invoices",
 ];
 
 /**
@@ -41,6 +46,11 @@ const REFERENCE_COMPANY_CONSUMERS = [
   "stock_transfers",
   "serialized_inventory",
   "delivery_report",
+  "b2b_clients",
+  "b2b_sales_quotes",
+  "b2b_sales_orders",
+  "b2b_shipments",
+  "b2b_invoices",
 ];
 
 /**
@@ -62,6 +72,11 @@ const REFERENCE_PRODUCT_CONSUMER_ROUTES = [
   "/bill-of-material",
   "/reports/serialized-inventory",
   "/reports/deliveries",
+  "/b2b-clients",
+  "/b2b-sales-quotes",
+  "/b2b-sales-orders",
+  "/b2b-shipments",
+  "/b2b-invoices",
 ];
 
 const REFERENCE_SUPPLIER_CONSUMER_ROUTES = ["/supplier", "/purchase-orders", "/po-inwards"];
@@ -77,6 +92,11 @@ const REFERENCE_COMPANY_CONSUMER_ROUTES = [
   "/stock-transfers",
   "/reports/serialized-inventory",
   "/reports/deliveries",
+  "/b2b-clients",
+  "/b2b-sales-quotes",
+  "/b2b-sales-orders",
+  "/b2b-shipments",
+  "/b2b-invoices",
 ];
 
 /**
