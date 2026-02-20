@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const { Sequelize } = require("sequelize");
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const {
   TOKEN_EXPIRY,
@@ -14,8 +15,11 @@ const db = require("../../models/index.js");
 const tenantRegistryService = require("../tenant/tenantRegistry.service.js");
 const dbPoolManager = require("../tenant/dbPoolManager.js");
 
+const normalizeEmail = (email) => (email && String(email).trim().toLowerCase()) || "";
+
 const login = asyncHandler(async (req, res) => {
-  const { email, password, tenant_key } = req.body;
+  const email = normalizeEmail(req.body.email);
+  const { password, tenant_key } = req.body;
   let user;
   let tenantSequelize = null;
   let loginTransaction = null; // Used in shared mode when login has no tenant_key (global middleware does not set req.transaction)
@@ -369,7 +373,7 @@ const logout = asyncHandler(async (req, res) => {
  * Body: { email: string }
  */
 const sendPasswordResetOtp = asyncHandler(async (req, res) => {
-  const { email } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   if (!email) {
     return responseHandler.sendError(
@@ -379,9 +383,14 @@ const sendPasswordResetOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // Find user by email (must be active)
+  // Find user by email (must be active), case-insensitive
   const user = await db.User.findOne({
-    where: { email, status: USER_STATUS.ACTIVE },
+    where: {
+      [db.Sequelize.Op.and]: [
+        Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), email),
+        { status: USER_STATUS.ACTIVE },
+      ],
+    },
   });
 
   // For security, don't reveal if email exists or not
@@ -426,7 +435,8 @@ const sendPasswordResetOtp = asyncHandler(async (req, res) => {
  * Body: { email: string, otp: string }
  */
 const verifyPasswordResetOtp = asyncHandler(async (req, res) => {
-  const { email, otp } = req.body;
+  const email = normalizeEmail(req.body.email);
+  const { otp } = req.body;
 
   if (!email || !otp) {
     return responseHandler.sendError(
@@ -436,9 +446,14 @@ const verifyPasswordResetOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // Find user by email
+  // Find user by email, case-insensitive
   const user = await db.User.findOne({
-    where: { email, status: db.Sequelize.literal("status = 'active'") },
+    where: {
+      [db.Sequelize.Op.and]: [
+        Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), email),
+        { status: "active" },
+      ],
+    },
   });
 
   if (!user) {
@@ -479,7 +494,8 @@ const verifyPasswordResetOtp = asyncHandler(async (req, res) => {
  * Body: { email: string, otp: string, new_password: string, confirm_password: string }
  */
 const resetPassword = asyncHandler(async (req, res) => {
-  const { email, otp, new_password, confirm_password } = req.body;
+  const email = normalizeEmail(req.body.email);
+  const { otp, new_password, confirm_password } = req.body;
 
   if (!email || !otp || !new_password || !confirm_password) {
     return responseHandler.sendError(
@@ -489,9 +505,14 @@ const resetPassword = asyncHandler(async (req, res) => {
     );
   }
 
-  // Find user by email
+  // Find user by email, case-insensitive
   const user = await db.User.findOne({
-    where: { email, status: db.Sequelize.literal("status = 'active'") },
+    where: {
+      [db.Sequelize.Op.and]: [
+        Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), email),
+        { status: "active" },
+      ],
+    },
   });
 
   if (!user) {

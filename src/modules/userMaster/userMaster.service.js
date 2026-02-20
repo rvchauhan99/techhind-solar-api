@@ -8,6 +8,8 @@ const { clearTeamHierarchyCache } = require('../../common/utils/teamHierarchyCac
 
 const User = db.User;
 
+const normalizeEmail = (email) => (email && String(email).trim().toLowerCase()) || '';
+
 const normalizeManagerId = (value) => {
   if (value === "" || value === null || typeof value === "undefined") return null;
   const parsed = Number(value);
@@ -34,8 +36,11 @@ const validateManager = async (managerId, transaction = null) => {
 };
 
 const createUser = async (payload, transaction = null) => {
-  // check duplicate email excluding soft-deleted
-  const existing = await User.findOne({ where: { email: payload.email, deleted_at: null }, transaction });
+  const normalizedEmail = normalizeEmail(payload.email);
+  if (!normalizedEmail) throw new AppError('Email is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
+
+  // check duplicate email excluding soft-deleted (case-insensitive via normalized value)
+  const existing = await User.findOne({ where: { email: normalizedEmail, deleted_at: null }, transaction });
   if (existing) throw new AppError('Email already in use', RESPONSE_STATUS_CODES.BAD_REQUEST);
 
   // set default password if not provided (we don't accept password from UI per spec)
@@ -47,7 +52,7 @@ const createUser = async (payload, transaction = null) => {
 
   const createPayload = {
     name: payload.name,
-    email: payload.email,
+    email: normalizedEmail,
     password: hashedPassword,
 
     photo: payload.photo || null,
@@ -186,8 +191,9 @@ const updateUser = async (id, updates, transaction = null) => {
   const user = await User.findOne({ where: { id, deleted_at: null }, transaction });
   if (!user) throw new AppError('User not found', RESPONSE_STATUS_CODES.NOT_FOUND);
 
-  if (updates.email && updates.email !== user.email) {
-    const exists = await User.findOne({ where: { email: updates.email, deleted_at: null, id: { [Op.ne]: id } }, transaction });
+  const normalizedEmail = updates.email ? normalizeEmail(updates.email) : undefined;
+  if (normalizedEmail !== undefined && normalizedEmail !== user.email) {
+    const exists = await User.findOne({ where: { email: normalizedEmail, deleted_at: null, id: { [Op.ne]: id } }, transaction });
     if (exists) throw new AppError('Email already in use', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
@@ -207,10 +213,10 @@ const updateUser = async (id, updates, transaction = null) => {
     await validateManager(managerId, transaction);
   }
 
-  // Only allow specific fields to be updated from UI; include new contact fields
+  // Only allow specific fields to be updated from UI; include new contact fields (email stored lowercase)
   const allowed = {
     name: safeUpdates.name,
-    email: safeUpdates.email,
+    email: normalizedEmail !== undefined ? normalizedEmail : safeUpdates.email,
     photo: safeUpdates.photo,
     role_id: safeUpdates.role_id,
     manager_id: typeof managerId === "undefined" ? undefined : managerId,

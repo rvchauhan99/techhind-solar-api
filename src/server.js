@@ -177,5 +177,6 @@ ${tenantBlock}
     });
   } catch (error) {
     console.error("❌ DB Connection failed:", error);
+    process.exit(1);
   }
 })();

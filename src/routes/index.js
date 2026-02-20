@@ -1,4 +1,5 @@
 const { Router } = require("express");
+const db = require("../models/index.js");
 const { requireAuthWithTenant } = require("../common/middlewares/auth.js");
 const { requireModulePermissionByMethod, requireModulePermissionAnyByMethod } = require("../common/middlewares/modulePermission.js");
 const authRoutes = require("../modules/auth/auth.routes.js");
@@ -43,9 +44,14 @@ const billingRoutes = require('../modules/billing/billing.routes.js');
 const adminRoutes = require('../modules/admin/admin.routes.js');
 const router = Router();
 
-// health check API
-router.get("/health-check", (req, res) => {
-  res.send("Solar API is working ...");
+// health check API – verifies main DB connectivity (works for both single-tenant and multi-tenant)
+router.get("/health-check", async (req, res) => {
+  try {
+    await db.sequelize.authenticate();
+    res.status(200).json({ status: "ok", database: "connected", message: "Solar API is working" });
+  } catch (err) {
+    res.status(503).json({ status: "error", database: "disconnected", message: err?.message || "Database unavailable" });
+  }
 });
 
 router.use("/auth", authRoutes);

@@ -23,7 +23,7 @@ process.env.NODE_ENV = process.env.NODE_ENV || "production";
 
 const dbConfig = require("../src/config/sequelize.config.js");
 if (!dbConfig || !dbConfig.host) {
-  console.error("No DB config. Set DB_HOST, DB_NAME, DB_USER, DB_PASS (and SSL if needed).");
+  console.error("No DB config. Set DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASS (and SSL if needed).");
   process.exit(1);
 }
 

@@ -47,6 +47,10 @@ const StockSerial = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    unit_price: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
+    },
     inward_date: {
       type: DataTypes.DATEONLY,
       allowNull: true,
