@@ -1,0 +1,3 @@
+row,order_number,error
+2,"ORD-2501-001","branch_name not found: ""Main Branch""; project_scheme_name not found: ""Rooftop Solar""; order_type_name not found: ""Net Metering""; discom_name not found: ""GUVNL""; inquiry_source_name not found: ""Direct""; inquiry_by_email not found: ""user@example.com""; handled_by_email not found: ""sales@example.com"""
+3,"ORD-2501-002","branch_name not found: ""Main Branch""; project_scheme_name not found: ""Off-grid""; order_type_name not found: ""Net Metering""; discom_name not found: ""GUVNL""; inquiry_source_name not found: ""Channel""; inquiry_by_email not found: ""sales@example.com""; handled_by_email not found: ""sales@example.com"""

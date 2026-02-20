@@ -21,7 +21,8 @@
     "setup-b2b-modules": "node scripts/setup-b2b-modules-and-superadmin.js",
     "assign-inventory-to-superadmin": "node scripts/assign-inventory-to-superadmin-once.js",
     "test:db-permissions": "node scripts/test-db-permissions.js",
-    "test:smoke-rbac": "node scripts/smoke-rbac.js"
+    "test:smoke-rbac": "node scripts/smoke-rbac.js",
+    "order-import": "node scripts/order-import/import-orders.js"
   },
   "dependencies": {
     "aws-sdk": "^2.1691.0",
@@ -29,6 +30,7 @@
     "body-parser": "^2.2.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
     "dotenv": "^16.6.1",
     "exceljs": "^4.4.0",
     "express": "^4.21.2",

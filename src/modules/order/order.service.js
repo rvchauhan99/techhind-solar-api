@@ -679,9 +679,11 @@ const createOrder = async ({ payload, transaction } = {}) => {
             }
         }
 
-        // 2) Create Order
+        // 2) Create Order (allow order_number from payload for migration/import)
         const orderData = {
-            ...(orderNumberFromInquiry && { order_number: orderNumberFromInquiry }),
+            ...(payload.order_number || orderNumberFromInquiry
+                ? { order_number: payload.order_number || orderNumberFromInquiry }
+                : {}),
             status: payload.status || "pending",
             inquiry_id: payload.inquiry_id || null,
             quotation_id: payload.quotation_id || null,
