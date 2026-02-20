@@ -39,3 +39,18 @@ Runtime connection pool settings (`DB_POOL_MAX`, `DB_POOL_MIN`, `REGISTRY_DB_POO
 ## State tracking
 
 Each database (tenant or dedicated) tracks applied migrations in the `SequelizeMeta` table. The tenant migration runner uses the same table and migration filenames as sequelize-cli, so state is compatible and retries are safe.
+
+## B2B modules (UI permissions)
+
+The B2B screens (Clients, Quotes, Orders, Shipments, Invoices) are controlled by entries in `modules` + `role_modules`.
+
+- **Ensure module rows exist**: run migrations (includes `migrations/20260219000006-add-b2b-modules.js`).
+- **Link modules to SuperAdmin** (so they appear in the web sidebar):
+
+```bash
+node scripts/setup-b2b-modules-and-superadmin.js
+```
+
+Notes:
+- Run this once per environment/DB after migrations.
+- The script is idempotent: it creates missing modules and links them to the `SuperAdmin` role with full permissions.

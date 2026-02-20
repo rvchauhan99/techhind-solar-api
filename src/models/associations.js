@@ -59,6 +59,16 @@ module.exports = (db) => {
     PanelTechnology,
     Fabrication,
     Installation,
+    B2BClient,
+    B2BClientShipTo,
+    B2BSalesQuote,
+    B2BSalesQuoteItem,
+    B2BSalesOrder,
+    B2BSalesOrderItem,
+    B2BShipment,
+    B2BShipmentItem,
+    B2BInvoice,
+    B2BInvoiceItem,
   } = db;
 
   // User ↔ Role
@@ -720,6 +730,120 @@ module.exports = (db) => {
   if (Installation && User) {
     Installation.belongsTo(User, { foreignKey: "installer_id", as: "installer" });
     User.hasMany(Installation, { foreignKey: "installer_id", as: "installations" });
+  }
+
+  // B2B associations
+  if (B2BClient && B2BClientShipTo) {
+    B2BClient.hasMany(B2BClientShipTo, { foreignKey: "client_id", as: "shipToAddresses" });
+    B2BClientShipTo.belongsTo(B2BClient, { foreignKey: "client_id", as: "client" });
+  }
+  if (B2BClient && B2BSalesQuote) {
+    B2BSalesQuote.belongsTo(B2BClient, { foreignKey: "client_id", as: "client" });
+    B2BClient.hasMany(B2BSalesQuote, { foreignKey: "client_id", as: "salesQuotes" });
+  }
+  if (B2BClientShipTo && B2BSalesQuote) {
+    B2BSalesQuote.belongsTo(B2BClientShipTo, { foreignKey: "ship_to_id", as: "shipTo" });
+    B2BClientShipTo.hasMany(B2BSalesQuote, { foreignKey: "ship_to_id", as: "salesQuotes" });
+  }
+  if (B2BSalesQuote && B2BSalesQuoteItem) {
+    B2BSalesQuote.hasMany(B2BSalesQuoteItem, { foreignKey: "b2b_sales_quote_id", as: "items" });
+    B2BSalesQuoteItem.belongsTo(B2BSalesQuote, { foreignKey: "b2b_sales_quote_id", as: "salesQuote" });
+  }
+  if (B2BSalesQuoteItem && Product) {
+    B2BSalesQuoteItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(B2BSalesQuoteItem, { foreignKey: "product_id", as: "b2bSalesQuoteItems" });
+  }
+  if (B2BSalesQuote && User) {
+    B2BSalesQuote.belongsTo(User, { foreignKey: "user_id", as: "user" });
+    User.hasMany(B2BSalesQuote, { foreignKey: "user_id", as: "b2bSalesQuotes" });
+  }
+  if (B2BSalesQuote && B2BSalesOrder) {
+    B2BSalesOrder.belongsTo(B2BSalesQuote, { foreignKey: "quote_id", as: "quote" });
+    B2BSalesQuote.hasMany(B2BSalesOrder, { foreignKey: "quote_id", as: "salesOrders" });
+  }
+  if (B2BClient && B2BSalesOrder) {
+    B2BSalesOrder.belongsTo(B2BClient, { foreignKey: "client_id", as: "client" });
+    B2BClient.hasMany(B2BSalesOrder, { foreignKey: "client_id", as: "salesOrders" });
+  }
+  if (B2BClientShipTo && B2BSalesOrder) {
+    B2BSalesOrder.belongsTo(B2BClientShipTo, { foreignKey: "ship_to_id", as: "shipTo" });
+    B2BClientShipTo.hasMany(B2BSalesOrder, { foreignKey: "ship_to_id", as: "salesOrders" });
+  }
+  if (B2BSalesOrder && B2BSalesOrderItem) {
+    B2BSalesOrder.hasMany(B2BSalesOrderItem, { foreignKey: "b2b_sales_order_id", as: "items" });
+    B2BSalesOrderItem.belongsTo(B2BSalesOrder, { foreignKey: "b2b_sales_order_id", as: "salesOrder" });
+  }
+  if (B2BSalesOrderItem && Product) {
+    B2BSalesOrderItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(B2BSalesOrderItem, { foreignKey: "product_id", as: "b2bSalesOrderItems" });
+  }
+  if (B2BSalesOrder && CompanyWarehouse) {
+    B2BSalesOrder.belongsTo(CompanyWarehouse, { foreignKey: "planned_warehouse_id", as: "plannedWarehouse" });
+    CompanyWarehouse.hasMany(B2BSalesOrder, { foreignKey: "planned_warehouse_id", as: "b2bSalesOrders" });
+  }
+  if (B2BSalesOrder && User) {
+    B2BSalesOrder.belongsTo(User, { foreignKey: "user_id", as: "user" });
+    User.hasMany(B2BSalesOrder, { foreignKey: "user_id", as: "b2bSalesOrders" });
+  }
+  if (B2BSalesOrder && B2BShipment) {
+    B2BShipment.belongsTo(B2BSalesOrder, { foreignKey: "b2b_sales_order_id", as: "salesOrder" });
+    B2BSalesOrder.hasMany(B2BShipment, { foreignKey: "b2b_sales_order_id", as: "shipments" });
+  }
+  if (B2BClient && B2BShipment) {
+    B2BShipment.belongsTo(B2BClient, { foreignKey: "client_id", as: "client" });
+    B2BClient.hasMany(B2BShipment, { foreignKey: "client_id", as: "shipments" });
+  }
+  if (B2BClientShipTo && B2BShipment) {
+    B2BShipment.belongsTo(B2BClientShipTo, { foreignKey: "ship_to_id", as: "shipTo" });
+    B2BClientShipTo.hasMany(B2BShipment, { foreignKey: "ship_to_id", as: "shipments" });
+  }
+  if (B2BShipment && B2BShipmentItem) {
+    B2BShipment.hasMany(B2BShipmentItem, { foreignKey: "b2b_shipment_id", as: "items" });
+    B2BShipmentItem.belongsTo(B2BShipment, { foreignKey: "b2b_shipment_id", as: "shipment" });
+  }
+  if (B2BShipmentItem && Product) {
+    B2BShipmentItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(B2BShipmentItem, { foreignKey: "product_id", as: "b2bShipmentItems" });
+  }
+  if (B2BShipmentItem && B2BSalesOrderItem) {
+    B2BShipmentItem.belongsTo(B2BSalesOrderItem, { foreignKey: "b2b_sales_order_item_id", as: "salesOrderItem" });
+    B2BSalesOrderItem.hasMany(B2BShipmentItem, { foreignKey: "b2b_sales_order_item_id", as: "shipmentItems" });
+  }
+  if (B2BShipment && CompanyWarehouse) {
+    B2BShipment.belongsTo(CompanyWarehouse, { foreignKey: "warehouse_id", as: "warehouse" });
+    CompanyWarehouse.hasMany(B2BShipment, { foreignKey: "warehouse_id", as: "b2bShipments" });
+  }
+  if (B2BShipment && User) {
+    B2BShipment.belongsTo(User, { foreignKey: "created_by", as: "createdBy" });
+    User.hasMany(B2BShipment, { foreignKey: "created_by", as: "b2bShipments" });
+  }
+  if (B2BShipment && B2BInvoice) {
+    B2BInvoice.belongsTo(B2BShipment, { foreignKey: "b2b_shipment_id", as: "shipment" });
+    B2BShipment.hasOne(B2BInvoice, { foreignKey: "b2b_shipment_id", as: "invoice" });
+  }
+  if (B2BSalesOrder && B2BInvoice) {
+    B2BInvoice.belongsTo(B2BSalesOrder, { foreignKey: "b2b_sales_order_id", as: "salesOrder" });
+    B2BSalesOrder.hasMany(B2BInvoice, { foreignKey: "b2b_sales_order_id", as: "invoices" });
+  }
+  if (B2BClient && B2BInvoice) {
+    B2BInvoice.belongsTo(B2BClient, { foreignKey: "client_id", as: "client" });
+    B2BClient.hasMany(B2BInvoice, { foreignKey: "client_id", as: "invoices" });
+  }
+  if (B2BClientShipTo && B2BInvoice) {
+    B2BInvoice.belongsTo(B2BClientShipTo, { foreignKey: "ship_to_id", as: "shipTo" });
+    B2BClientShipTo.hasMany(B2BInvoice, { foreignKey: "ship_to_id", as: "invoices" });
+  }
+  if (B2BInvoice && B2BInvoiceItem) {
+    B2BInvoice.hasMany(B2BInvoiceItem, { foreignKey: "b2b_invoice_id", as: "items" });
+    B2BInvoiceItem.belongsTo(B2BInvoice, { foreignKey: "b2b_invoice_id", as: "invoice" });
+  }
+  if (B2BInvoiceItem && Product) {
+    B2BInvoiceItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(B2BInvoiceItem, { foreignKey: "product_id", as: "b2bInvoiceItems" });
+  }
+  if (B2BInvoice && User) {
+    B2BInvoice.belongsTo(User, { foreignKey: "created_by", as: "createdBy" });
+    User.hasMany(B2BInvoice, { foreignKey: "created_by", as: "b2bInvoices" });
   }
 
   const ensureAuditAssociations = (Model) => {
