@@ -54,3 +54,14 @@ node scripts/setup-b2b-modules-and-superadmin.js
 Notes:
 - Run this once per environment/DB after migrations.
 - The script is idempotent: it creates missing modules and links them to the `SuperAdmin` role with full permissions.
+
+## Sample database (for new customers)
+
+To turn the **default connected database** into a clean sample DB for backup/restore per new customer:
+
+```bash
+npm run prepare-sample-db -- --confirm
+# or: CONFIRM_SAMPLE_RESET=1 node scripts/prepare-sample-database.js
+```
+
+This keeps master data, `roles`, `modules`, `role_modules`, and one SuperAdmin user; removes all operational/transactional data, products, bill of materials, and other users. See `docs/sample-database.md` for details.
