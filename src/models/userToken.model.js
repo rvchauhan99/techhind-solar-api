@@ -16,11 +16,11 @@ const UserToken = sequelize.define(
       allowNull: false,
     },
     access_token: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: false,
     },
     refresh_token: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: false,
     },
     refresh_iat: {
