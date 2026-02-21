@@ -76,8 +76,8 @@ const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
 };
 
 /**
- * Resolve path to base64 data URL: bucket key or legacy /uploads/ path
- * @param {string} pathOrKey - Bucket key (no leading /) or legacy path (e.g. /uploads/logo.png)
+ * Resolve path to base64 data URL: bucket key, legacy /uploads/ path, or full URL
+ * @param {string} pathOrKey - Bucket key (no leading /), legacy path (e.g. /uploads/logo.png), or http(s) URL
  * @param {string} mimeType - MIME type fallback
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
  * @returns {Promise<string>} Base64 data URL
@@ -88,18 +88,58 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
         const absolutePath = path.join(PUBLIC_DIR, pathOrKey);
         return fileToDataUrl(absolutePath, mimeType);
     }
-    try {
-        const result = bucketClient
-            ? await bucketService.getObjectWithClient(bucketClient, pathOrKey)
-            : await bucketService.getObject(pathOrKey);
-        const body = result.body;
-        const contentType = result.contentType || mimeType;
-        const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
-        return `data:${contentType};base64,${base64}`;
-    } catch (error) {
-        console.error(`Error reading from bucket ${pathOrKey}:`, error);
+    if (pathOrKey.startsWith("http://") || pathOrKey.startsWith("https://")) {
+        try {
+            const https = require("https");
+            const http = require("http");
+            const protocol = pathOrKey.startsWith("https") ? https : http;
+            const { buf, contentType: resolvedType } = await new Promise((resolve, reject) => {
+                protocol.get(pathOrKey, (res) => {
+                    const chunks = [];
+                    res.on("data", (chunk) => chunks.push(chunk));
+                    res.on("end", () => {
+                        const buf = Buffer.concat(chunks);
+                        const ct = res.headers["content-type"] || "";
+                        const contentType = /image\/png/i.test(ct) ? "image/png"
+                            : /image\/svg/i.test(ct) ? "image/svg+xml"
+                            : (buf[0] === 0x89 && buf[1] === 0x50) ? "image/png"
+                            : mimeType;
+                        resolve({ buf, contentType });
+                    });
+                    res.on("error", reject);
+                }).on("error", reject);
+            });
+            const base64 = buf.toString("base64");
+            return `data:${resolvedType};base64,${base64}`;
+        } catch (err) {
+            console.error(`Error fetching logo URL ${pathOrKey}:`, err);
+            return "";
+        }
+    }
+    const tryFetch = async (client) => {
+        try {
+            const result = client
+                ? await bucketService.getObjectWithClient(client, pathOrKey)
+                : await bucketService.getObject(pathOrKey);
+            const body = result.body;
+            const contentType = result.contentType || mimeType;
+            const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
+            return `data:${contentType};base64,${base64}`;
+        } catch (e) {
+            return null;
+        }
+    };
+    let dataUrl = await tryFetch(bucketClient);
+    if (!dataUrl && bucketClient) {
+        try {
+            dataUrl = await tryFetch(null);
+        } catch (_) { /* ignore */ }
+    }
+    if (!dataUrl) {
+        console.error(`Error reading from bucket: ${pathOrKey}`);
         return "";
     }
+    return dataUrl;
 };
 
 /**
@@ -151,29 +191,35 @@ const buildHtmlDocument = async (data, bucketClient) => {
     const backgroundImagePath = path.join(PUBLIC_DIR, "solar-background.jpg");
     const backgroundImage = fileToDataUrl(backgroundImagePath, "image/jpeg");
 
-    // Logo - try to load from company profile path (bucket key or legacy /uploads/ path), then fallback to defaults
-    let logoImage = "";
-    if (data.companyLogoPath) {
-        const ext = path.extname(data.companyLogoPath).toLowerCase();
-        const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
-        logoImage = await pathToDataUrl(data.companyLogoPath, mimeType, bucketClient);
-    }
-
-    // Fallback to bundled default logos only (no local uploads path)
-    if (!logoImage) {
-        const defaultLogoPaths = [
-            path.join(PUBLIC_DIR, "logo.png"),
-            path.join(PUBLIC_DIR, "solar-earth-logo.png"),
-        ];
-        for (const logoPath of defaultLogoPaths) {
-            if (fs.existsSync(logoPath)) {
-                const ext = path.extname(logoPath).toLowerCase();
+    // Helper to resolve branding image from path (bucket key or legacy path)
+    const resolveBrandingImage = async (pathOrKey, fallbackPaths = []) => {
+        if (pathOrKey) {
+            const ext = path.extname(pathOrKey).toLowerCase();
+            const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
+            const dataUrl = await pathToDataUrl(pathOrKey, mimeType, bucketClient);
+            if (dataUrl) return dataUrl;
+        }
+        for (const fp of fallbackPaths) {
+            if (fs.existsSync(fp)) {
+                const ext = path.extname(fp).toLowerCase();
                 const mimeType = ext === ".png" ? "image/png" : "image/jpeg";
-                logoImage = fileToDataUrl(logoPath, mimeType);
-                break;
+                return fileToDataUrl(fp, mimeType);
             }
         }
-    }
+        return "";
+    };
+
+    // Logo - company profile, then bundled defaults
+    const defaultLogoPaths = [
+        path.join(PUBLIC_DIR, "logo.png"),
+        path.join(PUBLIC_DIR, "solar-earth-logo.png"),
+    ];
+    const logoImage = await resolveBrandingImage(data.companyLogoPath, defaultLogoPaths);
+
+    // Header, footer, stamp - company profile only (no fallbacks)
+    const headerImage = await resolveBrandingImage(data.companyHeaderPath, []);
+    const footerImage = await resolveBrandingImage(data.companyFooterPath, []);
+    const stampImage = await resolveBrandingImage(data.companyStampPath, []);
 
     // Generate QR code for UPI payment
     const upiString = data.bank
@@ -201,11 +247,17 @@ const buildHtmlDocument = async (data, bucketClient) => {
         ? fileToDataUrl(path.join(paymentLogosDir, "bhim-upi.png"), "image/png")
         : "";
 
-    // Prepare template data with images
+    // Prepare template data with images and branding
     const templateData = {
         ...data,
         backgroundImage,
         logoImage,
+        branding: {
+            logoImage,
+            headerImage,
+            footerImage,
+            stampImage,
+        },
         qrCodeImage,
         gpayLogo,
         paytmLogo,
@@ -435,22 +487,48 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         mobile_number:
             quotation.mobile_number || quotation.customer?.mobile_number || "",
 
-        // Prepared by (sales person)
+        // Prepared by (quotation user with robust fallbacks)
         prepared_by: {
-            name: quotation.user?.name || "",
-            phone: quotation.user?.mobile_number || "",
+            name: (quotation.user?.name != null && String(quotation.user.name).trim() !== "") ? String(quotation.user.name).trim() : "-",
+            phone: (quotation.user?.mobile_number != null && String(quotation.user.mobile_number).trim() !== "") ? String(quotation.user.mobile_number).trim() : "-",
+            email: (quotation.user?.email != null && String(quotation.user.email).trim() !== "") ? String(quotation.user.email).trim() : "-",
         },
 
-        // Company details - using correct field names from company model
-        company: {
-            name: company?.company_name || "",
-            email: company?.company_email || "",
-            phone: company?.contact_number || "",
-            website: company?.company_website || "",
-        },
+        // Company details - normalized canonical object with full address
+        company: (() => {
+            const raw = company || {};
+            const name = raw.company_name != null ? String(raw.company_name).trim() : "";
+            const address = raw.address != null ? String(raw.address).trim() : "";
+            const city = raw.city != null ? String(raw.city).trim() : "";
+            const state = raw.state != null ? String(raw.state).trim() : "";
+            const parts = [address, city, state].filter(Boolean);
+            const addressLine = parts.length > 0 ? parts.join(", ") : "-";
+            const locationLine = [city, state].filter(Boolean).join(", ") || "-";
+            const website = raw.company_website != null ? String(raw.company_website).trim() : "";
+            const websiteDisplay = website !== "" ? website : "-";
+            const email = raw.company_email != null ? String(raw.company_email).trim() : "";
+            const phone = raw.contact_number != null ? String(raw.contact_number).trim() : "";
+            return {
+                name,
+                displayName: name || "-",
+                email,
+                emailDisplay: email !== "" ? email : "-",
+                phone,
+                phoneDisplay: phone !== "" ? phone : "-",
+                website,
+                websiteDisplay,
+                addressLine,
+                locationLine,
+                city: city || "-",
+                state: state || "-",
+            };
+        })(),
 
-        // Company logo path for PDF generation
-        companyLogoPath: company?.logo || null,
+        // Company branding paths (bucket keys or legacy paths) for PDF generation
+        companyLogoPath: (company?.logo != null && String(company.logo).trim() !== "") ? String(company.logo).trim() : null,
+        companyHeaderPath: (company?.header != null && String(company.header).trim() !== "") ? String(company.header).trim() : null,
+        companyFooterPath: (company?.footer != null && String(company.footer).trim() !== "") ? String(company.footer).trim() : null,
+        companyStampPath: (company?.stamp != null && String(company.stamp).trim() !== "") ? String(company.stamp).trim() : null,
 
         // Pricing
         price_per_kw: pricePerKw,

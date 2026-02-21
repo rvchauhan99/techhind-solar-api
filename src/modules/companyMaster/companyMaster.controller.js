@@ -123,12 +123,17 @@ const uploadImage = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, "Image file is required", 400);
   }
 
+  const bucketClient = bucketService.getBucketForRequest(req);
   let bucketKey;
   try {
-    const uploadResult = await bucketService.uploadFile(req.file, {
-      prefix: `company-images/${imageType}`,
-      acl: "private",
-    });
+    const uploadResult = await bucketService.uploadFile(
+      req.file,
+      {
+        prefix: `company-images/${imageType}`,
+        acl: "private",
+      },
+      bucketClient
+    );
     bucketKey = uploadResult.path;
   } catch (error) {
     console.error("Error uploading image to bucket:", error);
@@ -137,10 +142,10 @@ const uploadImage = asyncHandler(async (req, res) => {
 
   const result = await companyService.uploadCompanyImage(imageType, bucketKey, req.transaction);
 
-  // Delete old file from bucket if it was a bucket key
+  // Delete old file from bucket if it was a bucket key (use same client for consistency)
   if (result.oldImagePath && !result.oldImagePath.startsWith("/")) {
     try {
-      await bucketService.deleteFile(result.oldImagePath);
+      await bucketService.deleteFileWithClient(bucketClient, result.oldImagePath);
     } catch (err) {
       console.error("Error deleting old image from bucket:", err);
     }
@@ -160,7 +165,16 @@ const deleteImage = asyncHandler(async (req, res) => {
 
   if (deletedImagePath && !deletedImagePath.startsWith("/")) {
     try {
-      await bucketService.deleteFile(deletedImagePath);
+      const bucketClient = bucketService.getBucketForRequest(req);
+      try {
+        await bucketService.deleteFileWithClient(bucketClient, deletedImagePath);
+      } catch (tenantErr) {
+        if (bucketClient) {
+          await bucketService.deleteFile(deletedImagePath);
+        } else {
+          throw tenantErr;
+        }
+      }
     } catch (error) {
       console.error("Error deleting image from bucket:", error);
       throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
@@ -184,7 +198,17 @@ const getImageUrl = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, "Legacy image; use static URL", 400);
   }
   try {
-    const url = await bucketService.getSignedUrl(path, 3600);
+    const bucketClient = bucketService.getBucketForRequest(req);
+    let url;
+    try {
+      url = await bucketService.getSignedUrl(path, 3600, bucketClient);
+    } catch (tenantErr) {
+      if (bucketClient) {
+        url = await bucketService.getSignedUrl(path, 3600, null);
+      } else {
+        throw tenantErr;
+      }
+    }
     return responseHandler.sendSuccess(
       res,
       { url, expires_in: 3600 },

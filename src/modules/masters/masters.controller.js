@@ -147,13 +147,14 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 const getReferenceOptions = asyncHandler(async (req, res) => {
-  const { model, status, q, limit, id } = req.query;
+  const { model, status, status_in, q, limit, id } = req.query;
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
   const options = await masterService.getReferenceOptions({
     model,
     status: status || undefined,
+    status_in: status_in || undefined,
     q: q || undefined,
     limit: limit != null && limit !== '' ? limit : undefined,
     id: id || undefined,
@@ -174,6 +175,11 @@ const getAppConstants = asyncHandler(async (req, res) => {
 const getDefaultState = asyncHandler(async (req, res) => {
   const defaultState = await masterService.getDefaultState();
   return responseHandler.sendSuccess(res, defaultState, 'Default state fetched', 200);
+});
+
+const getDefaultBranch = asyncHandler(async (req, res) => {
+  const defaultBranch = await masterService.getDefaultBranch();
+  return responseHandler.sendSuccess(res, defaultBranch, 'Default branch fetched', 200);
 });
 
 const downloadSample = asyncHandler(async (req, res) => {
@@ -286,4 +292,4 @@ const getFileUrl = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = { masterList, create, list, getById, update, remove, getReferenceOptions, getAppConstants, downloadSample, uploadData, getDefaultState, getFileUrl };
+module.exports = { masterList, create, list, getById, update, remove, getReferenceOptions, getAppConstants, downloadSample, uploadData, getDefaultState, getDefaultBranch, getFileUrl };

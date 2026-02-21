@@ -157,6 +157,24 @@ async function deleteFile(key) {
 }
 
 /**
+ * Delete a single object by key using a specific client (for tenant-scoped bucket).
+ * @param {{ s3: object, bucketName: string }} client
+ * @param {string} key - Object key
+ * @returns {Promise<boolean>}
+ */
+async function deleteFileWithClient(client, key) {
+  if (!key) throw new Error("File path (key) is required");
+  const { s3, bucketName: bucket } = client;
+  try {
+    await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+    return true;
+  } catch (error) {
+    console.error("Error deleting file from bucket:", error);
+    throw new Error(`Failed to delete file: ${error.message}`);
+  }
+}
+
+/**
  * Delete multiple objects by key.
  * @param {string[]} keys - Object keys
  * @returns {Promise<boolean>}
@@ -169,23 +187,50 @@ async function deleteMultipleFiles(keys) {
 
 /**
  * Get a presigned GET URL for private object access.
- * @param {string} key - Object key
+ * @param {string} key - Object key (bucket path)
  * @param {number} expiresIn - Expiration in seconds (default 3600)
+ * @param {{ s3: object, bucketName: string }} [client] - Optional bucket client; uses default if null/undefined
  * @returns {Promise<string>}
  */
 async function getSignedUrl(key, expiresIn = 3600, client) {
-  if (!key) throw new Error("File path (key) is required");
+  const k = key != null ? String(key).trim() : "";
+  if (!k) throw new Error("File path (key) is required");
   const { s3, bucketName: bucket } = client || getClient();
   try {
     const url = await s3.getSignedUrlPromise("getObject", {
       Bucket: bucket,
-      Key: key,
+      Key: k,
       Expires: expiresIn,
     });
     return url;
   } catch (error) {
     console.error("Error generating signed URL:", error);
     throw new Error(`Failed to generate signed URL: ${error.message}`);
+  }
+}
+
+/**
+ * Get signed URL for request context. Tries tenant bucket first; on failure, falls back to default bucket.
+ * Use when the object may have been stored in the default bucket (e.g. tenant bucket fallback on upload).
+ * @param {object} req - Express request with req.tenant
+ * @param {string} key - Bucket object key (document_path)
+ * @param {number} [expiresIn] - Expiration in seconds (default 3600)
+ * @returns {Promise<string>}
+ */
+async function getSignedUrlForRequest(req, key, expiresIn = 3600) {
+  const bucketClient = getBucketForRequest(req);
+  try {
+    return await getSignedUrl(key, expiresIn, bucketClient);
+  } catch (err) {
+    if (req?.tenant?.bucket && bucketClient) {
+      try {
+        return await getSignedUrl(key, expiresIn, null);
+      } catch (fallbackErr) {
+        console.error("Fallback getSignedUrl (default bucket) failed:", fallbackErr);
+        throw err;
+      }
+    }
+    throw err;
   }
 }
 
@@ -328,11 +373,13 @@ async function getObjectWithClient(client, key) {
 module.exports = {
   getClient,
   getBucketForRequest,
+  getSignedUrlForRequest,
   getObjectWithClient,
   generateFilePath,
   uploadFile,
   uploadMultipleFiles,
   deleteFile,
+  deleteFileWithClient,
   deleteMultipleFiles,
   getSignedUrl,
   getPublicUrl,
