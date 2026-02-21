@@ -6,7 +6,7 @@ const bucketService = require("../../common/services/bucket.service.js");
 const orderService = require("./order.service.js");
 const orderPdfService = require("./pdf.service.js");
 const companyService = require("../companyMaster/companyMaster.service.js");
-const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
@@ -215,7 +215,7 @@ const generatePDF = asyncHandler(async (req, res) => {
     const context = await resolveOrderVisibilityContext(req);
     assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
 
-    const { Company, CompanyBankAccount } = db;
+    const { Company, CompanyBankAccount } = getTenantModels();
     const company = await Company.findOne({ where: { deleted_at: null } });
     const bankAccount = await CompanyBankAccount.findOne({
         where: { deleted_at: null },
