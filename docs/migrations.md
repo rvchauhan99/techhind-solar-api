@@ -11,8 +11,8 @@ Migrations are **never** run inside the API server lifecycle. They must be execu
 | **Dedicated mode** (single customer DB) | `npm run db:migrate` or `npm run db:tenant-migrate` | Before or after app deploy; run in CI against the single DB. |
 | **Local dev** (single DB) | `npm run db:migrate` | When schema changes; start app with `npm run dev` (no migrations on startup). |
 
-- **API startup:** The app does **not** run migrations on start. Start the server with `npm start` or `node src/server.js`.
-- **Docker:** The container only runs `node src/server.js`. Run migrations in your pipeline or a separate migration job before/after starting the app.
+- **API startup (local):** Running `npm start` or `node src/server.js` does **not** run migrations; run `npm run db:migrate` or `npm run db:tenant-migrate` yourself when needed.
+- **Docker:** The container **runs migrations automatically on start** via `docker-entrypoint.sh` (runs `db:tenant-migrate`, then starts the server). If migrations fail, the container exits so the deploy can fail. For single-tenant set `DB_*`/`DATABASE_URL`; for multi-tenant set `TENANT_REGISTRY_DB_URL`.
 
 ## Execution modes
 

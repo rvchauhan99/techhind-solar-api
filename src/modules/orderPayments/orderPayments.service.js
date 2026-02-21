@@ -1,15 +1,19 @@
-const { OrderPaymentDetail, PaymentMode, Bank, CompanyBankAccount, Order, Customer, CompanyBranch, User } = require("../../models");
 const { Op } = require("sequelize");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const orderPaymentService = {
     // Create a new payment
     async createPayment(payload, transaction) {
+        const models = getTenantModels();
+        const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.create(payload, { transaction });
         return payment;
     },
 
     // Get payment by ID
     async getPaymentById(id) {
+        const models = getTenantModels();
+        const { OrderPaymentDetail, PaymentMode, Bank, CompanyBankAccount, Order, User } = models;
         return OrderPaymentDetail.findByPk(id, {
             include: [
                 {
@@ -126,6 +130,8 @@ const orderPaymentService = {
             ];
         }
 
+        const models = getTenantModels();
+        const { OrderPaymentDetail, PaymentMode, Bank, CompanyBankAccount, Order, Customer, CompanyBranch, User } = models;
         const { count, rows } = await OrderPaymentDetail.findAndCountAll({
             where: whereClause,
             include: [
@@ -205,6 +211,8 @@ const orderPaymentService = {
 
     // Update payment (blocked for approved payments)
     async updatePayment(id, payload, transaction) {
+        const models = getTenantModels();
+        const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id);
         if (!payment) {
             throw new Error("Payment not found");
@@ -218,6 +226,8 @@ const orderPaymentService = {
 
     // Delete payment
     async deletePayment(id, transaction) {
+        const models = getTenantModels();
+        const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id);
         if (!payment) {
             throw new Error("Payment not found");
@@ -227,6 +237,8 @@ const orderPaymentService = {
     },
 
     async approvePayment({ id, userId, transaction }) {
+        const models = getTenantModels();
+        const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id, { transaction });
         if (!payment) {
             throw new Error("Payment not found");
@@ -258,6 +270,8 @@ const orderPaymentService = {
     },
 
     async rejectPayment({ id, userId, reason, transaction }) {
+        const models = getTenantModels();
+        const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id, { transaction });
         if (!payment) {
             throw new Error("Payment not found");

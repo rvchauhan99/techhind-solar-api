@@ -1,11 +1,9 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { TRANSACTION_TYPE, MOVEMENT_TYPE } = require("../../common/utils/constants.js");
-
-const { InventoryLedger, Stock, Product, ProductType, CompanyWarehouse, User, StockSerial } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 // Helper function to create ledger entry
 const createLedgerEntry = async ({
@@ -25,6 +23,8 @@ const createLedgerEntry = async ({
   performed_by,
   transaction,
 }) => {
+  const models = getTenantModels();
+  const { Stock, InventoryLedger } = models;
   // Get current stock quantity
   const stock = await Stock.findByPk(stock_id, { transaction });
   if (!stock) {
@@ -65,6 +65,8 @@ const createLedgerEntry = async ({
 
 // Create ledger entries for PO Inward
 const createPOInwardLedgerEntries = async ({ poInward, transaction }) => {
+  const models = getTenantModels();
+  const { Stock, StockSerial } = models;
   const t = transaction;
 
   for (const item of poInward.items) {
@@ -170,6 +172,8 @@ const listLedgerEntries = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { InventoryLedger, Stock, Product, ProductType, CompanyWarehouse, User, StockSerial } = models;
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -321,7 +325,8 @@ const exportLedgerEntries = async (params = {}) => {
 
 const getLedgerEntryById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { InventoryLedger, Product, ProductType, CompanyWarehouse, Stock, User, StockSerial } = models;
   const entry = await InventoryLedger.findOne({
     where: { id },
     include: [

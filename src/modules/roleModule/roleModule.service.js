@@ -1,10 +1,13 @@
 const ExcelJS = require("exceljs");
-const { Op, fn, col, where: sequelizeWhere } = require("sequelize");
+const { Op, fn, col, where: sequelizeWhere, QueryTypes } = require("sequelize");
 const db = require("../../models/index.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
+const { getTenantSequelize } = require("../../common/utils/requestContext.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
-const RoleModule = db.RoleModule;
+/** Sequelize to use for app data (modules, role_modules). In shared mode uses tenant DB. */
+const getDataSequelize = () => getTenantSequelize() || db.sequelize;
 const VALID_LISTING_CRITERIA = new Set(["my_team", "all"]);
 
 const normalizeListingCriteria = (value) => {
@@ -54,6 +57,51 @@ const deriveKeyCandidatesFromRoute = (moduleRoute) => {
 };
 
 /**
+ * Resolve module id using raw SQL on tenant sequelize (shared mode).
+ * @private
+ */
+const resolveModuleIdOrThrowOnSequelize = async (seq, { moduleId, moduleRoute, moduleKey }, transaction) => {
+  const resolvedModuleId = moduleId != null ? Number(moduleId) : null;
+  if (Number.isInteger(resolvedModuleId) && resolvedModuleId > 0) return resolvedModuleId;
+
+  const normalizedRoute = normalizeRoute(moduleRoute);
+  if (normalizedRoute) {
+    const routeCandidates = [...new Set([
+      normalizedRoute,
+      normalizedRoute.replace(/^\/+/, ""),
+    ].filter(Boolean))];
+    const routeLower = routeCandidates.map((r) => r.toLowerCase());
+    const [exact] = await seq.query(
+      `SELECT id FROM modules WHERE deleted_at IS NULL AND (route IN (:routes) OR lower(route) IN (:routeLower))
+       ORDER BY id ASC LIMIT 1`,
+      { type: QueryTypes.SELECT, replacements: { routes: routeCandidates, routeLower }, ...(transaction && { transaction }) }
+    );
+    if (exact) return exact.id;
+
+    const keyCandidates = deriveKeyCandidatesFromRoute(normalizedRoute);
+    if (keyCandidates.length) {
+      const [byKey] = await seq.query(
+        `SELECT id FROM modules WHERE deleted_at IS NULL AND lower(key) IN (:keys) ORDER BY id ASC LIMIT 1`,
+        { type: QueryTypes.SELECT, replacements: { keys: keyCandidates }, ...(transaction && { transaction }) }
+      );
+      if (byKey) return byKey.id;
+    }
+    throw new AppError("Forbidden: module not found or not configured", RESPONSE_STATUS_CODES.FORBIDDEN);
+  }
+
+  const normalizedKey = normalizeKey(moduleKey);
+  if (!normalizedKey) {
+    throw new AppError("Forbidden: module route/key not provided", RESPONSE_STATUS_CODES.FORBIDDEN);
+  }
+  const [row] = await seq.query(
+    `SELECT id FROM modules WHERE deleted_at IS NULL AND (key = :key OR lower(key) = :key) ORDER BY id ASC LIMIT 1`,
+    { type: QueryTypes.SELECT, replacements: { key: normalizedKey }, ...(transaction && { transaction }) }
+  );
+  if (!row) throw new AppError("Forbidden: module not found or not configured", RESPONSE_STATUS_CODES.FORBIDDEN);
+  return row.id;
+};
+
+/**
  * Resolve a Module.id from explicit id, route, or key.
  * Resolution prefers route first and then performs tolerant fallback (case-insensitive route, then key candidates).
  * Throws Forbidden when the module cannot be resolved, so callers fail closed.
@@ -62,6 +110,12 @@ const resolveModuleIdOrThrow = async (
   { moduleId = null, moduleRoute = null, moduleKey = null } = {},
   transaction = null
 ) => {
+  const seq = getDataSequelize();
+  if (seq !== db.sequelize) {
+    return resolveModuleIdOrThrowOnSequelize(seq, { moduleId, moduleRoute, moduleKey }, transaction);
+  }
+
+  const { Module } = getTenantModels();
   let resolvedModuleId = moduleId != null ? Number(moduleId) : null;
 
   if (Number.isInteger(resolvedModuleId) && resolvedModuleId > 0) {
@@ -79,7 +133,7 @@ const resolveModuleIdOrThrow = async (
 
     // 1) Exact route match first.
     const exactRouteOr = [...new Set(routeCandidates)].map((route) => ({ route }));
-    let moduleRows = await db.Module.findAll({
+    let moduleRows = await Module.findAll({
       where: { deleted_at: null, [Op.or]: exactRouteOr },
       attributes: ["id", "route", "key"],
       order: [["id", "ASC"]],
@@ -91,7 +145,7 @@ const resolveModuleIdOrThrow = async (
       const routeCiOr = [...new Set(routeCandidates)].map((route) =>
         sequelizeWhere(fn("lower", col("route")), route.toLowerCase())
       );
-      moduleRows = await db.Module.findAll({
+      moduleRows = await Module.findAll({
         where: { deleted_at: null, [Op.or]: routeCiOr },
         attributes: ["id", "route", "key"],
         order: [["id", "ASC"]],
@@ -103,7 +157,7 @@ const resolveModuleIdOrThrow = async (
     if (!moduleRows.length) {
       const keyCandidates = deriveKeyCandidatesFromRoute(normalizedRoute);
       if (keyCandidates.length) {
-        moduleRows = await db.Module.findAll({
+        moduleRows = await Module.findAll({
           where: {
             deleted_at: null,
             [Op.or]: keyCandidates.map((candidate) =>
@@ -145,7 +199,7 @@ const resolveModuleIdOrThrow = async (
     );
   }
 
-  const moduleRows = await db.Module.findAll({
+  const moduleRows = await Module.findAll({
     where: {
       deleted_at: null,
       [Op.or]: [
@@ -178,8 +232,9 @@ const resolveModuleIdOrThrow = async (
 };
 
 const createRoleModule = async (payload, transaction = null) => {
+  const { RoleModule: RM } = getTenantModels();
   // prevent duplicate (role_id + module_id) for non-deleted rows
-  const exists = await RoleModule.findOne({
+  const exists = await RM.findOne({
     where: { role_id: payload.role_id, module_id: payload.module_id, deleted_at: null },
     transaction,
   });
@@ -189,16 +244,17 @@ const createRoleModule = async (payload, transaction = null) => {
     ...payload,
     listing_criteria: normalizeListingCriteria(payload?.listing_criteria),
   };
-  const created = await RoleModule.create(createPayload, { transaction });
+  const created = await RM.create(createPayload, { transaction });
   return created.toJSON();
 };
 
 const getRoleModuleById = async (id, transaction = null) => {
-  const item = await RoleModule.findOne({
+  const { RoleModule: RM, Role, Module } = getTenantModels();
+  const item = await RM.findOne({
     where: { id, deleted_at: null },
     include: [
-      { model: db.Role, as: 'role', attributes: ['id', 'name'] },
-      { model: db.Module, as: 'module', attributes: ['id', 'name'] },
+      { model: Role, as: 'role', attributes: ['id', 'name'] },
+      { model: Module, as: 'module', attributes: ['id', 'name'] },
     ],
     transaction,
   });
@@ -238,22 +294,23 @@ const listRoleModules = async ({
     where.listing_criteria = normalizeListingCriteria(listing_criteria);
   }
 
+  const { RoleModule: RM, Role, Module } = getTenantModels();
   const roleInclude = {
-    model: db.Role,
+    model: Role,
     as: 'role',
     attributes: ['id', 'name'],
     required: !!role_name,
     ...(role_name && { where: { name: { [Op.iLike]: `%${role_name}%` } } }),
   };
   const moduleInclude = {
-    model: db.Module,
+    model: Module,
     as: 'module',
     attributes: ['id', 'name'],
     required: !!module_name,
     ...(module_name && { where: { name: { [Op.iLike]: `%${module_name}%` } } }),
   };
 
-  const rows = await RoleModule.findAll({
+  const rows = await RM.findAll({
     where,
     offset,
     limit,
@@ -261,19 +318,20 @@ const listRoleModules = async ({
     include: [roleInclude, moduleInclude],
   });
 
-  const count = await RoleModule.count({ where });
+  const count = await RM.count({ where });
 
   const data = Array.isArray(rows) ? rows.map((r) => (r && typeof r.toJSON === 'function' ? r.toJSON() : r)) : [];
   return { data, meta: { page, limit, total: count, pages: limit > 0 ? Math.ceil(count / limit) : 0 } };
 };
 
 const updateRoleModule = async (id, updates, transaction = null) => {
-  const item = await RoleModule.findOne({ where: { id, deleted_at: null }, transaction });
+  const { RoleModule: RM } = getTenantModels();
+  const item = await RM.findOne({ where: { id, deleted_at: null }, transaction });
   if (!item) throw new AppError('Role-Module link not found', RESPONSE_STATUS_CODES.NOT_FOUND);
 
   // if role_id/module_id changed, ensure new combination not duplicate
   if ((updates.role_id && updates.role_id !== item.role_id) || (updates.module_id && updates.module_id !== item.module_id)) {
-    const exists = await RoleModule.findOne({ where: { role_id: updates.role_id || item.role_id, module_id: updates.module_id || item.module_id, deleted_at: null, id: { [Op.ne]: id } }, transaction });
+    const exists = await RM.findOne({ where: { role_id: updates.role_id || item.role_id, module_id: updates.module_id || item.module_id, deleted_at: null, id: { [Op.ne]: id } }, transaction });
     if (exists) throw new AppError('Role-Module link already exists', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
@@ -288,7 +346,8 @@ const updateRoleModule = async (id, updates, transaction = null) => {
 };
 
 const deleteRoleModule = async (id, transaction = null) => {
-  await RoleModule.destroy({ where: { id }, transaction });
+  const { RoleModule: RM } = getTenantModels();
+  await RM.destroy({ where: { id }, transaction });
   return true;
 };
 
@@ -325,24 +384,26 @@ const exportRoleModules = async (params = {}) => {
 };
 
 const getByRoleAndModule = async (roleId, moduleId, transaction = null) => {
-  const item = await RoleModule.findOne({ where: { role_id: roleId, module_id: moduleId, deleted_at: null }, transaction });
+  const { RoleModule: RM } = getTenantModels();
+  const item = await RM.findOne({ where: { role_id: roleId, module_id: moduleId, deleted_at: null }, transaction });
   if (!item) return null;
   return item.toJSON();
 };
 
 const getRoleModulesByRoleId = async (roleId, transaction = null) => {
+  const { RoleModule: RM, Role, Module } = getTenantModels();
   // Convert roleId to integer since route params are strings
   const roleIdNum = parseInt(roleId, 10);
   if (isNaN(roleIdNum)) {
     throw new AppError('Invalid role ID', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
-  const rows = await RoleModule.findAll({
+  const rows = await RM.findAll({
     where: { role_id: roleIdNum, deleted_at: null },
     order: [['id', 'DESC']],
     include: [
-      { model: db.Role, as: 'role', attributes: ['id', 'name'] },
-      { model: db.Module, as: 'module', attributes: ['id', 'name'] },
+      { model: Role, as: 'role', attributes: ['id', 'name'] },
+      { model: Module, as: 'module', attributes: ['id', 'name'] },
     ],
     transaction,
   });
@@ -354,10 +415,72 @@ const getRoleModulesByRoleId = async (roleId, transaction = null) => {
  * Return full RoleModule permission row for a given role and module.
  * module can be specified by id, route, or key. Returns plain JSON or null.
  */
+/**
+ * Get permission for role and module using raw SQL on tenant sequelize (shared mode).
+ * @private
+ */
+const getPermissionForRoleAndModuleOnSequelize = async (
+  seq,
+  { roleId, moduleId, moduleRoute, moduleKey },
+  transaction
+) => {
+  const roleIdNum = Number(roleId);
+  if (!Number.isInteger(roleIdNum) || roleIdNum <= 0) return null;
+
+  let moduleIds = [];
+  if (moduleRoute) {
+    const normalizedRoute = normalizeRoute(moduleRoute);
+    if (normalizedRoute) {
+      const routeCandidates = [...new Set([normalizedRoute, normalizedRoute.replace(/^\/+/, "")].filter(Boolean))];
+      const routeLower = routeCandidates.map((r) => r.toLowerCase());
+      const candidateRows = await seq.query(
+        `SELECT id FROM modules WHERE deleted_at IS NULL AND (route IN (:routes) OR lower(route) IN (:routeLower))
+         ORDER BY id ASC`,
+        { type: QueryTypes.SELECT, replacements: { routes: routeCandidates, routeLower }, ...(transaction && { transaction }) }
+      );
+      moduleIds = (Array.isArray(candidateRows) ? candidateRows : [candidateRows]).map((r) => r.id);
+    }
+    if (!moduleIds.length) {
+      const resolvedId = await resolveModuleIdOrThrowOnSequelize(seq, { moduleId, moduleRoute, moduleKey }, transaction);
+      moduleIds = [resolvedId];
+    }
+  } else {
+    const resolvedId = await resolveModuleIdOrThrowOnSequelize(seq, { moduleId, moduleRoute, moduleKey }, transaction);
+    moduleIds = [resolvedId];
+  }
+
+  const qOpts = (repl) => ({ type: QueryTypes.SELECT, replacements: repl, ...(transaction && { transaction }) });
+  let permRows = await seq.query(
+    `SELECT id, role_id, module_id, can_create, can_read, can_update, can_delete, listing_criteria
+     FROM role_modules WHERE deleted_at IS NULL AND role_id = :role_id AND module_id IN (:module_ids)
+     ORDER BY module_id ASC LIMIT 1`,
+    qOpts({ role_id: roleIdNum, module_ids: moduleIds })
+  );
+  if (!permRows || (Array.isArray(permRows) && !permRows.length)) {
+    permRows = await seq.query(
+      `SELECT id, role_id, module_id, can_create, can_read, can_update, can_delete, listing_criteria
+       FROM role_modules WHERE deleted_at IS NULL AND role_id = :role_id AND module_id = :module_id LIMIT 1`,
+      qOpts({ role_id: roleIdNum, module_id: moduleIds[0] })
+    );
+  }
+  const perm = Array.isArray(permRows) ? permRows[0] : permRows;
+  if (!perm) {
+    console.warn("[rbac] Missing role-module mapping", { roleId: roleIdNum, moduleId, moduleRoute, moduleKey });
+    return null;
+  }
+  return perm;
+};
+
 const getPermissionForRoleAndModule = async (
   { roleId, moduleId = null, moduleRoute = null, moduleKey = null } = {},
   transaction = null
 ) => {
+  const seq = getDataSequelize();
+  if (seq !== db.sequelize) {
+    return getPermissionForRoleAndModuleOnSequelize(seq, { roleId, moduleId, moduleRoute, moduleKey }, transaction);
+  }
+
+  const { Module, RoleModule } = getTenantModels();
   const roleIdNum = Number(roleId);
   if (!Number.isInteger(roleIdNum) || roleIdNum <= 0) {
     return null;
@@ -376,7 +499,7 @@ const getPermissionForRoleAndModule = async (
       if (withoutLeadingSlash !== normalizedRoute) routeCandidates.push(withoutLeadingSlash);
     }
 
-    const candidateRows = await db.Module.findAll({
+    const candidateRows = await Module.findAll({
       where: {
         deleted_at: null,
         [Op.or]: [

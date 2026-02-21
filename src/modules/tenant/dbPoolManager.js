@@ -2,7 +2,7 @@
 
 const { Sequelize } = require("sequelize");
 const tenantRegistryService = require("./tenantRegistry.service.js");
-const { getRegistrySequelize } = require("../../config/registryDb.js");
+const { getRegistrySequelize, isRegistryAvailable } = require("../../config/registryDb.js");
 const { getDialectOptions } = require("../../config/dbSsl.js");
 const defaultSequelize = require("../../config/db.js");
 
@@ -17,11 +17,12 @@ const defaultPoolConfig = {
 };
 
 /**
- * Check if app is in shared (multi-tenant) mode (Registry DB configured).
+ * Check if app is in shared (multi-tenant) mode (Registry DB configured and reachable).
+ * When registry is configured but unreachable, returns false so app falls back to single-tenant.
  * @returns {boolean}
  */
 function isSharedMode() {
-  return !!getRegistrySequelize();
+  return isRegistryAvailable();
 }
 
 /**
@@ -72,7 +73,10 @@ function getOrCreateTenantPool(tenantId, config) {
     host: db_host,
     port: db_port || 5432,
     dialect: "postgres",
-    logging: false,
+    logging:
+      !isProduction
+        ? (sql) => console.log(`[DB:tenant/${db_name}]`, sql)
+        : false,
     pool: defaultPoolConfig,
     dialectOptions: isProduction ? getDialectOptions(true) : {},
   });

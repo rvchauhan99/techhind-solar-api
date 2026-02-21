@@ -56,6 +56,23 @@ async function tenantContextMiddleware(req, res, next) {
       req.tenantIdForLog = req.tenant.id;
       console.log(`[tenant_id=${req.tenant.id}] ${req.method} ${req.originalUrl || req.url}`);
     }
+
+    if (process.env.NODE_ENV === "development" && req.tenant) {
+      const cfg = req.tenant.sequelize?.config;
+      const db = cfg
+        ? { host: cfg.host, port: cfg.port, database: cfg.database, user: cfg.username }
+        : null;
+      const bucketName =
+        req.tenant.bucket?.bucketName ?? req.tenant.bucket?.bucket ?? "(default from env)";
+      console.log("[tenant] details:", {
+        tenant_id: req.tenant.id,
+        tenant_key: req.tenant.tenant_key,
+        mode: req.tenant.mode,
+        status: req.tenant.status,
+        ...(db && { db }),
+        bucket: bucketName,
+      });
+    }
     return next();
   } catch (err) {
     if (err.code === "TENANT_SUSPENDED" || err.code === "TENANT_NOT_FOUND") {

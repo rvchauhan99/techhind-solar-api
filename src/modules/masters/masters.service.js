@@ -3,13 +3,16 @@ const db = require('../../models/index.js');
 const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
 const modelDisplayFields = require('../../common/utils/modelDisplayFields.json');
+const { getTenantModels } = require('../tenant/tenantModels.js');
 
 /**
- * Helper function to get model by name
+ * Helper function to get model by name (tenant-aware).
+ * Uses getTenantModels() so queries hit tenant DB when registry is configured.
  * @param {string} model - Model name (e.g., "company.model")
  * @returns {Object} - Sequelize Model
  */
 const getModelByName = (model) => {
+    const models = getTenantModels();
     const raw = String(model || "").replace(/\.model$/i, "").trim();
     const normalize = (s) => String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 
@@ -24,14 +27,14 @@ const getModelByName = (model) => {
 
     const directCandidates = [...new Set([raw, pascal, camel].filter(Boolean))];
     for (const candidate of directCandidates) {
-        if (db[candidate]) return db[candidate];
+        if (models[candidate]) return models[candidate];
     }
 
-    // Fuzzy match against db model keys (handles PurchaseOrder, POInward, etc.).
-    const availableModels = Object.keys(db).filter((key) => !["sequelize", "Sequelize"].includes(key));
+    // Fuzzy match against model keys (handles PurchaseOrder, POInward, etc.).
+    const availableModels = Object.keys(models).filter((key) => !["sequelize", "Sequelize"].includes(key));
     const normalizedRaw = normalize(raw);
     const fuzzyKey = availableModels.find((key) => normalize(key) === normalizedRaw);
-    if (fuzzyKey && db[fuzzyKey]) return db[fuzzyKey];
+    if (fuzzyKey && models[fuzzyKey]) return models[fuzzyKey];
 
     throw new AppError(
         `Model "${pascal || raw}" not found. Available models: ${availableModels.join(", ")}`,
@@ -893,14 +896,15 @@ const getReferenceOptions = async ({ model, status, q = null, limit = null, id: 
 
     // For PurchaseOrder, include Supplier so we can show "po_number - supplier_name" in dropdown
     const isPurchaseOrder = model === 'purchaseOrder.model' || model === 'purchase_order.model' || Model.tableName === 'purchase_orders';
+    const models = getTenantModels();
     const findOptions = {
         where,
         order: orderBy,
         attributes: attributes,
     };
-    if (isPurchaseOrder && db.Supplier) {
+    if (isPurchaseOrder && models.Supplier) {
         findOptions.include = [
-            { model: db.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
+            { model: models.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
         ];
     }
 

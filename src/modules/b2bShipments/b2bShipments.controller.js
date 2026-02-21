@@ -4,7 +4,7 @@ const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const b2bShipmentsService = require("./b2bShipments.service.js");
 const pdfService = require("./pdf.service.js");
-const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const bucketService = require("../../common/services/bucket.service.js");
 
 const list = asyncHandler(async (req, res) => {
@@ -55,7 +55,8 @@ const generatePDF = asyncHandler(async (req, res) => {
   const shipment = await b2bShipmentsService.getShipmentById({ id });
   if (!shipment) return responseHandler.sendError(res, "B2B shipment not found", 404);
 
-  const company = await db.Company.findOne({ where: { deleted_at: null } });
+  const { Company } = getTenantModels();
+  const company = await Company.findOne({ where: { deleted_at: null } });
   let bucketClient = null;
   try {
     bucketClient = bucketService.getBucketForRequest(req);

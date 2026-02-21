@@ -1,6 +1,7 @@
 "use strict";
 
-const db = require("../../models/index.js");
+const { getTenantModels } = require("../../modules/tenant/tenantModels.js");
+const { getContextValue } = require("./requestContext.js");
 
 const teamHierarchyCache = new Map();
 
@@ -10,8 +11,16 @@ const normalizeUserId = (userId) => {
   return parsed;
 };
 
+const getCacheKey = (rootId) => {
+  const req = getContextValue("request");
+  const tenantId = req?.tenant?.id ?? "default";
+  return `${tenantId}:${rootId}`;
+};
+
 const buildManagerChildrenMap = async (transaction = null) => {
-  const users = await db.User.findAll({
+  const models = getTenantModels();
+  const { User } = models;
+  const users = await User.findAll({
     where: { deleted_at: null },
     attributes: ["id", "manager_id"],
     transaction,
@@ -54,20 +63,25 @@ const getTeamHierarchyUserIds = async (rootUserId, options = {}) => {
   const rootId = normalizeUserId(rootUserId);
   if (!rootId) return [];
 
+  const cacheKey = getCacheKey(rootId);
   const useCache = options.useCache !== false && !options.transaction;
-  if (useCache && teamHierarchyCache.has(rootId)) {
-    return teamHierarchyCache.get(rootId);
+  if (useCache && teamHierarchyCache.has(cacheKey)) {
+    return teamHierarchyCache.get(cacheKey);
   }
 
   const ids = await computeTeamUserIds(rootId, options.transaction || null);
-  if (useCache) teamHierarchyCache.set(rootId, ids);
+  if (useCache) teamHierarchyCache.set(cacheKey, ids);
   return ids;
 };
 
 const invalidateTeamHierarchyCacheForUser = (userId) => {
   const normalized = normalizeUserId(userId);
   if (!normalized) return;
-  teamHierarchyCache.delete(normalized);
+  for (const key of teamHierarchyCache.keys()) {
+    if (String(key).endsWith(`:${normalized}`)) {
+      teamHierarchyCache.delete(key);
+    }
+  }
 };
 
 const invalidateTeamHierarchyCacheForUsers = (userIds = []) => {

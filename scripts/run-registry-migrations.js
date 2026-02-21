@@ -5,12 +5,13 @@ const path = require("path");
 const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
-const { getRegistrySequelize } = require("../src/config/registryDb.js");
+const { getRegistrySequelize, initializeRegistryConnection } = require("../src/config/registryDb.js");
 
 async function run() {
+  await initializeRegistryConnection();
   const sequelize = getRegistrySequelize();
   if (!sequelize) {
-    console.log("TENANT_REGISTRY_DB_URL not set; skipping registry migrations.");
+    console.log("TENANT_REGISTRY_DB_URL not set or registry unreachable; skipping registry migrations.");
     process.exit(0);
   }
   const migrationsDir = path.join(__dirname, "..", "migrations-registry");

@@ -1,10 +1,8 @@
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
-const db = require("../../models/index.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES, INQUIRY_STATUS } = require("../../common/utils/constants.js");
-
-const { Inquiry, SiteVisit, User } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 /**
  * Create a new site visit
@@ -12,6 +10,8 @@ const { Inquiry, SiteVisit, User } = db;
  * @returns {Object} - Created site visit
  */
 const createSiteVisit = async (payload) => {
+  const models = getTenantModels();
+  const { Inquiry, SiteVisit } = models;
   // Inquiry ID is required except when visit_status is "Pending"
   if (!payload.inquiry_id && payload.visit_status !== "Pending") {
     throw new AppError("Inquiry ID is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
@@ -23,7 +23,7 @@ const createSiteVisit = async (payload) => {
   }
 
   // Use a transaction to ensure both site visit creation and inquiry status update succeed or fail together
-  const transaction = await db.sequelize.transaction();
+  const transaction = await models.sequelize.transaction();
 
   try {
     // Only verify and update inquiry if inquiry_id is provided
@@ -138,6 +138,8 @@ const listInquiriesWithSiteVisits = async ({
   sortBy = null,
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { Inquiry, SiteVisit } = models;
   const offset = (page - 1) * limit;
 
   // Build where clause for site visits (main table)

@@ -3,14 +3,42 @@
 const { getRegistrySequelize } = require("../../config/registryDb.js");
 const cryptoService = require("./crypto.service.js");
 
+const CACHE_TTL_MS = Number(process.env.TENANT_CACHE_TTL_MS) || 60_000;
+const cache = new Map();
+
+function getCached(tenantId) {
+  const entry = cache.get(tenantId);
+  if (!entry || Date.now() > entry.expiresAt) {
+    if (entry) cache.delete(tenantId);
+    return null;
+  }
+  return entry.config;
+}
+
+function setCached(tenantId, config) {
+  cache.set(tenantId, { config, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+function invalidateTenantCache(tenantId) {
+  if (tenantId) cache.delete(tenantId);
+}
+
+function invalidateAllTenantCache() {
+  cache.clear();
+}
+
 /**
  * Fetch tenant by id (UUID). Validates status === 'active'.
  * Returns decrypted DB and bucket config. Uses Tenant Registry DB.
+ * Cached in memory with TTL (default 60s) to reduce registry load.
  * @param {string} tenantId - UUID of the tenant
  * @returns {Promise<object|null>} - Tenant config with decrypted credentials, or null if not found
  * @throws {Error} - If tenant is suspended or decryption fails
  */
 async function getTenantById(tenantId) {
+  const cached = getCached(tenantId);
+  if (cached) return cached;
+
   const sequelize = getRegistrySequelize();
   if (!sequelize) return null;
 
@@ -42,7 +70,7 @@ async function getTenantById(tenantId) {
     }
   };
 
-  return {
+  const config = {
     id: row.id,
     tenant_key: row.tenant_key,
     mode: row.mode,
@@ -60,6 +88,8 @@ async function getTenantById(tenantId) {
     bucket_endpoint: row.bucket_endpoint,
     created_at: row.created_at,
   };
+  setCached(tenantId, config);
+  return config;
 }
 
 /**
@@ -151,4 +181,10 @@ async function getActiveTenantsForMigrations(options = {}) {
   }));
 }
 
-module.exports = { getTenantById, getTenantByKey, getActiveTenantsForMigrations };
+module.exports = {
+  getTenantById,
+  getTenantByKey,
+  getActiveTenantsForMigrations,
+  invalidateTenantCache,
+  invalidateAllTenantCache,
+};

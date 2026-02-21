@@ -11,7 +11,12 @@ const {
   transactionMiddleware,
 } = require("./common/middlewares/transaction.js");
 const { validateEnv } = require("./config/envValidator.js");
-const { getRegistrySequelize, closeRegistrySequelize } = require("./config/registryDb.js");
+const {
+  getRegistrySequelize,
+  closeRegistrySequelize,
+  initializeRegistryConnection,
+  isRegistryAvailable,
+} = require("./config/registryDb.js");
 const { closeAllPools } = require("./modules/tenant/dbPoolManager.js");
 const { requestContextMiddleware } = require("./common/utils/requestContext.js");
 
@@ -108,11 +113,15 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     await db.sequelize.authenticate();
     const { host, database, port, username } = db.sequelize.config;
 
+    const hasRegistryUrl = !!process.env.TENANT_REGISTRY_DB_URL;
+    await initializeRegistryConnection();
+    const registryHealthy = isRegistryAvailable();
+
     let tenantMode = "dedicated";
     let tenantLogLines = [];
     const dedicatedId = process.env.DEDICATED_TENANT_ID || "";
 
-    if (getRegistrySequelize()) {
+    if (registryHealthy && getRegistrySequelize()) {
       tenantMode = "shared (multi-tenant)";
       try {
         const sequelize = getRegistrySequelize();
@@ -133,6 +142,10 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
       } catch (err) {
         tenantLogLines.push(`   Tenants  : \x1b[33mRegistry query failed: ${err.message}\x1b[0m`);
       }
+    } else if (hasRegistryUrl && !registryHealthy) {
+      console.error("❌ TENANT_REGISTRY_DB_URL is set but registry database is unreachable. Server will not start.");
+      console.error("   Either fix the registry connection or unset TENANT_REGISTRY_DB_URL for single-tenant mode.");
+      process.exit(1);
     } else {
       tenantLogLines.push(`   Tenant   : \x1b[36mdedicated\x1b[0m${dedicatedId ? ` (id: ${dedicatedId})` : ""}`);
     }

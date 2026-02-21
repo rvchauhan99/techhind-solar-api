@@ -1,9 +1,7 @@
 "use strict";
 
-const db = require("../../models/index.js");
 const orderService = require("../order/order.service.js");
-
-const { Installation, Order, User } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 /**
  * Get installation record by order id.
@@ -12,6 +10,8 @@ const { Installation, Order, User } = db;
  */
 const getByOrderId = async (orderId) => {
     if (!orderId) return null;
+    const models = getTenantModels();
+    const { Installation, User } = models;
     const row = await Installation.findOne({
         where: { order_id: orderId, deleted_at: null },
         include: [{ model: User, as: "installer", attributes: ["id", "name"], required: false }],
@@ -53,7 +53,9 @@ const getByOrderId = async (orderId) => {
  * @returns {Promise<Object>}
  */
 const createOrUpdate = async (orderId, payload, options = {}) => {
-    const t = options.transaction || (await db.sequelize.transaction());
+    const models = getTenantModels();
+    const { Installation, Order } = models;
+    const t = options.transaction || (await models.sequelize.transaction());
     const committedHere = !options.transaction;
 
     try {

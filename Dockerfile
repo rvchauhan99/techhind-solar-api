@@ -20,8 +20,8 @@ RUN npm ci --omit=dev
 # Copy source code and project structure
 COPY . .
 
-# Set ownership of all files to pptruser
-RUN chown -R pptruser:pptruser /usr/src/app
+# Set ownership of all files to pptruser; entrypoint must be executable
+RUN chown -R pptruser:pptruser /usr/src/app && chmod +x /usr/src/app/docker-entrypoint.sh
 
 # Switch back to pptruser for running the app
 USER pptruser
@@ -29,5 +29,6 @@ USER pptruser
 # App default port (override with PORT env)
 EXPOSE 5000
 
-# Start the server only. Run migrations as a separate job (e.g. CI or cron): db:migrate or db:tenant-migrate.
+# Run migrations on startup, then start the server (fails deploy if migrations fail)
+ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
 CMD ["node", "src/server.js"]

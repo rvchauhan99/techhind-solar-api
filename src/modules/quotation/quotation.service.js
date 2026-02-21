@@ -2,6 +2,7 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 
@@ -53,8 +54,9 @@ const listQuotations = async ({
     include_converted,
     enforced_user_ids: enforcedUserIds,
 } = {}) => {
-    const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, ProjectPrice, Inquiry, ProductMake } = db;
-    const { Op } = db.Sequelize;
+    const models = getTenantModels();
+    const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, ProjectPrice, Inquiry, ProductMake } = models;
+    const { Op } = models.Sequelize;
 
     const where = { deleted_at: null };
 
@@ -318,7 +320,8 @@ const exportQuotations = async (params = {}) => {
 };
 
 const getQuotationById = async ({ id }) => {
-    const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, ProjectPrice, Inquiry } = db;
+    const models = getTenantModels();
+    const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, ProjectPrice, Inquiry } = models;
     if (!id) return null;
 
     const found = await Quotation.findOne({
@@ -344,9 +347,10 @@ const getQuotationById = async ({ id }) => {
 };
 
 const createQuotation = async ({ payload, transaction } = {}) => {
-    const { Quotation, Inquiry, Customer } = db;
+    const models = getTenantModels();
+    const { Quotation, Inquiry, Customer } = models;
 
-    const t = transaction || (await db.sequelize.transaction());
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -377,13 +381,13 @@ const createQuotation = async ({ payload, transaction } = {}) => {
 
         // Build full BOM snapshot when project_price_id is set
         if (payload.project_price_id) {
-            const bomSnapshot = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t);
+            const bomSnapshot = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t, models);
             if (bomSnapshot && bomSnapshot.length > 0) {
                 payload.bom_snapshot = bomSnapshot;
             }
         } else {
             // Build BOM snapshot from manually selected products when project_price_id is not set
-            const bomSnapshot = await buildBomSnapshotFromQuotationProducts(payload, t);
+            const bomSnapshot = await buildBomSnapshotFromQuotationProducts(payload, t, models);
             if (bomSnapshot && bomSnapshot.length > 0) {
                 payload.bom_snapshot = bomSnapshot;
             }
@@ -452,10 +456,11 @@ const createQuotation = async ({ payload, transaction } = {}) => {
 };
 
 const updateQuotation = async ({ id, payload, transaction } = {}) => {
-    const { Quotation } = db;
+    const models = getTenantModels();
+    const { Quotation } = models;
     if (!id) return null;
 
-    const t = transaction || (await db.sequelize.transaction());
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -467,14 +472,14 @@ const updateQuotation = async ({ id, payload, transaction } = {}) => {
 
         // Rebuild BOM snapshot when project_price_id is present in payload
         if (payload.project_price_id != null) {
-            const bomSnapshot = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t);
+            const bomSnapshot = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t, models);
             if (bomSnapshot && bomSnapshot.length > 0) {
                 payload.bom_snapshot = bomSnapshot;
             }
         } else {
             // Build BOM snapshot from manually selected products when project_price_id is not set
             const mergedPayload = { ...quotation.toJSON(), ...payload };
-            const bomSnapshot = await buildBomSnapshotFromQuotationProducts(mergedPayload, t);
+            const bomSnapshot = await buildBomSnapshotFromQuotationProducts(mergedPayload, t, models);
             payload.bom_snapshot = (bomSnapshot && bomSnapshot.length > 0) ? bomSnapshot : null;
         }
 
@@ -494,11 +499,12 @@ const updateQuotation = async ({ id, payload, transaction } = {}) => {
 };
 
 const approveQuotation = async ({ id, transaction } = {}) => {
-    const { Quotation } = db;
-    const { Op } = db.Sequelize;
+    const models = getTenantModels();
+    const { Quotation } = models;
+    const { Op } = models.Sequelize;
     if (!id) return null;
 
-    const t = transaction || (await db.sequelize.transaction());
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -531,10 +537,11 @@ const approveQuotation = async ({ id, transaction } = {}) => {
 };
 
 const unapproveQuotation = async ({ id, transaction } = {}) => {
-    const { Quotation } = db;
+    const models = getTenantModels();
+    const { Quotation } = models;
     if (!id) return null;
 
-    const t = transaction || (await db.sequelize.transaction());
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -560,10 +567,11 @@ const unapproveQuotation = async ({ id, transaction } = {}) => {
 };
 
 const deleteQuotation = async ({ id, transaction } = {}) => {
-    const { Quotation } = db;
+    const models = getTenantModels();
+    const { Quotation } = models;
     if (!id) return null;
 
-    const t = transaction || (await db.sequelize.transaction());
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -589,7 +597,8 @@ const deleteQuotation = async ({ id, transaction } = {}) => {
 };
 
 const getProjectPrices = async ({ schemeId, transaction } = {}) => {
-    const { ProjectPrice, BillOfMaterial } = db;
+    const models = getTenantModels();
+    const { ProjectPrice, BillOfMaterial } = models;
     const projectPrices = await ProjectPrice.findAll({
         where: { project_for_id: schemeId },
         include: [
@@ -608,13 +617,13 @@ const getProjectPrices = async ({ schemeId, transaction } = {}) => {
  * Sort BOM snapshot by product_type.display_order (ascending). Reassigns sort_order 0,1,2,...
  * Lines without product_type_id or with unknown type get a high display_order (appear last).
  * @param {Array} bomSnapshot - Array of BOM lines (each has product_type_id)
- * @param {object} db - Models instance
+ * @param {object} models - Models instance (from getTenantModels)
  * @param {object} [transaction]
  * @returns {Promise<Array>} Sorted array (same reference if length 0)
  */
-const sortBomSnapshotByProductTypeDisplayOrder = async (bomSnapshot, db, transaction) => {
+const sortBomSnapshotByProductTypeDisplayOrder = async (bomSnapshot, models, transaction) => {
     if (!Array.isArray(bomSnapshot) || bomSnapshot.length === 0) return bomSnapshot;
-    const { ProductType } = db;
+    const { ProductType } = models;
     const typeIds = [...new Set(bomSnapshot.map((line) => line.product_type_id).filter((id) => id != null && !Number.isNaN(Number(id))))];
     const displayOrderMap = {};
     if (typeIds.length > 0) {
@@ -648,8 +657,9 @@ const sortBomSnapshotByProductTypeDisplayOrder = async (bomSnapshot, db, transac
  * @param {object} [transaction]
  * @returns {Promise<Array|null>} Array of { product_id, quantity, sort_order, product_snapshot } or null
  */
-const buildBomSnapshotFromProjectPrice = async (projectPriceId, transaction) => {
-    const { ProjectPrice, BillOfMaterial, Product, ProductType, ProductMake, MeasurementUnit } = db;
+const buildBomSnapshotFromProjectPrice = async (projectPriceId, transaction, models) => {
+    models = models || getTenantModels();
+    const { ProjectPrice, BillOfMaterial, Product, ProductType, ProductMake, MeasurementUnit } = models;
     if (!projectPriceId) return null;
 
     const projectPrice = await ProjectPrice.findOne({
@@ -714,7 +724,7 @@ const buildBomSnapshotFromProjectPrice = async (projectPriceId, transaction) => 
             ...(snapshot ? snapshot : {}),
         };
     });
-    return sortBomSnapshotByProductTypeDisplayOrder(rawSnapshot, db, transaction);
+    return sortBomSnapshotByProductTypeDisplayOrder(rawSnapshot, models, transaction);
 };
 
 /**
@@ -742,8 +752,9 @@ const QUOTATION_PRODUCT_MAPPING = [
  * @param {object} [transaction]
  * @returns {Promise<Array|null>} Array of { product_id, quantity, sort_order, product_snapshot } or null
  */
-const buildBomSnapshotFromQuotationProducts = async (payload, transaction) => {
-    const { Product, ProductType, ProductMake, MeasurementUnit } = db;
+const buildBomSnapshotFromQuotationProducts = async (payload, transaction, models) => {
+    models = models || getTenantModels();
+    const { Product, ProductType, ProductMake, MeasurementUnit } = models;
     const parseQty = (val, defaultVal = 1) => {
         const n = val != null ? parseFloat(val) : NaN;
         return !Number.isNaN(n) && n > 0 ? n : defaultVal;
@@ -830,11 +841,12 @@ const buildBomSnapshotFromQuotationProducts = async (payload, transaction) => {
             ...(snapshot ? snapshot : {}),
         };
     });
-    return sortBomSnapshotByProductTypeDisplayOrder(rawSnapshot, db, transaction);
+    return sortBomSnapshotByProductTypeDisplayOrder(rawSnapshot, models, transaction);
 };
 
 const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
-    const { ProjectPrice, BillOfMaterial, Product, ProductType, ProductMake } = db;
+    const models = getTenantModels();
+    const { ProjectPrice, BillOfMaterial, Product, ProductType, ProductMake } = models;
 
     const projectPrice = await ProjectPrice.findOne({
         where: { id, deleted_at: null },
@@ -893,13 +905,14 @@ const getProjectPriceBomDetails = async ({ id, transaction } = {}) => {
 };
 
 const getProductMakes = async ({ transaction } = {}) => {
-    const { ProductMake, ProductType } = db;
+    const models = getTenantModels();
+    const { ProductMake, ProductType } = models;
     const productMakes = await ProductMake.findAll({ where: { deleted_at: null }, include: [{ model: ProductType, as: 'productType', attributes: ['id', 'name'] }], transaction });
     return productMakes.map((item) => item.toJSON());
 };
 
 const getNextQuotationNumber = async () => {
-    const { Quotation } = db;
+    const models = getTenantModels();
     // Create a temporary instance to trigger the beforeCreate hook logic
     // We'll use the model's generateQuotationNumber function directly
     // const quotationNumber = await Quotation.sequelize.models.Quotation.beforeCreate({ quotation_number: null });
@@ -913,7 +926,7 @@ const getNextQuotationNumber = async () => {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    const results = await db.sequelize.query(
+    const results = await models.sequelize.query(
         `SELECT COUNT(*) as count 
          FROM quotations 
          WHERE created_at >= :startOfMonth 
@@ -924,7 +937,7 @@ const getNextQuotationNumber = async () => {
                 startOfMonth: startOfMonth.toISOString(),
                 endOfMonth: endOfMonth.toISOString(),
             },
-            type: db.sequelize.QueryTypes.SELECT,
+            type: models.sequelize.QueryTypes.SELECT,
         }
     );
 
@@ -937,7 +950,8 @@ const getNextQuotationNumber = async () => {
 };
 
 const getQuotationCountByInquiry = async ({ inquiry_id }) => {
-    const { Quotation } = db;
+    const models = getTenantModels();
+    const { Quotation } = models;
 
     if (!inquiry_id) return 0;
 
@@ -952,7 +966,8 @@ const getQuotationCountByInquiry = async ({ inquiry_id }) => {
 };
 
 const getAllProducts = async () => {
-    const { Product, ProductType, ProductMake } = db;
+    const models = getTenantModels();
+    const { Product, ProductType, ProductMake } = models;
 
     const products = await Product.findAll({
         where: { deleted_at: null },

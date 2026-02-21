@@ -12,6 +12,7 @@ const authService = require("./auth.service.js");
 const emailService = require("../../common/services/email.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const tenantRegistryService = require("../tenant/tenantRegistry.service.js");
 const dbPoolManager = require("../tenant/dbPoolManager.js");
 
@@ -28,6 +29,18 @@ const login = asyncHandler(async (req, res) => {
     const tenant = await tenantRegistryService.getTenantByKey(tenant_key);
     if (!tenant) {
       return responseHandler.sendError(res, "Invalid tenant", 400);
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.log("[login] tenant resolved:", {
+        tenant_id: tenant.id,
+        tenant_key: tenant.tenant_key,
+        db: {
+          host: tenant.db_host,
+          port: tenant.db_port,
+          database: tenant.db_name,
+          user: tenant.db_user,
+        },
+      });
     }
     tenantSequelize = await dbPoolManager.getPool(tenant.id, tenant);
     user = await authService.loginUserWithTenant(tenantSequelize, email, password);
@@ -151,25 +164,34 @@ const verifyTwoFactor = asyncHandler(async (req, res) => {
 });
 
 const generateTwoFactor = asyncHandler(async (req, res) => {
-  const { secret, qrCodeUrl } = await authService.generateTwoFactorSecret(
-    req.user.id,
-    req.transaction
-  );
+  const { secret, qrCodeUrl } = req.tenant?.sequelize
+    ? await authService.generateTwoFactorSecretOnSequelize(req.tenant.sequelize, req.user.id)
+    : await authService.generateTwoFactorSecret(req.user.id, req.transaction);
   responseHandler.sendSuccess(res, { secret, qrCodeUrl }, "2FA Secret Generated");
 });
 
 const enableTwoFactor = asyncHandler(async (req, res) => {
   const { code } = req.body;
-  const isValid = await authService.verifyTwoFactorToken(req.user.id, code);
+  const isValid = req.tenant?.sequelize
+    ? await authService.verifyTwoFactorTokenOnSequelize(req.tenant.sequelize, req.user.id, code)
+    : await authService.verifyTwoFactorToken(req.user.id, code, req.transaction);
   if (!isValid) {
     return responseHandler.sendError(res, "Invalid 2FA code", 400);
   }
-  await authService.enableTwoFactor(req.user.id, req.transaction);
+  if (req.tenant?.sequelize) {
+    await authService.enableTwoFactorOnSequelize(req.tenant.sequelize, req.user.id);
+  } else {
+    await authService.enableTwoFactor(req.user.id, req.transaction);
+  }
   responseHandler.sendSuccess(res, null, "2FA Enabled Successfully");
 });
 
 const disableTwoFactor = asyncHandler(async (req, res) => {
-  await authService.disableTwoFactor(req.user.id, req.transaction);
+  if (req.tenant?.sequelize) {
+    await authService.disableTwoFactorOnSequelize(req.tenant.sequelize, req.user.id);
+  } else {
+    await authService.disableTwoFactor(req.user.id, req.transaction);
+  }
   responseHandler.sendSuccess(res, null, "2FA Disabled Successfully");
 });
 
@@ -177,20 +199,31 @@ const changePassword = asyncHandler(async (req, res) => {
   const userId = req.user?.id;
   const { current_password, new_password, confirm_password } = req.body;
   if (!userId) return responseHandler.sendError(res, "Unauthorized", 401);
-  // delegate to service which will verify current password, validate new/confirm and update hash and set first_login true
-  await authService.changePassword(
-    userId,
-    current_password,
-    new_password,
-    confirm_password,
-    req.transaction
-  );
+  if (req.tenant?.sequelize) {
+    await authService.changePasswordOnSequelize(
+      req.tenant.sequelize,
+      userId,
+      current_password,
+      new_password,
+      confirm_password
+    );
+  } else {
+    await authService.changePassword(
+      userId,
+      current_password,
+      new_password,
+      confirm_password,
+      req.transaction
+    );
+  }
   // on success, instruct frontend to logout and re-login
   responseHandler.sendSuccess(res, null, "Password changed successfully", 200);
 });
 
 const getUserProfile = asyncHandler(async (req, res) => {
-  const userProfile = await authService.getUserprofileById(req.user.id);
+  const userProfile = req.tenant?.sequelize
+    ? await authService.getUserprofileByIdOnSequelize(req.tenant.sequelize, req.user.id)
+    : await authService.getUserprofileById(req.user.id, req.transaction);
 
   const roleModules = userProfile.role.roleModules || [];
 
@@ -362,7 +395,11 @@ const logout = asyncHandler(async (req, res) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader?.split(" ")[1];
 
-  await authService.deleteUserToken(req.user?.id, token, req.transaction);
+  if (req.tenant?.sequelize) {
+    await authService.deleteUserTokenOnSequelize(req.tenant.sequelize, req.user?.id, token);
+  } else {
+    await authService.deleteUserToken(req.user?.id, token, req.transaction);
+  }
 
   responseHandler.sendSuccess(res, null, "Logged out successfully");
 });
@@ -384,9 +421,10 @@ const sendPasswordResetOtp = asyncHandler(async (req, res) => {
   }
 
   // Find user by email (must be active), case-insensitive
-  const user = await db.User.findOne({
+  const { User } = getTenantModels();
+  const user = await User.findOne({
     where: {
-      [db.Sequelize.Op.and]: [
+      [Sequelize.Op.and]: [
         Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), email),
         { status: USER_STATUS.ACTIVE },
       ],
@@ -447,9 +485,10 @@ const verifyPasswordResetOtp = asyncHandler(async (req, res) => {
   }
 
   // Find user by email, case-insensitive
-  const user = await db.User.findOne({
+  const { User } = getTenantModels();
+  const user = await User.findOne({
     where: {
-      [db.Sequelize.Op.and]: [
+      [Sequelize.Op.and]: [
         Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), email),
         { status: "active" },
       ],
@@ -506,9 +545,10 @@ const resetPassword = asyncHandler(async (req, res) => {
   }
 
   // Find user by email, case-insensitive
-  const user = await db.User.findOne({
+  const { User } = getTenantModels();
+  const user = await User.findOne({
     where: {
-      [db.Sequelize.Op.and]: [
+      [Sequelize.Op.and]: [
         Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), email),
         { status: "active" },
       ],

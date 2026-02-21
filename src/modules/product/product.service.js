@@ -3,8 +3,7 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
-
-const { Product, ProductType, ProductMake, MeasurementUnit } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
 
@@ -63,6 +62,8 @@ const listProducts = async ({
   is_active: isActive = null,
   visibility = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { Product, ProductType, ProductMake, MeasurementUnit } = models;
   const offset = (page - 1) * limit;
 
   const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
@@ -208,7 +209,8 @@ const listProducts = async ({
 
 const getProductById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { Product, ProductType, ProductMake, MeasurementUnit } = models;
   const product = await Product.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -251,7 +253,9 @@ const getProductById = async ({ id } = {}) => {
 };
 
 const createProduct = async ({ payload, transaction } = {}) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -299,9 +303,11 @@ const createProduct = async ({ payload, transaction } = {}) => {
 };
 
 const updateProduct = async ({ id, payload, transaction } = {}) => {
+  const models = getTenantModels();
+  const { Product } = models;
   if (!id) return null;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -371,9 +377,11 @@ const updateProduct = async ({ id, payload, transaction } = {}) => {
 };
 
 const deleteProduct = async ({ id, transaction } = {}) => {
+  const models = getTenantModels();
+  const { Product } = models;
   if (!id) return false;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -401,6 +409,7 @@ const deleteProduct = async ({ id, transaction } = {}) => {
 };
 
 const exportProducts = async (params = {}) => {
+  const models = getTenantModels();
   const result = await listProducts({ ...params, page: 1, limit: 10000 });
 
   const workbook = new ExcelJS.Workbook();

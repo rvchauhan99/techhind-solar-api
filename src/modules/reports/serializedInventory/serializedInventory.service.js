@@ -1,18 +1,8 @@
 "use strict";
 
-const db = require("../../../models/index.js");
 const { Op } = require("sequelize");
 const { SERIAL_STATUS } = require("../../../common/utils/constants.js");
-
-const {
-  StockSerial,
-  Product,
-  CompanyWarehouse,
-  Stock,
-  InventoryLedger,
-  User,
-  ProductType,
-} = db;
+const { getTenantModels } = require("../../tenant/tenantModels.js");
 
 /**
  * Get serialized inventory report with filters
@@ -30,6 +20,8 @@ const getSerializedInventoryReport = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { StockSerial, Product, CompanyWarehouse, Stock, ProductType } = models;
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -200,6 +192,8 @@ const getSerializedInventoryReport = async ({
 const getSerialLedgerEntries = async ({ serialId } = {}) => {
   if (!serialId) return null;
 
+  const models = getTenantModels();
+  const { StockSerial, Product, CompanyWarehouse, InventoryLedger, User } = models;
   const serial = await StockSerial.findByPk(serialId, {
     include: [
       {

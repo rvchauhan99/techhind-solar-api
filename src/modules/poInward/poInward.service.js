@@ -1,23 +1,11 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { QueryTypes } = require("sequelize");
 const { RECEIPT_STATUS, RECEIPT_TYPE, PO_STATUS } = require("../../common/utils/constants.js");
 const stockService = require("../stock/stock.service.js");
-
-const {
-  POInward,
-  POInwardItem,
-  POInwardSerial,
-  PurchaseOrder,
-  PurchaseOrderItem,
-  Supplier,
-  CompanyWarehouse,
-  Product,
-  User,
-} = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const listPOInwards = async ({
   page = 1,
@@ -39,6 +27,8 @@ const listPOInwards = async ({
   total_accepted_quantity_op,
   total_accepted_quantity_to,
 } = {}) => {
+  const models = getTenantModels();
+  const { POInward, POInwardItem, POInwardSerial, PurchaseOrder, PurchaseOrderItem, Supplier, CompanyWarehouse, Product, User } = models;
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -156,7 +146,8 @@ const exportPOInwards = async (params = {}) => {
 
 const getPOInwardById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { POInward, PurchaseOrder, PurchaseOrderItem, Supplier, CompanyWarehouse, Product, User, POInwardItem, POInwardSerial } = models;
   const poInward = await POInward.findOne({
     where: { id },
     include: [
@@ -219,7 +210,9 @@ const getPOInwardById = async ({ id } = {}) => {
 };
 
 const createPOInward = async ({ payload, transaction } = {}) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { POInward, POInwardItem, POInwardSerial, PurchaseOrder, PurchaseOrderItem, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -376,7 +369,8 @@ const createPOInward = async ({ payload, transaction } = {}) => {
  */
 const computeProductPurchasePriceStats = async ({ productIds, transaction } = {}) => {
   if (!productIds || productIds.length === 0) return [];
-  const results = await db.sequelize.query(
+  const models = getTenantModels();
+  const results = await models.sequelize.query(
     `SELECT i.product_id,
             MIN(i.rate) AS min_purchase_price,
             MAX(i.rate) AS max_purchase_price,
@@ -396,8 +390,9 @@ const computeProductPurchasePriceStats = async ({ productIds, transaction } = {}
 
 const approvePOInward = async ({ id, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { POInward, POInwardItem, POInwardSerial, PurchaseOrder, PurchaseOrderItem, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -494,8 +489,9 @@ const approvePOInward = async ({ id, transaction } = {}) => {
 
 const updatePOInward = async ({ id, payload, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { POInward, POInwardItem, POInwardSerial, PurchaseOrder, PurchaseOrderItem, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {

@@ -1,11 +1,9 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { PO_STATUS } = require("../../common/utils/constants.js");
-
-const { PurchaseOrder, PurchaseOrderItem, Supplier, Company, CompanyWarehouse, Product, User } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const VALID_PO_NUMBER_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
 const VALID_STRING_OPS = VALID_PO_NUMBER_OPS;
@@ -77,6 +75,8 @@ const listPurchaseOrders = async ({
   grand_total_op: grandTotalOp = null,
   grand_total_to: grandTotalTo = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { PurchaseOrder, PurchaseOrderItem, Supplier, Company, CompanyWarehouse, Product, User } = models;
   const offset = (page - 1) * limit;
 
   const where = {
@@ -259,7 +259,8 @@ const listPurchaseOrders = async ({
 
 const getPurchaseOrderById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { PurchaseOrder, PurchaseOrderItem, Supplier, Company, CompanyWarehouse, Product, User } = models;
   const po = await PurchaseOrder.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -341,7 +342,9 @@ const calculatePOTotals = (items) => {
 };
 
 const createPurchaseOrder = async ({ payload, transaction } = {}) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { PurchaseOrder, PurchaseOrderItem, Supplier, Company, CompanyWarehouse, Product, User } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -430,9 +433,11 @@ const createPurchaseOrder = async ({ payload, transaction } = {}) => {
 };
 
 const updatePurchaseOrder = async ({ id, payload, transaction } = {}) => {
+  const models = getTenantModels();
+  const { PurchaseOrder, PurchaseOrderItem, Supplier, Company, CompanyWarehouse, Product, User } = models;
   if (!id) return null;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -539,9 +544,11 @@ const updatePurchaseOrder = async ({ id, payload, transaction } = {}) => {
 };
 
 const approvePurchaseOrder = async ({ id, approved_by, transaction } = {}) => {
+  const models = getTenantModels();
+  const { PurchaseOrder, PurchaseOrderItem } = models;
   if (!id) return null;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -579,9 +586,11 @@ const approvePurchaseOrder = async ({ id, approved_by, transaction } = {}) => {
 };
 
 const deletePurchaseOrder = async ({ id, transaction } = {}) => {
+  const models = getTenantModels();
+  const { PurchaseOrder, PurchaseOrderItem } = models;
   if (!id) return false;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {

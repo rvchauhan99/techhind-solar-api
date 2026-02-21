@@ -1,14 +1,13 @@
 "use strict";
 
-const db = require("../../models/index.js");
+const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
-
-const InquiryDocument = db.InquiryDocument;
-const Inquiry = db.Inquiry;
-const OrderDocumentType = db.OrderDocumentType;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const createInquiryDocument = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { InquiryDocument, Inquiry, OrderDocumentType } = models;
   // Validation: Check required fields
   if (!payload.inquiry_id) {
     throw new AppError("Inquiry ID is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
@@ -89,6 +88,8 @@ const createInquiryDocument = async (payload, transaction = null) => {
 };
 
 const updateInquiryDocument = async (id, payload, transaction = null) => {
+  const models = getTenantModels();
+  const { InquiryDocument, Inquiry } = models;
   const document = await InquiryDocument.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -122,6 +123,8 @@ const updateInquiryDocument = async (id, payload, transaction = null) => {
 };
 
 const deleteInquiryDocument = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { InquiryDocument } = models;
   const document = await InquiryDocument.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -136,6 +139,8 @@ const deleteInquiryDocument = async (id, transaction = null) => {
 };
 
 const getInquiryDocumentById = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { InquiryDocument, Inquiry } = models;
   const document = await InquiryDocument.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -157,7 +162,8 @@ const getInquiryDocumentById = async (id, transaction = null) => {
 };
 
 const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null }, transaction = null) => {
-  const { Sequelize } = db;
+  const models = getTenantModels();
+  const { InquiryDocument, Inquiry } = models;
   const where = { deleted_at: null };
 
   if (inquiry_id) {
@@ -165,9 +171,9 @@ const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null
   }
 
   if (q) {
-    where[Sequelize.Op.or] = [
-      { doc_type: { [Sequelize.Op.iLike]: `%${q}%` } },
-      { remarks: { [Sequelize.Op.iLike]: `%${q}%` } },
+    where[Op.or] = [
+      { doc_type: { [Op.iLike]: `%${q}%` } },
+      { remarks: { [Op.iLike]: `%${q}%` } },
     ];
   }
 

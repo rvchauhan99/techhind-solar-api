@@ -1,13 +1,11 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { ADJUSTMENT_STATUS, ADJUSTMENT_TYPE, TRANSACTION_TYPE, MOVEMENT_TYPE, SERIAL_STATUS } = require("../../common/utils/constants.js");
 const stockService = require("../stock/stock.service.js");
 const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
-
-const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, Stock, StockSerial, Product, CompanyWarehouse, User } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const listStockAdjustments = async ({
   page = 1,
@@ -25,6 +23,8 @@ const listStockAdjustments = async ({
   total_quantity_to,
   reason = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { StockAdjustment, CompanyWarehouse, User } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
 
@@ -116,7 +116,8 @@ const exportStockAdjustments = async (params = {}) => {
 
 const getStockAdjustmentById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, StockSerial, Product, CompanyWarehouse, User } = models;
   const adjustment = await StockAdjustment.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -142,7 +143,9 @@ const getStockAdjustmentById = async ({ id } = {}) => {
 };
 
 const createStockAdjustment = async ({ payload, transaction } = {}) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -232,8 +235,9 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
 
 const approveStockAdjustment = async ({ id, approved_by, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, StockSerial, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -285,8 +289,9 @@ const approveStockAdjustment = async ({ id, approved_by, transaction } = {}) => 
 
 const postStockAdjustment = async ({ id, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, StockSerial, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {

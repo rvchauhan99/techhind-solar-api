@@ -3,7 +3,7 @@ const orderDocumentsService = require("../orderDocuments/orderDocuments.service.
 const AppError = require("../../common/errors/AppError.js");
 const bucketService = require("../../common/services/bucket.service.js");
 const paymentReceiptPdfService = require("./pdf.service.js");
-const db = require("../../models");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const FILE_UNAVAILABLE_MESSAGE =
     "We couldn't save your documents right now. Please try again in a few minutes.";
@@ -234,12 +234,12 @@ const orderPaymentsController = {
                     .json({ success: false, message: "Receipt is only available for approved payments" });
             }
 
-            const { Order: OrderModel, Company, CompanyBankAccount } = db;
+            const { Order, Customer, CompanyBranch, Company, CompanyBankAccount } = getTenantModels();
             const order = payment.order_id
-                ? await OrderModel.findByPk(payment.order_id, {
+                ? await Order.findByPk(payment.order_id, {
                       include: [
-                          { model: db.Customer, as: "customer" },
-                          { model: db.CompanyBranch, as: "branch" },
+                          { model: Customer, as: "customer" },
+                          { model: CompanyBranch, as: "branch" },
                       ],
                   })
                 : null;

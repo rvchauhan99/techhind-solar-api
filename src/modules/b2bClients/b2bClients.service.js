@@ -1,9 +1,8 @@
 "use strict";
 
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { buildStringCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
-const { B2BClient, B2BClientShipTo } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const listClients = async ({
   page = 1,
@@ -13,6 +12,8 @@ const listClients = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { B2BClient, B2BClientShipTo } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
 
@@ -85,6 +86,8 @@ const listClients = async ({
 };
 
 const getClientById = async ({ id }) => {
+  const models = getTenantModels();
+  const { B2BClient, B2BClientShipTo } = models;
   return B2BClient.findOne({
     where: { id, deleted_at: null },
     include: [{ model: B2BClientShipTo, as: "shipToAddresses", where: { deleted_at: null, is_active: true }, required: false }],
@@ -92,6 +95,8 @@ const getClientById = async ({ id }) => {
 };
 
 const createClient = async ({ payload, transaction }) => {
+  const models = getTenantModels();
+  const { B2BClient, B2BClientShipTo } = models;
   const client = await B2BClient.create(payload, { transaction });
   const hasBilling =
     (payload.billing_address && String(payload.billing_address).trim()) ||
@@ -120,6 +125,8 @@ const createClient = async ({ payload, transaction }) => {
 };
 
 const updateClient = async ({ id, payload, transaction }) => {
+  const models = getTenantModels();
+  const { B2BClient } = models;
   const client = await B2BClient.findByPk(id);
   if (!client) return null;
   await client.update(payload, { transaction });
@@ -128,6 +135,8 @@ const updateClient = async ({ id, payload, transaction }) => {
 
 /** Generate next client code: CLI-00001, CLI-00002, ... (prefix + 5-digit global sequence). */
 const generateClientCode = async () => {
+  const models = getTenantModels();
+  const { B2BClient } = models;
   const rows = await B2BClient.findAll({
     where: { client_code: { [Op.like]: "CLI-%" } },
     attributes: ["client_code"],
@@ -154,6 +163,8 @@ const getNextClientCode = async () => {
 };
 
 const deleteClient = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BClient } = models;
   const client = await B2BClient.findByPk(id);
   if (!client) return null;
   await client.update({ is_active: false }, { transaction });
@@ -161,6 +172,8 @@ const deleteClient = async ({ id, transaction }) => {
 };
 
 const listShipTos = async ({ client_id, page = 1, limit = 100 }) => {
+  const models = getTenantModels();
+  const { B2BClientShipTo } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null, is_active: true };
   if (client_id) where.client_id = client_id;
@@ -179,6 +192,8 @@ const listShipTos = async ({ client_id, page = 1, limit = 100 }) => {
 };
 
 const createShipTo = async ({ client_id, payload, transaction }) => {
+  const models = getTenantModels();
+  const { B2BClientShipTo } = models;
   if (payload.is_default === true) {
     await B2BClientShipTo.update(
       { is_default: false },
@@ -189,6 +204,8 @@ const createShipTo = async ({ client_id, payload, transaction }) => {
 };
 
 const updateShipTo = async ({ id, payload, transaction }) => {
+  const models = getTenantModels();
+  const { B2BClientShipTo } = models;
   const shipTo = await B2BClientShipTo.findByPk(id);
   if (!shipTo) return null;
   if (payload.is_default === true && shipTo.client_id) {
@@ -202,6 +219,8 @@ const updateShipTo = async ({ id, payload, transaction }) => {
 };
 
 const deleteShipTo = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BClientShipTo } = models;
   const shipTo = await B2BClientShipTo.findByPk(id);
   if (!shipTo) return null;
   await shipTo.update({ is_active: false }, { transaction });

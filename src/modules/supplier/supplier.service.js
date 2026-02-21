@@ -5,8 +5,7 @@ const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
-
-const { Supplier, State } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 /** Indian GSTIN: 15 chars. Chars 1-2 = state code, 3-12 = PAN (10 chars), 13 = entity, 14 = Z, 15 = checksum. */
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
@@ -40,6 +39,8 @@ const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "sta
 
 /** Generate next supplier code: SUP-00001, SUP-00002, ... (prefix + 5-digit global sequence). */
 const generateSupplierCode = async () => {
+  const models = getTenantModels();
+  const { Supplier } = models;
   const rows = await Supplier.findAll({
     where: { supplier_code: { [Op.like]: "SUP-%" } },
     attributes: ["supplier_code"],
@@ -106,6 +107,8 @@ const listSuppliers = async ({
   is_active,
   visibility = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { Supplier, State } = models;
   const offset = (page - 1) * limit;
 
   const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
@@ -219,7 +222,8 @@ const listSuppliers = async ({
 
 const getSupplierById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { Supplier, State } = models;
   const supplier = await Supplier.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -251,7 +255,9 @@ const getSupplierById = async ({ id } = {}) => {
 };
 
 const createSupplier = async ({ payload, transaction } = {}, retryOnConflict = false) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { Supplier } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -311,8 +317,9 @@ const createSupplier = async ({ payload, transaction } = {}, retryOnConflict = f
 
 const updateSupplier = async ({ id, payload, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { Supplier } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -370,8 +377,9 @@ const updateSupplier = async ({ id, payload, transaction } = {}) => {
 
 const deleteSupplier = async ({ id, transaction } = {}) => {
   if (!id) return false;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { Supplier } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
