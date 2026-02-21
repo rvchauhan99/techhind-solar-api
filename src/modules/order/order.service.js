@@ -5,29 +5,7 @@ const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
-
-const {
-    Order,
-    Inquiry,
-    Quotation,
-    Customer,
-    User,
-    InquirySource,
-    CompanyBranch,
-    ProjectScheme,
-    OrderType,
-    Discom,
-    Division,
-    SubDivision,
-    LoanType,
-    State,
-    City,
-    Product,
-    ProjectPhase,
-    CompanyWarehouse,
-    Fabrication,
-    Installation,
-} = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -88,6 +66,12 @@ const listOrders = async ({
     project_cost_to,
     enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
+    const models = getTenantModels();
+    const {
+        Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
+        ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+    } = models;
     const offset = (page - 1) * limit;
 
     const where = { deleted_at: null };
@@ -196,7 +180,7 @@ const listOrders = async ({
         attributes: {
             include: [
                 [
-                    db.sequelize.literal(`(
+                    models.sequelize.literal(`(
                         SELECT COALESCE(SUM(payment_amount), 0)
                         FROM order_payment_details
                         WHERE order_payment_details.order_id = "Order".id
@@ -338,13 +322,18 @@ const exportOrders = async (params = {}) => {
 
 const getOrderById = async ({ id } = {}) => {
     if (!id) return null;
-
+    const models = getTenantModels();
+    const {
+        Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
+        ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+    } = models;
     const order = await Order.findOne({
         where: { id, deleted_at: null },
         attributes: {
             include: [
                 [
-                    db.sequelize.literal(`(
+                    models.sequelize.literal(`(
                         SELECT COALESCE(SUM(payment_amount), 0)
                         FROM order_payment_details
                         WHERE order_payment_details.order_id = "Order".id
@@ -606,7 +595,13 @@ const getOrderById = async ({ id } = {}) => {
 };
 
 const createOrder = async ({ payload, transaction } = {}) => {
-    const t = transaction || (await db.sequelize.transaction());
+    const models = getTenantModels();
+    const {
+        Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
+        ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+    } = models;
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -629,7 +624,7 @@ const createOrder = async ({ payload, transaction } = {}) => {
                 district: payload.district || null,
             };
 
-            const customer = await db.Customer.create(customerPayload, { transaction: t });
+            const customer = await Customer.create(customerPayload, { transaction: t });
             customerId = customer.id;
         }
 
@@ -639,7 +634,7 @@ const createOrder = async ({ payload, transaction } = {}) => {
         let inverter_id = payload.inverter_id ?? null;
         let quotationForStatus = null;
         if (payload.quotation_id) {
-            const quotation = await db.Quotation.findOne({
+            const quotation = await Quotation.findOne({
                 where: { id: payload.quotation_id, deleted_at: null },
                 attributes: ["id", "bom_snapshot", "inquiry_id"],
                 transaction: t,
@@ -765,8 +760,13 @@ const createOrder = async ({ payload, transaction } = {}) => {
 
 const updateOrder = async ({ id, payload, transaction } = {}) => {
     if (!id) return null;
-
-    const t = transaction || (await db.sequelize.transaction());
+    const models = getTenantModels();
+    const {
+        Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
+        ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+    } = models;
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -800,7 +800,7 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
 
         // Update linked customer if present
         if (order.customer_id) {
-            const customer = await db.Customer.findOne({
+            const customer = await Customer.findOne({
                 where: { id: order.customer_id, deleted_at: null },
                 transaction: t,
             });
@@ -967,8 +967,9 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
 
 const deleteOrder = async ({ id, transaction } = {}) => {
     if (!id) return false;
-
-    const t = transaction || (await db.sequelize.transaction());
+    const models = getTenantModels();
+    const { Order } = models;
+    const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
 
     try {
@@ -1006,7 +1007,8 @@ const listPendingDeliveryOrders = async ({ user_id } = {}) => {
     if (!user_id) {
         return [];
     }
-
+    const models = getTenantModels();
+    const { Order, Customer, User, CompanyWarehouse } = models;
     // Find warehouses where the user is a manager
     const managedWarehouses = await CompanyWarehouse.findAll({
         include: [
@@ -1136,6 +1138,8 @@ const listDeliveryExecutionOrders = async ({
     if (!user_id) {
         return [];
     }
+    const models = getTenantModels();
+    const { Order, Customer, User, CompanyWarehouse, ProjectScheme, Discom, CompanyBranch, Product } = models;
     const allowedUserIds = Array.isArray(user_ids) && user_ids.length > 0
         ? user_ids
         : [user_id];
@@ -1260,7 +1264,7 @@ const listDeliveryExecutionOrders = async ({
             "bom_snapshot",
             "updated_at",
             [
-                db.sequelize.literal(`(
+                models.sequelize.literal(`(
                     SELECT COALESCE(SUM(payment_amount), 0)
                     FROM order_payment_details
                     WHERE order_payment_details.order_id = "Order".id
@@ -1269,7 +1273,7 @@ const listDeliveryExecutionOrders = async ({
                 "total_paid",
             ],
             [
-                db.sequelize.literal(`(
+                models.sequelize.literal(`(
                     SELECT MAX(challan_date)
                     FROM challans
                     WHERE challans.order_id = "Order".id
@@ -1278,7 +1282,7 @@ const listDeliveryExecutionOrders = async ({
                 "last_challan_date",
             ],
             [
-                db.sequelize.literal(`(
+                models.sequelize.literal(`(
                     SELECT COUNT(1)
                     FROM challans
                     WHERE challans.order_id = "Order".id
@@ -1458,6 +1462,8 @@ const listFabricationInstallationOrders = async ({
     address = null,
 } = {}) => {
     if (!user_id || !tab) return [];
+    const models = getTenantModels();
+    const { Order, Fabrication, Installation, Customer, User, ProjectScheme, Discom, CompanyBranch, Product, CompanyWarehouse } = models;
     const scopedUserIds = Array.isArray(user_ids)
         ? user_ids.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
         : null;
@@ -1480,8 +1486,8 @@ const listFabricationInstallationOrders = async ({
             : { fabricator_installer_id: user_id };
         where[Op.and] = [
             { [Op.or]: [fabricatorCond, sameAssigneeCond] },
-            db.sequelize.literal("(stages->>'planner') = 'completed'"),
-            db.sequelize.literal("(stages->>'fabrication') IS DISTINCT FROM 'completed'"),
+            models.sequelize.literal("(stages->>'planner') = 'completed'"),
+            models.sequelize.literal("(stages->>'fabrication') IS DISTINCT FROM 'completed'"),
         ];
     } else if (tabVal === "pending_installation") {
         const installerCond = hasScopedUserIds
@@ -1492,8 +1498,8 @@ const listFabricationInstallationOrders = async ({
             : { fabricator_installer_id: user_id };
         where[Op.and] = [
             { [Op.or]: [installerCond, sameAssigneeCond] },
-            db.sequelize.literal("(stages->>'fabrication') = 'completed'"),
-            db.sequelize.literal("(stages->>'installation') IS DISTINCT FROM 'completed'"),
+            models.sequelize.literal("(stages->>'fabrication') = 'completed'"),
+            models.sequelize.literal("(stages->>'installation') IS DISTINCT FROM 'completed'"),
         ];
     } else if (tabVal === "completed_fabrication_15d") {
         const fabricatorCond = hasScopedUserIds
@@ -1504,7 +1510,7 @@ const listFabricationInstallationOrders = async ({
             : { fabricator_installer_id: user_id };
         where[Op.and] = [
             { [Op.or]: [fabricatorCond, sameAssigneeCond] },
-            db.sequelize.literal("(stages->>'fabrication') = 'completed'"),
+            models.sequelize.literal("(stages->>'fabrication') = 'completed'"),
             { fabrication_completed_at: { [Op.gte]: fifteenDaysAgo } },
         ];
     } else if (tabVal === "completed_installation_15d") {
@@ -1516,7 +1522,7 @@ const listFabricationInstallationOrders = async ({
             : { fabricator_installer_id: user_id };
         where[Op.and] = [
             { [Op.or]: [installerCond, sameAssigneeCond] },
-            db.sequelize.literal("(stages->>'installation') = 'completed'"),
+            models.sequelize.literal("(stages->>'installation') = 'completed'"),
             { installation_completed_at: { [Op.gte]: fifteenDaysAgo } },
         ];
     } else {
@@ -1572,7 +1578,7 @@ const listFabricationInstallationOrders = async ({
             "reference_from",
             "payment_type",
             [
-                db.sequelize.literal(`(
+                models.sequelize.literal(`(
                     SELECT COALESCE(SUM(payment_amount), 0)
                     FROM order_payment_details
                     WHERE order_payment_details.order_id = "Order".id
@@ -1665,6 +1671,8 @@ const listFabricationInstallationOrders = async ({
 };
 
 const getSolarPanels = async () => {
+    const models = getTenantModels();
+    const { Product } = models;
     const products = await Product.findAll({
         where: {
             product_type_id: 10,
@@ -1683,6 +1691,8 @@ const getSolarPanels = async () => {
 };
 
 const getInverters = async () => {
+    const models = getTenantModels();
+    const { Product } = models;
     const products = await Product.findAll({
         where: {
             product_type_id: 9,

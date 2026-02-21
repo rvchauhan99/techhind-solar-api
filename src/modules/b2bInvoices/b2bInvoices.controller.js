@@ -4,7 +4,7 @@ const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const b2bInvoicesService = require("./b2bInvoices.service.js");
 const pdfService = require("./pdf.service.js");
-const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const bucketService = require("../../common/services/bucket.service.js");
 
 const list = asyncHandler(async (req, res) => {
@@ -54,7 +54,8 @@ const generatePDF = asyncHandler(async (req, res) => {
   const invoice = await b2bInvoicesService.getInvoiceById({ id });
   if (!invoice) return responseHandler.sendError(res, "B2B invoice not found", 404);
 
-  const company = await db.Company.findOne({ where: { deleted_at: null } });
+  const { Company } = getTenantModels();
+  const company = await Company.findOne({ where: { deleted_at: null } });
   let bucketClient = null;
   try {
     bucketClient = bucketService.getBucketForRequest(req);

@@ -52,21 +52,15 @@ DATABASE_URL=postgres://user:password@host:5432/dbname
 
 ## Step 3: Run migrations
 
-Migrations are **not** run on API startup. Run them once before or after deploy.
+**Docker:** The image runs migrations automatically on container start (see [migrations.md](migrations.md)). Ensure `DB_*` or `DATABASE_URL` is set when the container starts so migrations can run, then the server starts.
 
-From the API project root:
+**Non-Docker (e.g. bare metal):** Run migrations once before or after deploy:
 
 ```bash
 npm run db:migrate
-```
-
-Or use the tenant migration script in dedicated mode (same effect on the single DB):
-
-```bash
+# or
 npm run db:tenant-migrate
 ```
-
-See [migrations.md](migrations.md) for details.
 
 ---
 
@@ -112,7 +106,7 @@ Or with Node directly:
 node src/server.js
 ```
 
-**Docker:** The image runs `node src/server.js` only. Do not run migrations in the container CMD; run them in your pipeline or a separate job.
+**Docker:** The image runs migrations on start via the entrypoint, then starts the server. No separate migration job is required if you use the default image.
 
 ---
 
@@ -127,7 +121,7 @@ node src/server.js
 
 1. Do **not** set `TENANT_REGISTRY_DB_URL`.
 2. Set `DB_*` or `DATABASE_URL` and optional SSL.
-3. Run `npm run db:migrate` (or `db:tenant-migrate`) as a separate step.
+3. Run `npm run db:migrate` (or `db:tenant-migrate`) as a separate step when not using Docker; with Docker, migrations run on container start.
 4. Set JWT secrets, `NODE_ENV`, `PORT`, `FRONTEND_URL`, and optional bucket/email.
 5. Start the API with `npm start` or Docker.
 6. Point the frontend at this API; login is email + password only.

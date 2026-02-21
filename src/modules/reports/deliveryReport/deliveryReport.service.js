@@ -1,8 +1,8 @@
 "use strict";
 
-const db = require("../../../models/index.js");
 const { QueryTypes } = require("sequelize");
 const { TRANSACTION_TYPE } = require("../../../common/utils/constants.js");
+const { getTenantModels } = require("../../tenant/tenantModels.js");
 
 /**
  * Get delivery report aggregated per order (optionally filter by warehouse, date range, order number).
@@ -15,6 +15,7 @@ const getDeliveryReport = async ({
   warehouse_id = null,
   order_number = null,
 } = {}) => {
+  const models = getTenantModels();
   const offset = (page - 1) * limit;
 
   const whereClauses = [
@@ -54,7 +55,7 @@ const getDeliveryReport = async ({
     ${whereSql}
   `;
 
-  const countRows = await db.sequelize.query(countSql, {
+  const countRows = await models.sequelize.query(countSql, {
     type: QueryTypes.SELECT,
     replacements: params,
   });
@@ -90,7 +91,7 @@ const getDeliveryReport = async ({
     LIMIT :limit OFFSET :offset
   `;
 
-  const rows = await db.sequelize.query(dataSql, {
+  const rows = await models.sequelize.query(dataSql, {
     type: QueryTypes.SELECT,
     replacements: {
       ...params,

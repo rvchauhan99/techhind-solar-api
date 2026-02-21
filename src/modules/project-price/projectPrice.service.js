@@ -1,10 +1,8 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
-
-const { ProjectPrice, State, ProjectScheme, OrderType, BillOfMaterial, Product, ProductType } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const listProjectPrices = async ({
   page = 1,
@@ -26,6 +24,8 @@ const listProjectPrices = async ({
   is_locked = null,
   visibility = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { ProjectPrice, State, ProjectScheme, OrderType, BillOfMaterial } = models;
   const offset = (page - 1) * limit;
 
   const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
@@ -201,7 +201,8 @@ const exportProjectPrices = async (params = {}) => {
 
 const getProjectPriceById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { ProjectPrice, State, ProjectScheme, OrderType, BillOfMaterial } = models;
   const item = await ProjectPrice.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -236,7 +237,9 @@ const getProjectPriceById = async ({ id } = {}) => {
 };
 
 const createProjectPrice = async ({ payload, transaction } = {}) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { ProjectPrice } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -273,8 +276,9 @@ const createProjectPrice = async ({ payload, transaction } = {}) => {
 
 const updateProjectPrice = async ({ id, payload, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { ProjectPrice } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -329,8 +333,9 @@ const updateProjectPrice = async ({ id, payload, transaction } = {}) => {
 
 const deleteProjectPrice = async ({ id, transaction } = {}) => {
   if (!id) return false;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { ProjectPrice } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -359,6 +364,8 @@ const deleteProjectPrice = async ({ id, transaction } = {}) => {
 };
 
 const bomDetails = async () => {
+  const models = getTenantModels();
+  const { BillOfMaterial, Product, ProductType } = models;
   let datas = await BillOfMaterial.findAll({ attributes: ['id', 'bom_name', 'bom_detail'] });
 
   // Get all unique product_ids from all bom_details

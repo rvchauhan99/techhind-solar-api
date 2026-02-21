@@ -2,6 +2,7 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const { INQUIRY_STATUS } = require("../../common/utils/constants.js");
 
 const listInquiries = async ({
@@ -47,8 +48,9 @@ const listInquiries = async ({
   assigned_on_op: assignedOnOp,
   enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
-  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City, OrderType } = db;
-  const { Op } = db.Sequelize;
+  const models = getTenantModels();
+  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City, OrderType } = models;
+  const { Op } = models.Sequelize;
 
   const where = { deleted_at: null };
   if (is_dead === 'true' || is_dead === true) {
@@ -400,7 +402,8 @@ const exportInquiries = async ({
 };
 
 const getInquiryById = async ({ id }) => {
-  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City } = db;
+  const models = getTenantModels();
+  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City } = models;
   if (!id) return null;
 
   const found = await Inquiry.findOne({
@@ -476,9 +479,10 @@ const getInquiryById = async ({ id }) => {
 };
 
 const createInquiry = async ({ payload, transaction } = {}) => {
-  const { Inquiry, Customer, CompanyBranch, Company } = db;
+  const models = getTenantModels();
+  const { Inquiry, Customer, CompanyBranch, Company } = models;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -566,10 +570,11 @@ const createInquiry = async ({ payload, transaction } = {}) => {
 };
 
 const updateInquiry = async ({ id, payload, transaction } = {}) => {
-  const { Inquiry, Customer } = db;
+  const models = getTenantModels();
+  const { Inquiry, Customer } = models;
   if (!id) return null;
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -781,8 +786,9 @@ const generateInquiryImportSampleCsv = () => {
 };
 
 const bulkImportInquiriesFromCsv = async ({ csvText, filename } = {}) => {
-  const { InquirySource, ProjectScheme, CompanyBranch, OrderType, Discom, State, City } = db;
-  const { Op } = db.Sequelize;
+  const models = getTenantModels();
+  const { InquirySource, ProjectScheme, CompanyBranch, OrderType, Discom, State, City, Inquiry, Customer } = models;
+  const { Op } = models.Sequelize;
 
   const { headers, rows } = parseCSV(csvText || "");
   if (headers.length === 0 || rows.length === 0) {

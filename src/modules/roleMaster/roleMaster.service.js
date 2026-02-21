@@ -1,12 +1,12 @@
 const ExcelJS = require('exceljs');
 const { Op } = require('sequelize');
-const db = require('../../models/index.js');
 const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
-
-const Role = db.Role;
+const { getTenantModels } = require('../tenant/tenantModels.js');
 
 const createRole = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Role } = models;
   // check duplicate name (excluding soft-deleted)
   const existing = await Role.findOne({
     where: { name: payload.name, deleted_at: null },
@@ -22,6 +22,8 @@ const createRole = async (payload, transaction = null) => {
 };
 
 const getRoleById = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Role } = models;
   const role = await Role.findOne({ where: { id, deleted_at: null }, transaction });
   if (!role) throw new AppError('Role not found', RESPONSE_STATUS_CODES.NOT_FOUND);
   return role.toJSON();
@@ -55,6 +57,8 @@ const listRoles = async ({
   description = null,
   description_op = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { Role } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
   const andConds = [];
@@ -87,6 +91,8 @@ const listRoles = async ({
 };
 
 const updateRole = async (id, updates, transaction = null) => {
+  const models = getTenantModels();
+  const { Role } = models;
   const role = await Role.findOne({ where: { id, deleted_at: null }, transaction });
   if (!role) throw new AppError('Role not found', RESPONSE_STATUS_CODES.NOT_FOUND);
 
@@ -101,6 +107,8 @@ const updateRole = async (id, updates, transaction = null) => {
 };
 
 const deleteRole = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Role } = models;
   await Role.destroy({ where: { id }, transaction });
   return true;
 };

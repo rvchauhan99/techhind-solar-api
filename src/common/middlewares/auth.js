@@ -1,8 +1,8 @@
 const jwt = require("jsonwebtoken");
 const AppError = require("../errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../utils/constants.js");
-const db = require("../../models/index.js");
 const authService = require("../../modules/auth/auth.service.js");
+const { getTenantModels } = require("../../modules/tenant/tenantModels.js");
 const { tenantContextMiddleware } = require("../../modules/tenant/tenantContext.middleware.js");
 const { tenantTransactionMiddleware } = require("../../modules/tenant/tenantTransaction.middleware.js");
 const { usageTrackingMiddleware } = require("../../modules/billing/usageTracking.middleware.js");
@@ -43,7 +43,8 @@ const validateAccessToken = async (req, res, next) => {
         }
       } else {
         await authService.checkedToken(token);
-        const userToken = await db.UserToken.findOne({
+        const { UserToken } = getTenantModels();
+        const userToken = await UserToken.findOne({
           where: { user_id: decoded.id, access_token: token },
         });
         if (!userToken) {

@@ -2,11 +2,15 @@
 
 const { getRegistrySequelize } = require("../../config/registryDb.js");
 
+const registryUsageEnabled = () =>
+  String(process.env.ENABLE_REGISTRY_USAGE_TRACKING || "").toLowerCase() === "true";
+
 /**
  * Increment api_requests for tenant for today. Writes to Registry DB customer_usage_daily.
  * @param {string} tenantId - UUID
  */
 async function incrementApiRequests(tenantId) {
+  if (!registryUsageEnabled()) return;
   const sequelize = getRegistrySequelize();
   if (!sequelize) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -23,6 +27,7 @@ async function incrementApiRequests(tenantId) {
  * @param {string} tenantId - UUID
  */
 async function incrementPdfGenerated(tenantId) {
+  if (!registryUsageEnabled()) return;
   const sequelize = getRegistrySequelize();
   if (!sequelize) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -40,6 +45,7 @@ async function incrementPdfGenerated(tenantId) {
  * @param {string|number} userId - User ID
  */
 async function recordUserActivity(tenantId, userId) {
+  if (!registryUsageEnabled()) return;
   const sequelize = getRegistrySequelize();
   if (!sequelize) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -58,6 +64,7 @@ async function recordUserActivity(tenantId, userId) {
  * @param {string} date - YYYY-MM-DD
  */
 async function aggregateActiveUsersForDate(date) {
+  if (!registryUsageEnabled()) return;
   const sequelize = getRegistrySequelize();
   if (!sequelize) return;
   await sequelize.query(
@@ -81,6 +88,7 @@ async function aggregateActiveUsersForDate(date) {
  * @param {number} storageGb - Storage in GB
  */
 async function setStorageGb(tenantId, date, storageGb) {
+  if (!registryUsageEnabled()) return;
   const sequelize = getRegistrySequelize();
   if (!sequelize) return;
   await sequelize.query(

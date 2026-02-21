@@ -85,7 +85,7 @@ router.use("/stock-adjustments", requireAuthWithTenant, requireModulePermissionB
 router.use("/reports/serialized-inventory", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/serialized-inventory" }), serializedInventoryReportRoutes);
 router.use("/reports/deliveries", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/deliveries" }), deliveryReportRoutes);
 router.use("/billing", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/billing" }), billingRoutes);
-router.use("/admin", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/admin" }), adminRoutes);
+router.use("/admin", adminRoutes);
 
 // Child API mounts use parent page module: order-documents/inquiry-documents use /order and /inquiry above; order-payments uses any of order-related pages.
 // Mounts that use per-route requireModulePermission (no mount-level module check).

@@ -1,14 +1,18 @@
 "use strict";
 
-const { OrderDocument } = require("../../models");
 const { Op } = require("sequelize");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const createOrderDocument = async (payload, transaction) => {
+    const models = getTenantModels();
+    const { OrderDocument } = models;
     const document = await OrderDocument.create(payload, { transaction });
     return document;
 };
 
 const updateOrderDocument = async (id, updates, transaction) => {
+    const models = getTenantModels();
+    const { OrderDocument } = models;
     const document = await OrderDocument.findByPk(id);
     if (!document) {
         throw new Error("Document not found");
@@ -18,6 +22,8 @@ const updateOrderDocument = async (id, updates, transaction) => {
 };
 
 const deleteOrderDocument = async (id, transaction) => {
+    const models = getTenantModels();
+    const { OrderDocument } = models;
     const document = await OrderDocument.findByPk(id);
     if (!document) {
         throw new Error("Document not found");
@@ -27,6 +33,8 @@ const deleteOrderDocument = async (id, transaction) => {
 };
 
 const getOrderDocumentById = async (id) => {
+    const models = getTenantModels();
+    const { OrderDocument } = models;
     const document = await OrderDocument.findByPk(id);
     return document;
 };
@@ -49,6 +57,8 @@ const listOrderDocuments = async ({ order_id, page = 1, limit = 20, q = null }, 
         ];
     }
 
+    const models = getTenantModels();
+    const { OrderDocument } = models;
     const { count, rows } = await OrderDocument.findAndCountAll({
         where,
         limit,

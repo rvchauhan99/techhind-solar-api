@@ -1,12 +1,12 @@
 const ExcelJS = require('exceljs');
 const { Op } = require('sequelize');
-const db = require('../../models/index.js');
 const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
-
-const Module = db.Module;
+const { getTenantModels } = require('../tenant/tenantModels.js');
 
 const createModule = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Module } = models;
   // check duplicate name or key (excluding soft-deleted)
   const existing = await Module.findOne({
     where: {
@@ -45,6 +45,8 @@ const createModule = async (payload, transaction = null) => {
 };
 
 const getModuleById = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Module } = models;
   const module = await Module.findOne({ where: { id, deleted_at: null }, transaction });
   if (!module) throw new AppError('Module not found', RESPONSE_STATUS_CODES.NOT_FOUND);
   return module.toJSON();
@@ -68,6 +70,8 @@ const listModules = async ({
   sequence_op,
   sequence_to,
 } = {}) => {
+  const models = getTenantModels();
+  const { Module } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
   const andConds = [];
@@ -128,6 +132,8 @@ const listModules = async ({
 };
 
 const updateModule = async (id, updates, transaction = null) => {
+  const models = getTenantModels();
+  const { Module } = models;
   const module = await Module.findOne({ where: { id, deleted_at: null }, transaction });
   if (!module) throw new AppError('Module not found', RESPONSE_STATUS_CODES.NOT_FOUND);
 
@@ -162,6 +168,8 @@ const updateModule = async (id, updates, transaction = null) => {
 };
 
 const deleteModule = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Module } = models;
   await Module.destroy({ where: { id }, transaction });
   return true;
 };
