@@ -158,6 +158,8 @@ async function main() {
   const registryUrl = process.env.TENANT_REGISTRY_DB_URL;
 
   if (registryUrl) {
+    const { initializeRegistryConnection } = require("../src/config/registryDb.js");
+    await initializeRegistryConnection();
     const { getActiveTenantsForMigrations } = require("../src/modules/tenant/tenantRegistry.service.js");
     tenants = await getActiveTenantsForMigrations({ sharedOnly: true });
     if (singleTenantId) {
