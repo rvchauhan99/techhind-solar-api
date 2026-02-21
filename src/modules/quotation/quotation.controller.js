@@ -8,7 +8,7 @@ const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCac
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 const pdfService = require("./pdf.service.js");
 const bucketService = require("../../common/services/bucket.service.js");
-const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const FILE_UNAVAILABLE_MESSAGE =
     "We couldn't save your documents right now. Please try again in a few minutes.";
@@ -313,8 +313,7 @@ const generatePDF = asyncHandler(async (req, res) => {
     const context = await resolveQuotationVisibilityContext(req);
     assertRecordVisibleByListingCriteria(quotation, context, { handledByField: "user_id" });
 
-    // Get company profile
-    const { Company, CompanyBankAccount, ProductMake } = db;
+    const { Company, CompanyBankAccount, ProductMake } = getTenantModels();
     const company = await Company.findOne({ where: { deleted_at: null } });
 
     // Get primary bank account

@@ -46,7 +46,10 @@ const login = asyncHandler(async (req, res) => {
     user = await authService.loginUserWithTenant(tenantSequelize, email, password);
     user.tenant_id = tenant.id;
   } else {
-    if (dbPoolManager.isSharedMode() && !req.transaction) {
+    if (dbPoolManager.isSharedMode()) {
+      return responseHandler.sendError(res, "tenant_key is required for login in multi-tenant mode", 400);
+    }
+    if (!req.transaction) {
       loginTransaction = await db.sequelize.transaction({ timeout: 30000 });
       req.transaction = loginTransaction; // so error handler can rollback
     }
