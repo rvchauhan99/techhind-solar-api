@@ -4,19 +4,18 @@ const { DataTypes, QueryTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
 const { QUOTATION_STATUS } = require("../common/utils/constants.js");
 
-// Helper to generate quotation number: YYMM###
-const generateQuotationNumber = async () => {
+// Helper to generate quotation number: YYMM### (uses tenant-bound sequelize when available)
+const generateQuotationNumber = async (seq) => {
+    const db = seq || sequelize;
     const now = new Date();
     const year = String(now.getFullYear()).slice(-2);
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const yymm = `${year}${month}`;
 
-    // Calculate start and end of current month
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    // Count quotations created in the current month (excluding soft-deleted)
-    const results = await sequelize.query(
+    const results = await db.query(
         `SELECT COUNT(*) as count 
      FROM quotations 
      WHERE created_at >= :startOfMonth 
@@ -27,7 +26,7 @@ const generateQuotationNumber = async () => {
                 startOfMonth: startOfMonth.toISOString(),
                 endOfMonth: endOfMonth.toISOString(),
             },
-            type: QueryTypes.SELECT,
+            type: db.QueryTypes.SELECT,
         }
     );
 
@@ -508,9 +507,10 @@ const Quotation = sequelize.define(
     }
 );
 
-// Quotation.beforeCreate(async (quotation) => {
+// Quotation.beforeCreate(async (quotation, options) => {
 //     if (!quotation.quotation_number) {
-//         quotation.quotation_number = await generateQuotationNumber();
+//         const seq = (options?.transaction?.sequelize) || quotation.sequelize;
+//         quotation.quotation_number = await generateQuotationNumber(seq);
 //     }
 // });
 

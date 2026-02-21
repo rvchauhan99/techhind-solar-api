@@ -4,25 +4,18 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
 const { INQUIRY_STATUS } = require("../common/utils/constants.js");
 
-// Helper to generate inquiry number: YYMM###
-// First 4 digits: Year and Month (e.g., 2501 for January 2025)
-// Last 3 digits: Random based on inquiry count in the month
-//   - 1st inquiry: 10-20
-//   - 2nd inquiry: 20-30
-//   - 3rd inquiry: 30-40
-//   - and so on...
-const generateInquiryNumber = async () => {
+// Helper to generate inquiry number: YYMM### (uses tenant-bound sequelize when available)
+const generateInquiryNumber = async (seq) => {
+  const db = seq || sequelize;
   const now = new Date();
   const year = String(now.getFullYear()).slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const yymm = `${year}${month}`;
 
-  // Calculate start and end of current month
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  // Count inquiries created in the current month (excluding soft-deleted) using raw query
-  const results = await sequelize.query(
+  const results = await db.query(
     `SELECT COUNT(*) as count 
      FROM inquiries 
      WHERE created_at >= :startOfMonth 
@@ -33,7 +26,7 @@ const generateInquiryNumber = async () => {
         startOfMonth: startOfMonth.toISOString(),
         endOfMonth: endOfMonth.toISOString(),
       },
-      type: sequelize.QueryTypes.SELECT,
+      type: db.QueryTypes.SELECT,
     }
   );
 
@@ -133,9 +126,10 @@ const Inquiry = sequelize.define(
   }
 );
 
-Inquiry.beforeCreate(async (inquiry) => {
+Inquiry.beforeCreate(async (inquiry, options) => {
   if (!inquiry.inquiry_number) {
-    inquiry.inquiry_number = await generateInquiryNumber();
+    const seq = (options?.transaction?.sequelize) || inquiry.sequelize;
+    inquiry.inquiry_number = await generateInquiryNumber(seq);
   }
 });
 

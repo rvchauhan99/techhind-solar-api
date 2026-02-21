@@ -4,8 +4,9 @@ const { DataTypes, QueryTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
 const { ADJUSTMENT_STATUS, ADJUSTMENT_TYPE } = require("../common/utils/constants.js");
 
-// Helper to generate adjustment number: YYMM###
-const generateAdjustmentNumber = async () => {
+// Helper to generate adjustment number: YYMM### (uses tenant-bound sequelize when available)
+const generateAdjustmentNumber = async (seq) => {
+  const db = seq || sequelize;
   const now = new Date();
   const year = String(now.getFullYear()).slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -14,7 +15,7 @@ const generateAdjustmentNumber = async () => {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  const results = await sequelize.query(
+  const results = await db.query(
     `SELECT COUNT(*) as count 
      FROM stock_adjustments 
      WHERE created_at >= :startOfMonth 
@@ -25,7 +26,7 @@ const generateAdjustmentNumber = async () => {
         startOfMonth: startOfMonth.toISOString(),
         endOfMonth: endOfMonth.toISOString(),
       },
-      type: QueryTypes.SELECT,
+      type: db.QueryTypes.SELECT,
     }
   );
 
@@ -115,9 +116,10 @@ const StockAdjustment = sequelize.define(
   }
 );
 
-StockAdjustment.beforeCreate(async (adjustment) => {
+StockAdjustment.beforeCreate(async (adjustment, options) => {
   if (!adjustment.adjustment_number) {
-    adjustment.adjustment_number = await generateAdjustmentNumber();
+    const seq = (options?.transaction?.sequelize) || adjustment.sequelize;
+    adjustment.adjustment_number = await generateAdjustmentNumber(seq);
   }
 });
 

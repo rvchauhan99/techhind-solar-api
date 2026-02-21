@@ -3,8 +3,9 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
 
-// Helper to generate order number: YYMM###
-const generateOrderNumber = async () => {
+// Helper to generate order number: YYMM### (uses tenant-bound sequelize when available)
+const generateOrderNumber = async (seq) => {
+    const db = seq || sequelize;
     const now = new Date();
     const year = String(now.getFullYear()).slice(-2);
     const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -15,7 +16,7 @@ const generateOrderNumber = async () => {
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
     // Count orders created in the current month (excluding soft-deleted)
-    const results = await sequelize.query(
+    const results = await db.query(
         `SELECT COUNT(*) as count 
      FROM orders 
      WHERE created_at >= :startOfMonth 
@@ -26,7 +27,7 @@ const generateOrderNumber = async () => {
                 startOfMonth: startOfMonth.toISOString(),
                 endOfMonth: endOfMonth.toISOString(),
             },
-            type: sequelize.QueryTypes.SELECT,
+            type: db.QueryTypes.SELECT,
         }
     );
 
@@ -578,9 +579,10 @@ const Order = sequelize.define(
     }
 );
 
-Order.beforeCreate(async (order) => {
+Order.beforeCreate(async (order, options) => {
     if (!order.order_number) {
-        order.order_number = await generateOrderNumber();
+        const seq = (options?.transaction?.sequelize) || order.sequelize;
+        order.order_number = await generateOrderNumber(seq);
     }
 });
 

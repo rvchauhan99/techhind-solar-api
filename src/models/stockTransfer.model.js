@@ -4,8 +4,9 @@ const { DataTypes, QueryTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
 const { TRANSFER_STATUS } = require("../common/utils/constants.js");
 
-// Helper to generate transfer number: YYMM###
-const generateTransferNumber = async () => {
+// Helper to generate transfer number: YYMM### (uses tenant-bound sequelize when available)
+const generateTransferNumber = async (seq) => {
+  const db = seq || sequelize;
   const now = new Date();
   const year = String(now.getFullYear()).slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -14,7 +15,7 @@ const generateTransferNumber = async () => {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  const results = await sequelize.query(
+  const results = await db.query(
     `SELECT COUNT(*) as count 
      FROM stock_transfers 
      WHERE created_at >= :startOfMonth 
@@ -25,7 +26,7 @@ const generateTransferNumber = async () => {
         startOfMonth: startOfMonth.toISOString(),
         endOfMonth: endOfMonth.toISOString(),
       },
-      type: QueryTypes.SELECT,
+      type: db.QueryTypes.SELECT,
     }
   );
 
@@ -113,9 +114,10 @@ const StockTransfer = sequelize.define(
   }
 );
 
-StockTransfer.beforeCreate(async (transfer) => {
+StockTransfer.beforeCreate(async (transfer, options) => {
   if (!transfer.transfer_number) {
-    transfer.transfer_number = await generateTransferNumber();
+    const seq = (options?.transaction?.sequelize) || transfer.sequelize;
+    transfer.transfer_number = await generateTransferNumber(seq);
   }
 });
 

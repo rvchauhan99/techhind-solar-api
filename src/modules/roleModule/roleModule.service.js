@@ -5,9 +5,17 @@ const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const { getTenantSequelize } = require("../../common/utils/requestContext.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const dbPoolManager = require("../tenant/dbPoolManager.js");
 
-/** Sequelize to use for app data (modules, role_modules). In shared mode uses tenant DB. */
-const getDataSequelize = () => getTenantSequelize() || db.sequelize;
+/** Sequelize to use for app data (modules, role_modules). In shared mode uses tenant DB; never hits registry for app tables. */
+const getDataSequelize = () => {
+  const tenantSeq = getTenantSequelize();
+  if (tenantSeq) return tenantSeq;
+  if (dbPoolManager.isSharedMode()) {
+    throw new AppError("Tenant context required for app data access", RESPONSE_STATUS_CODES.FORBIDDEN);
+  }
+  return db.sequelize;
+};
 const VALID_LISTING_CRITERIA = new Set(["my_team", "all"]);
 
 const normalizeListingCriteria = (value) => {
