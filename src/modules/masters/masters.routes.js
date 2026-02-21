@@ -18,6 +18,7 @@ router.get('/list/:model', ...requireAuthWithTenant, masters("read"), controller
 router.get('/reference-options', ...requireAuthWithTenant, referenceRead, controller.getReferenceOptions);
 router.get('/constants', ...requireAuthWithTenant, referenceRead, controller.getAppConstants);
 router.get('/state/default', ...requireAuthWithTenant, referenceRead, controller.getDefaultState);
+router.get('/branch/default', ...requireAuthWithTenant, referenceRead, controller.getDefaultBranch);
 router.post('/create', ...requireAuthWithTenant, masters("create"), uploadMemory.single('file'), controller.create);
 // CSV sample download and upload (must be before /:id routes)
 router.get('/sample-file', ...requireAuthWithTenant, masters("read"), controller.downloadSample);

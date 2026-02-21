@@ -2,7 +2,7 @@
 <div class="page thankyou-page">
   <!-- Logo Header -->
   <div class="thankyou-logo-header">
-    <img src="{{logoImage}}" alt="Solar Earth" class="thankyou-logo" />
+    <img src="{{logoImage}}" alt="{{company.displayName}}" class="thankyou-logo" />
   </div>
 
   <!-- Thank You Title -->
@@ -13,7 +13,7 @@
 
   <!-- Thank You Message -->
   <div class="thankyou-message">
-    <p>We appreciate your interest in Solar Earth Renewables and taking a step towards a brighter, more sustainable future powered by the sun!</p>
+    <p>We appreciate your interest in {{company.displayName}} and taking a step towards a brighter, more sustainable future powered by the sun!</p>
     <p class="thankyou-highlight">We look forward to partnering with you on your solar journey!</p>
   </div>
 
@@ -34,7 +34,7 @@
         </div>
         <div class="thankyou-contact-info">
           <span class="thankyou-contact-label">Contact No.</span>
-          <span class="thankyou-contact-value">{{company.phone}}</span>
+          <span class="thankyou-contact-value">{{company.phoneDisplay}}</span>
         </div>
       </div>
       
@@ -47,7 +47,7 @@
         </div>
         <div class="thankyou-contact-info">
           <span class="thankyou-contact-label">Email</span>
-          <span class="thankyou-contact-value">{{company.email}}</span>
+          <span class="thankyou-contact-value">{{company.emailDisplay}}</span>
         </div>
       </div>
       
@@ -61,7 +61,7 @@
         </div>
         <div class="thankyou-contact-info">
           <span class="thankyou-contact-label">Visit Us On</span>
-          <span class="thankyou-contact-value">www.{{company.website}}</span>
+          <span class="thankyou-contact-value">{{company.websiteDisplay}}</span>
         </div>
       </div>
     </div>
@@ -75,7 +75,7 @@
       </div>
       <div class="thankyou-contact-info">
         <span class="thankyou-contact-label">Address</span>
-        <span class="thankyou-contact-value thankyou-address-text">C/601 Ananta Space, Jagatpur Road, Jagatpur,<br/>Ahmedabad Gujarat, India - 382470.</span>
+        <span class="thankyou-contact-value thankyou-address-text">{{company.addressLine}}</span>
       </div>
     </div>
   </div>

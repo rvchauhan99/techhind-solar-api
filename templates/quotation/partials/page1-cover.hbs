@@ -2,7 +2,7 @@
 <div class="page cover-page" style="background-image: url('{{backgroundImage}}');">
   <!-- Header with Logo -->
   <div class="cover-header">
-    <img src="{{logoImage}}" alt="Solar Earth" class="cover-logo" />
+    <img src="{{logoImage}}" alt="{{company.displayName}}" class="cover-logo" />
     <div class="cover-accent-bar"></div>
   </div>
 
@@ -33,6 +33,7 @@
         <h4>Prepared By,</h4>
         <p>Name: {{prepared_by.name}}</p>
         <p>Contact No: {{prepared_by.phone}}</p>
+        <p>Email: {{prepared_by.email}}</p>
       </div>
     </div>
   </div>
@@ -43,21 +44,21 @@
       <span class="icon">✉</span>
       <div>
         <span class="label">Email</span>
-        {{company.email}}
+        {{company.emailDisplay}}
       </div>
     </div>
     <div class="cover-footer-item">
       <span class="icon">📞</span>
       <div>
         <span class="label">Mobile Number</span>
-        {{company.phone}}
+        {{company.phoneDisplay}}
       </div>
     </div>
     <div class="cover-footer-item">
       <span class="icon">🌐</span>
       <div>
         <span class="label">Website</span>
-        {{company.website}}
+        {{company.websiteDisplay}}
       </div>
     </div>
   </div>

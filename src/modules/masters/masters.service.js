@@ -804,7 +804,7 @@ const updateMaster = async ({ model, id, updates, userId } = {}) => {
  * @param {Object} params - { model, status, q, limit, id } - status optional; q search term (optional); limit max results (optional, default 20 when q present); id optional single id to fetch one option
  * @returns {Array} - Array of { id, label, value, ... } objects
  */
-const getReferenceOptions = async ({ model, status, q = null, limit = null, id: idParam = null } = {}) => {
+const getReferenceOptions = async ({ model, status, status_in, q = null, limit = null, id: idParam = null } = {}) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
@@ -826,6 +826,12 @@ const getReferenceOptions = async ({ model, status, q = null, limit = null, id: 
     const where = { deleted_at: null };
     if (status && modelAttributes.status) {
         where.status = status;
+    } else if (status_in && modelAttributes.status) {
+        // status_in: comma-separated, e.g. "APPROVED,PARTIAL_RECEIVED" for PO inward eligibility
+        const statuses = String(status_in).split(',').map(s => s.trim()).filter(Boolean);
+        if (statuses.length > 0) {
+            where.status = { [Op.in]: statuses };
+        }
     }
 
     // Fetch by id: when id is provided, filter by primary key and return at most one option
@@ -949,6 +955,20 @@ const getDefaultState = async () => {
     return defaultState ? defaultState.toJSON() : null;
 };
 
+/**
+ * Get the default branch (company_branch where is_default is true)
+ * @returns {Object|null} - Default branch or null if none exists
+ */
+const getDefaultBranch = async () => {
+    const CompanyBranch = getModelByName('company_branch.model');
+    
+    const defaultBranch = await CompanyBranch.findOne({
+        where: { deleted_at: null, is_default: true },
+    });
+
+    return defaultBranch ? defaultBranch.toJSON() : null;
+};
+
 module.exports = {
     getMasterList,
     deleteMaster,
@@ -957,6 +977,7 @@ module.exports = {
     updateMaster,
     getReferenceOptions,
     getDefaultState,
+    getDefaultBranch,
 };
 
 /**

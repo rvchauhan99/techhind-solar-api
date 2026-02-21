@@ -4,8 +4,8 @@
     <div class="about-section">
         <h2>About us</h2>
         <p>
-            Solar Earth, established in 2018, is a leading provider of solar power systems for both residential and
-            commercial properties across Gujarat, India. Our headquarters are located in Ahmedabad, Gujarat, allowing us
+            {{company.displayName}}, established in 2018, is a leading provider of solar power systems for both residential and
+            commercial properties across {{company.state}}, India. Our headquarters are located in {{company.addressLine}}, allowing us
             to serve clients throughout the state efficiently.
         </p>
     </div>
@@ -15,11 +15,11 @@
         <h2>Our Mission</h2>
         <p>
             We are committed to helping our customers harness the clean and sustainable power of the sun. We are
-            passionate about reducing reliance on fossil fuels and creating a greener future for Gujarat.
+            passionate about reducing reliance on fossil fuels and creating a greener future for {{company.state}}.
         </p>
     </div>
 
-    <!-- Why Choose Solar Earth Section -->
+    <!-- Why Choose {{company.displayName}} Section -->
     <div class="why-choose">
         <div class="why-choose-header">
             <div class="check-icon">
@@ -28,7 +28,7 @@
                     <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
             </div>
-            <h2>Why Choose Solar Earth ?</h2>
+            <h2>Why Choose {{company.displayName}} ?</h2>
         </div>
 
         <div class="features-grid">

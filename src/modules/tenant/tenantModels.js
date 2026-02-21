@@ -54,11 +54,24 @@ function getModelsForSequelize(sequelize) {
 
 /**
  * Get models for current request's tenant sequelize. Falls back to global db in dedicated mode.
- * Use in services: const models = getTenantModels(); models.Quotation.findAll(...)
+ * When req is passed, uses req.tenant.sequelize directly to avoid async context issues.
+ * Use in services: const models = getTenantModels(req); models.Quotation.findAll(...)
+ * @param {import("express").Request} [req] - Optional request object; when provided, uses req.tenant.sequelize for tenant context
  */
-function getTenantModels() {
-  const seq = getTenantSequelize();
+function getTenantModels(req) {
+  let seq = null;
+  if (req?.tenant?.sequelize) {
+    seq = req.tenant.sequelize;
+  } else {
+    seq = getTenantSequelize();
+  }
   if (seq) return getModelsForSequelize(seq);
+  const dbPoolManager = require("./dbPoolManager.js");
+  if (dbPoolManager.isSharedMode()) {
+    const AppError = require("../../common/errors/AppError.js");
+    const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
+    throw new AppError("Tenant context required for data access", RESPONSE_STATUS_CODES.FORBIDDEN);
+  }
   return db;
 }
 

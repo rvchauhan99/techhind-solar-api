@@ -316,10 +316,13 @@ const generatePDF = asyncHandler(async (req, res) => {
     const { Company, CompanyBankAccount, ProductMake } = getTenantModels();
     const company = await Company.findOne({ where: { deleted_at: null } });
 
-    // Get primary bank account
+    // Get primary bank account: default first, then by creation date
     const bankAccount = await CompanyBankAccount.findOne({
         where: { deleted_at: null },
-        order: [["created_at", "ASC"]]
+        order: [
+            ["is_default", "DESC"],
+            ["created_at", "ASC"]
+        ]
     });
 
     // Get all product makes and create a Map (id -> {name, logo})

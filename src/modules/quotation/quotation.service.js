@@ -327,7 +327,7 @@ const getQuotationById = async ({ id }) => {
     const found = await Quotation.findOne({
         where: { id, deleted_at: null },
         include: [
-            { model: User, as: "user", attributes: ["id", "name", "mobile_number"] },
+            { model: User, as: "user", attributes: ["id", "name", "mobile_number", "email"] },
             { model: CompanyBranch, as: "branch", attributes: ["id", "name"] },
             { model: Customer, as: "customer", attributes: ["id", "customer_name", "mobile_number", "email_id", "company_name"] },
             { model: State, as: "state", attributes: ["id", "name"] },

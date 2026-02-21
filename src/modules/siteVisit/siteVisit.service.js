@@ -7,10 +7,11 @@ const { getTenantModels } = require("../tenant/tenantModels.js");
 /**
  * Create a new site visit
  * @param {Object} payload - Site visit data
+ * @param {import("express").Request} [req] - Request object (used for tenant context in multi-tenant mode)
  * @returns {Object} - Created site visit
  */
-const createSiteVisit = async (payload) => {
-  const models = getTenantModels();
+const createSiteVisit = async (payload, req) => {
+  const models = getTenantModels(req);
   const { Inquiry, SiteVisit } = models;
   // Inquiry ID is required except when visit_status is "Pending"
   if (!payload.inquiry_id && payload.visit_status !== "Pending") {
@@ -102,7 +103,8 @@ const createSiteVisit = async (payload) => {
  * List site visits with their inquiry details (INNER JOIN)
  * Returns all site visits with their associated inquiry data
  * Main table is SiteVisit, with Inquiry details joined
- * @param {Object} params - { page, limit, q, status, visit_status, sortBy, sortOrder }
+ * @param {Object} params - { page, limit, q, status, visit_status, sortBy, sortOrder, ... }
+ * @param {import("express").Request} [req] - Request object (used for tenant context in multi-tenant mode)
  * @returns {Object} - { data, meta }
  */
 const listInquiriesWithSiteVisits = async ({
@@ -137,8 +139,8 @@ const listInquiriesWithSiteVisits = async ({
   site_visit_created_at_op = null,
   sortBy = null,
   sortOrder = "DESC",
-} = {}) => {
-  const models = getTenantModels();
+} = {}, req) => {
+  const models = getTenantModels(req);
   const { Inquiry, SiteVisit } = models;
   const offset = (page - 1) * limit;
 
@@ -407,12 +409,12 @@ const listInquiriesWithSiteVisits = async ({
   };
 };
 
-const exportInquiriesWithSiteVisits = async (params = {}) => {
+const exportInquiriesWithSiteVisits = async (params = {}, req) => {
   const { data } = await listInquiriesWithSiteVisits({
     page: 1,
     limit: 10000,
     ...params,
-  });
+  }, req);
 
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Site Visits");
