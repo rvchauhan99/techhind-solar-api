@@ -1,20 +1,7 @@
 "use strict";
 
-const db = require("../../models/index.js");
 const { Op, QueryTypes } = require("sequelize");
-
-const {
-    Challan,
-    ChallanItems,
-    Order,
-    CompanyWarehouse,
-    Product,
-    ProductType,
-    MeasurementUnit,
-    Stock,
-    StockSerial,
-    User,
-} = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const stockService = require("../stock/stock.service.js");
 const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
 const {
@@ -64,7 +51,8 @@ const generateChallanNumber = async () => {
     const mmyy = `${month}${year}`;
 
     // Find the highest sequence number for current month
-    const results = await db.sequelize.query(
+    const models = getTenantModels();
+    const results = await models.sequelize.query(
         `SELECT challan_no 
          FROM challans 
          WHERE challan_no LIKE :pattern 
@@ -97,6 +85,8 @@ const generateChallanNumber = async () => {
  */
 const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
     if (!orderId) return;
+    const models = getTenantModels();
+    const { Order, Challan, ChallanItems } = models;
     const order = await Order.findOne({
         where: { id: orderId, deleted_at: null },
         attributes: ["id", "bom_snapshot"],
@@ -149,6 +139,8 @@ const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
  */
 const recomputeOrderDeliveryStatus = async (orderId, transaction = null) => {
     if (!orderId) return;
+    const models = getTenantModels();
+    const { Order } = models;
     const order = await Order.findOne({
         where: { id: orderId, deleted_at: null },
         attributes: ["id", "bom_snapshot", "delivery_status"],
@@ -215,6 +207,8 @@ const listChallans = async ({
     created_at_op: createdAtOp = null,
     enforced_handled_by_ids: enforcedHandledByIds = null,
 } = {}) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, Order, CompanyWarehouse, User } = models;
     const offset = (page - 1) * limit;
     const where = { deleted_at: null };
 
@@ -411,6 +405,8 @@ const listChallans = async ({
  * Get challan by ID with all related data
  */
 const getChallanById = async ({ id } = {}) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit } = models;
     const challan = await Challan.findOne({
         where: { id, deleted_at: null },
         include: [
@@ -456,6 +452,8 @@ const getChallanById = async ({ id } = {}) => {
  * Get challan by ID with complete printable payload.
  */
 const getChallanForPdf = async ({ id } = {}) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, Quotation, User } = models;
     const challan = await Challan.findOne({
         where: { id, deleted_at: null },
         include: [
@@ -465,7 +463,7 @@ const getChallanForPdf = async ({ id } = {}) => {
                 attributes: ["id", "order_number", "consumer_no", "capacity", "handled_by"],
                 include: [
                     {
-                        model: db.Customer,
+                        model: Customer,
                         as: "customer",
                         attributes: [
                             "id",
@@ -519,6 +517,8 @@ const getChallanForPdf = async ({ id } = {}) => {
  * Create challan with items
  */
 const createChallan = async ({ payload, user_id, transaction } = {}) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, Stock, StockSerial, Quotation, User, ProductType } = models;
     const { items, ...challanData } = payload;
 
     // Validate minimum one item
@@ -539,7 +539,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
             attributes: ["id", "bom_snapshot", "stages", "current_stage_key", "planned_warehouse_id", "status"],
             include: [
                 {
-                    model: db.Quotation,
+                    model: Quotation,
                     as: "quotation",
                     attributes: [
                         "id",
@@ -916,6 +916,8 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
  * Update challan
  */
 const updateChallan = async ({ id, payload, transaction } = {}) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, Stock, StockSerial } = models;
     const { items, ...challanData } = payload;
 
     const challan = await Challan.findOne({
@@ -958,6 +960,8 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
  * Delete challan (soft delete)
  */
 const deleteChallan = async ({ id, user_id, transaction } = {}) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, Order, Product, StockSerial } = models;
     const challan = await Challan.findOne({
         where: { id, deleted_at: null },
         include: [
@@ -1118,12 +1122,14 @@ const getNextChallanNumber = async () => {
  * Product list from order.bom_snapshot or quotation.bom_snapshot when present, else legacy quotation product IDs.
  */
 const getQuotationProductsByOrderId = async ({ order_id } = {}) => {
+    const models = getTenantModels();
+    const { Order, Quotation, Product, ProductType } = models;
     const order = await Order.findOne({
         where: { id: order_id, deleted_at: null },
         attributes: ["id", "bom_snapshot"],
         include: [
             {
-                model: db.Quotation,
+                model: Quotation,
                 as: "quotation",
                 attributes: [
                     "id",
@@ -1192,12 +1198,14 @@ const getQuotationProductsByOrderId = async ({ order_id } = {}) => {
  * Else: status keyed by product type (panel, inverter, ...) from quotation legacy.
  */
 const getDeliveryStatus = async ({ order_id } = {}) => {
+    const models = getTenantModels();
+    const { Order, Quotation, Challan, ChallanItems, Product, ProductType } = models;
     const order = await Order.findOne({
         where: { id: order_id, deleted_at: null },
         attributes: ["id", "bom_snapshot"],
         include: [
             {
-                model: db.Quotation,
+                model: Quotation,
                 as: "quotation",
                 attributes: [
                     "id",

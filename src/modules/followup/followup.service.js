@@ -1,14 +1,13 @@
 const ExcelJS = require("exceljs");
 const { Sequelize, Op } = require("sequelize");
 const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES, FOLLOWUP_RATING, INQUIRY_STATUS } = require("../../common/utils/constants.js");
 
-const Followup = db.Followup;
-const Inquiry = db.Inquiry;
-const User = db.User;
-
 const createFollowup = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Followup, Inquiry, User } = models;
   // Validation: Check required fields
   if (!payload.inquiry_id) {
     throw new AppError("Inquiry ID is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
@@ -104,6 +103,8 @@ const createFollowup = async (payload, transaction = null) => {
 };
 
 const updateFollowup = async (id, payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Followup, Inquiry, User } = models;
   const followup = await Followup.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -174,6 +175,8 @@ const updateFollowup = async (id, payload, transaction = null) => {
 };
 
 const deleteFollowup = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Followup } = models;
   const followup = await Followup.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -188,6 +191,8 @@ const deleteFollowup = async (id, transaction = null) => {
 };
 
 const getFollowupById = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Followup, Inquiry, User } = models;
   const followup = await Followup.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -215,6 +220,8 @@ const getFollowupById = async (id, transaction = null) => {
 };
 
 const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}, transaction = null) => {
+  const models = getTenantModels();
+  const { Followup, Inquiry, User } = models;
   const followupWhere = { deleted_at: null };
   let inquiryWhere = { deleted_at: null };
 
@@ -490,6 +497,8 @@ const getRatingOptions = async () => {
 };
 
 const getInquiry = async () => {
+  const models = getTenantModels();
+  const { Inquiry } = models;
   // get all inquiry from table
   const inquiry = await Inquiry.findAll({
     where: {

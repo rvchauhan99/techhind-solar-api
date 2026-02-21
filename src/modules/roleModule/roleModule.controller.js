@@ -83,7 +83,10 @@ const getPermission = asyncHandler(async (req, res) => {
       200
     );
 
-  const item = await roleModuleService.getByRoleAndModule(roleId, moduleId);
+  const item = await roleModuleService.getPermissionForRoleAndModule(
+    { roleId, moduleId },
+    req.transaction || null
+  );
   if (!item)
     return responseHandler.sendSuccess(
       res,

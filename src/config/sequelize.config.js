@@ -54,7 +54,10 @@ const baseConfig = {
   host: params.host,
   port: params.port,
   dialect: "postgres",
-  logging: false,
+  logging:
+    nodeEnv === "development"
+      ? (sql) => console.log(`[DB:main/${params.database}]`, sql)
+      : false,
   pool,
 };
 

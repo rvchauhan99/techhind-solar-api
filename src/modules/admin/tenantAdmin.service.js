@@ -1,7 +1,9 @@
 "use strict";
 
+const crypto = require("crypto");
 const { getRegistrySequelize } = require("../../config/registryDb.js");
 const cryptoService = require("../tenant/crypto.service.js");
+const { invalidateTenantCache } = require("../tenant/tenantRegistry.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 
@@ -146,20 +148,26 @@ async function createTenant(payload) {
     }
   }
 
+  const id = crypto.randomUUID();
+  const created_at = new Date();
+
   const [result] = await sequelize.query(
     `INSERT INTO tenants (
-      tenant_key, mode, status,
+      id, tenant_key, mode, status,
       db_host, db_port, db_name, db_user, db_password_encrypted,
       bucket_provider, bucket_name, bucket_access_key_encrypted,
-      bucket_secret_key_encrypted, bucket_region, bucket_endpoint
+      bucket_secret_key_encrypted, bucket_region, bucket_endpoint,
+      created_at
     ) VALUES (
-      :tenant_key, :mode, :status,
+      :id, :tenant_key, :mode, :status,
       :db_host, :db_port, :db_name, :db_user, :db_password_encrypted,
       :bucket_provider, :bucket_name, :bucket_access_key_encrypted,
-      :bucket_secret_key_encrypted, :bucket_region, :bucket_endpoint
+      :bucket_secret_key_encrypted, :bucket_region, :bucket_endpoint,
+      :created_at
     ) RETURNING id, tenant_key, mode, status, db_name, bucket_name, created_at`,
     {
       replacements: {
+        id,
         tenant_key: keyTrimmed,
         mode,
         status,
@@ -174,6 +182,7 @@ async function createTenant(payload) {
         bucket_secret_key_encrypted,
         bucket_region,
         bucket_endpoint,
+        created_at,
       },
       type: sequelize.QueryTypes.SELECT,
     }
@@ -223,6 +232,7 @@ async function updateTenant(id, payload) {
     `UPDATE tenants SET ${setClause} WHERE id = :id`,
     { replacements: { ...updates, id }, type: sequelize.QueryTypes.UPDATE }
   );
+  invalidateTenantCache(id);
 
   return getTenantById(id);
 }

@@ -1,31 +1,20 @@
 "use strict";
 
-const db = require("../../models/index.js");
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
-const {
-  B2BShipment,
-  B2BShipmentItem,
-  B2BSalesOrder,
-  B2BSalesOrderItem,
-  B2BClient,
-  B2BClientShipTo,
-  B2BInvoice,
-  CompanyWarehouse,
-  Product,
-  User,
-} = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const stockService = require("../stock/stock.service.js");
 const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
 const { TRANSACTION_TYPE, MOVEMENT_TYPE, SERIAL_STATUS } = require("../../common/utils/constants.js");
 
 const generateShipmentNumber = async () => {
+  const models = getTenantModels();
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
   const mmyy = `${month}${year}`;
   // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
-  const rows = await db.sequelize.query(
+  const rows = await models.sequelize.query(
     `SELECT shipment_no FROM b2b_shipments WHERE shipment_no LIKE :pattern AND deleted_at IS NULL ORDER BY shipment_no DESC LIMIT 1`,
     { replacements: { pattern: `SH-${mmyy}%` }, type: QueryTypes.SELECT }
   );
@@ -46,6 +35,8 @@ const listShipments = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { B2BShipment, B2BClient, B2BSalesOrder, CompanyWarehouse, B2BInvoice } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
   if (q) where.shipment_no = { [Op.iLike]: `%${q}%` };
@@ -115,6 +106,8 @@ const listShipments = async ({
 };
 
 const getShipmentById = async ({ id }) => {
+  const models = getTenantModels();
+  const { B2BShipment, B2BClient, B2BClientShipTo, B2BSalesOrder, CompanyWarehouse, User, B2BInvoice, B2BShipmentItem, Product, ProductType } = models;
   return B2BShipment.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -127,13 +120,15 @@ const getShipmentById = async ({ id }) => {
       {
         model: B2BShipmentItem,
         as: "items",
-        include: [{ model: Product, as: "product", include: [{ model: db.ProductType, as: "productType" }] }],
+        include: [{ model: Product, as: "product", include: [{ model: ProductType, as: "productType" }] }],
       },
     ],
   });
 };
 
 const createShipment = async ({ payload, user_id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BShipment, B2BShipmentItem, B2BSalesOrder, B2BSalesOrderItem, B2BClient, CompanyWarehouse, User, Product, StockSerial } = models;
   const { items, ...header } = payload;
   if (!items || items.length === 0) {
     const err = new Error("At least one item is required");
@@ -271,7 +266,7 @@ const createShipment = async ({ payload, user_id, transaction }) => {
         throw err;
       }
       for (const serial of serialList) {
-        const stockSerial = await db.StockSerial.findOne({
+        const stockSerial = await StockSerial.findOne({
           where: {
             serial_number: serial,
             product_id: item.product_id,
@@ -356,6 +351,8 @@ const createShipment = async ({ payload, user_id, transaction }) => {
 };
 
 const deleteShipment = async ({ id, user_id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BShipment, B2BShipmentItem, B2BSalesOrderItem, Product, B2BInvoice, StockSerial } = models;
   const shipment = await B2BShipment.findOne({
     where: { id, deleted_at: null },
     include: [{ model: B2BShipmentItem, as: "items" }],
@@ -392,7 +389,7 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
 
       if (isSerialized && serialList.length > 0) {
         for (const serial of serialList) {
-          const stockSerial = await db.StockSerial.findOne({
+          const stockSerial = await StockSerial.findOne({
             where: { serial_number: serial, product_id: item.product_id },
             transaction,
           });
@@ -479,7 +476,7 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
     }
   }
 
-  const hasInvoice = await db.B2BInvoice.count({ where: { b2b_shipment_id: id, deleted_at: null }, transaction });
+  const hasInvoice = await B2BInvoice.count({ where: { b2b_shipment_id: id, deleted_at: null }, transaction });
   if (hasInvoice > 0) {
     const err = new Error("Cannot delete shipment with existing invoice");
     err.statusCode = 400;

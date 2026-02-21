@@ -1,9 +1,7 @@
 "use strict";
 
-const db = require("../../../models/index.js");
 const { Op, fn, col, literal } = require("sequelize");
-
-const { OrderPaymentDetail, Order, CompanyBranch, User, PaymentMode } = db;
+const { getTenantModels } = require("../../tenant/tenantModels.js");
 
 const getPaymentsReport = async ({
   page = 1,
@@ -17,6 +15,8 @@ const getPaymentsReport = async ({
   order_number = null,
   receipt_number = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { OrderPaymentDetail, Order, CompanyBranch, User, PaymentMode } = models;
   const offset = (page - 1) * limit;
 
   const where = {};

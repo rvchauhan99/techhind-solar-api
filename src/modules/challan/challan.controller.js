@@ -3,7 +3,7 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const bucketService = require("../../common/services/bucket.service.js");
-const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const challanService = require("./challan.service.js");
 const challanPdfService = require("./pdf.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
@@ -113,7 +113,8 @@ const generatePDF = asyncHandler(async (req, res) => {
         orderHandledByPath: "order.handled_by",
     });
 
-    const company = await db.Company.findOne({ where: { deleted_at: null } });
+    const { Company } = getTenantModels();
+    const company = await Company.findOne({ where: { deleted_at: null } });
     let bucketClient = null;
     try {
         bucketClient = bucketService.getBucketForRequest(req);

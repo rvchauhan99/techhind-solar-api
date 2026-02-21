@@ -1,14 +1,11 @@
 const { Op } = require("sequelize");
-const db = require("../../models/index.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
-
-const Company = db.Company;
-const CompanyBankAccount = db.CompanyBankAccount;
-const CompanyBranch = db.CompanyBranch;
-const CompanyWarehouse = db.CompanyWarehouse;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const getCompanyProfile = async (transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBankAccount } = models;
   // Get the first company (assuming single company setup)
   // If multiple companies, you might want to add company_id parameter
   const company = await Company.findOne({
@@ -58,6 +55,8 @@ const getCompanyProfile = async (transaction = null) => {
 };
 
 const updateCompanyProfile = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Company } = models;
   // Validation: Check required fields
   const requiredFields = {
     company_name: "Company Name",
@@ -145,6 +144,8 @@ const updateCompanyProfile = async (payload, transaction = null) => {
 };
 
 const createBankAccount = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBankAccount } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -198,6 +199,8 @@ const createBankAccount = async (payload, transaction = null) => {
 };
 
 const updateBankAccount = async (id, payload, transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyBankAccount } = models;
   const bankAccount = await CompanyBankAccount.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -249,6 +252,8 @@ const updateBankAccount = async (id, payload, transaction = null) => {
 };
 
 const deleteBankAccount = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBankAccount } = models;
   const bankAccount = await CompanyBankAccount.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -272,6 +277,8 @@ const deleteBankAccount = async (id, transaction = null) => {
 };
 
 const listBankAccounts = async (transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBankAccount } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -297,6 +304,8 @@ const listBankAccounts = async (transaction = null) => {
 
 // Branch Methods
 const createBranch = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBranch } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -363,6 +372,8 @@ const createBranch = async (payload, transaction = null) => {
 };
 
 const updateBranch = async (id, payload, transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyBranch } = models;
   const branch = await CompanyBranch.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -445,6 +456,8 @@ const updateBranch = async (id, payload, transaction = null) => {
 };
 
 const deleteBranch = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyBranch } = models;
   const branch = await CompanyBranch.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -481,6 +494,8 @@ const deleteBranch = async (id, transaction = null) => {
 };
 
 const listBranches = async (transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBranch } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -505,6 +520,8 @@ const listBranches = async (transaction = null) => {
 };
 
 const getDefaultBranch = async (transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyBranch } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -526,6 +543,8 @@ const getDefaultBranch = async (transaction = null) => {
 
 // Warehouse Methods
 const createWarehouse = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyWarehouse } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -562,6 +581,8 @@ const createWarehouse = async (payload, transaction = null) => {
 };
 
 const updateWarehouse = async (id, payload, transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyWarehouse } = models;
   const warehouse = await CompanyWarehouse.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -601,6 +622,8 @@ const updateWarehouse = async (id, payload, transaction = null) => {
 };
 
 const deleteWarehouse = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyWarehouse } = models;
   const warehouse = await CompanyWarehouse.findOne({
     where: { id, deleted_at: null },
     transaction,
@@ -616,6 +639,8 @@ const deleteWarehouse = async (id, transaction = null) => {
 };
 
 const listWarehouses = async (companyId = null, transaction = null) => {
+  const models = getTenantModels();
+  const { Company, CompanyWarehouse, State, User } = models;
   let company;
   
   // If company_id is provided, use it; otherwise get the first company
@@ -641,13 +666,13 @@ const listWarehouses = async (companyId = null, transaction = null) => {
     where: { company_id: company.id, deleted_at: null, is_active: true },
     include: [
       {
-        model: db.State,
+        model: State,
         as: "state",
         attributes: ["id", "name"],
         required: false,
       },
       {
-        model: db.User,
+        model: User,
         as: "managers",
         attributes: ["id", "name", "email"],
         required: false,
@@ -670,11 +695,13 @@ const listWarehouses = async (companyId = null, transaction = null) => {
 };
 
 const getWarehouseManagers = async (warehouseId, transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyWarehouse, User } = models;
   const warehouse = await CompanyWarehouse.findOne({
     where: { id: warehouseId, deleted_at: null },
     include: [
       {
-        model: db.User,
+        model: User,
         as: "managers",
         attributes: ["id", "name", "email"],
         required: false,
@@ -693,6 +720,8 @@ const getWarehouseManagers = async (warehouseId, transaction = null) => {
 };
 
 const setWarehouseManagers = async (warehouseId, userIds = [], transaction = null) => {
+  const models = getTenantModels();
+  const { CompanyWarehouse } = models;
   const warehouse = await CompanyWarehouse.findOne({
     where: { id: warehouseId, deleted_at: null },
     transaction,
@@ -711,6 +740,8 @@ const setWarehouseManagers = async (warehouseId, userIds = [], transaction = nul
 
 // Image Management Methods
 const uploadCompanyImage = async (imageType, filePath, transaction = null) => {
+  const models = getTenantModels();
+  const { Company } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -756,6 +787,8 @@ const uploadCompanyImage = async (imageType, filePath, transaction = null) => {
 };
 
 const deleteCompanyImage = async (imageType, transaction = null) => {
+  const models = getTenantModels();
+  const { Company } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },

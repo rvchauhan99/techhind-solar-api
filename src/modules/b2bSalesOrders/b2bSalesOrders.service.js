@@ -1,27 +1,18 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildNumberCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
-const {
-  B2BSalesOrder,
-  B2BSalesOrderItem,
-  B2BSalesQuote,
-  B2BSalesQuoteItem,
-  B2BClient,
-  B2BClientShipTo,
-  CompanyWarehouse,
-  User,
-} = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const generateOrderNumber = async () => {
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
   const mmyy = `${month}${year}`;
+  const models = getTenantModels();
   // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
-  const rows = await db.sequelize.query(
+  const rows = await models.sequelize.query(
     `SELECT order_no FROM b2b_sales_orders WHERE order_no LIKE :pattern AND deleted_at IS NULL ORDER BY order_no DESC LIMIT 1`,
     { replacements: { pattern: `SO-${mmyy}%` }, type: QueryTypes.SELECT }
   );
@@ -42,6 +33,8 @@ const listOrders = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BSalesOrderItem, B2BSalesQuote, B2BSalesQuoteItem, B2BClient, B2BClientShipTo, CompanyWarehouse, User, Product, ProductType, B2BShipment, B2BShipmentItem } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
   if (q) where.order_no = { [Op.iLike]: `%${q}%` };
@@ -116,6 +109,8 @@ const listOrders = async ({
 };
 
 const getOrderById = async ({ id }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BSalesOrderItem, B2BSalesQuote, B2BClient, B2BClientShipTo, CompanyWarehouse, User, Product, ProductType, B2BShipment, B2BShipmentItem } = models;
   const order = await B2BSalesOrder.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -127,14 +122,14 @@ const getOrderById = async ({ id }) => {
       {
         model: B2BSalesOrderItem,
         as: "items",
-        include: [{ model: db.Product, as: "product", include: [{ model: db.ProductType, as: "productType" }] }],
+        include: [{ model: Product, as: "product", include: [{ model: ProductType, as: "productType" }] }],
       },
     ],
   });
   if (!order) return null;
-  const shipments = await db.B2BShipment.findAll({
+  const shipments = await B2BShipment.findAll({
     where: { b2b_sales_order_id: id, deleted_at: null },
-    include: [{ model: db.B2BShipmentItem, as: "items" }],
+    include: [{ model: B2BShipmentItem, as: "items" }],
   });
   const shippedByOrderItemId = {};
   shipments.forEach((s) => {
@@ -183,6 +178,8 @@ const computeTotals = (items) => {
 };
 
 const createOrder = async ({ payload, user_id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BSalesOrderItem } = models;
   const { items, ...header } = payload;
   if (!items || items.length === 0) {
     const err = new Error("At least one item is required");
@@ -219,6 +216,8 @@ const createOrder = async ({ payload, user_id, transaction }) => {
 };
 
 const createFromQuote = async ({ quoteId, payloadOverride, user_id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BSalesOrderItem, B2BSalesQuote, B2BSalesQuoteItem, B2BClient, B2BClientShipTo } = models;
   const quote = await B2BSalesQuote.findOne({
     where: { id: quoteId, deleted_at: null },
     include: [
@@ -288,6 +287,8 @@ const createFromQuote = async ({ quoteId, payloadOverride, user_id, transaction 
 };
 
 const confirmOrder = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder } = models;
   const order = await B2BSalesOrder.findByPk(id);
   if (!order) return null;
   if (!order.planned_warehouse_id) {
@@ -300,6 +301,8 @@ const confirmOrder = async ({ id, transaction }) => {
 };
 
 const updateOrder = async ({ id, payload, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BSalesOrderItem } = models;
   const order = await B2BSalesOrder.findByPk(id);
   if (!order) return null;
   if (order.status === "CONFIRMED") {
@@ -338,6 +341,8 @@ const updateOrder = async ({ id, payload, transaction }) => {
 };
 
 const cancelOrder = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder } = models;
   const order = await B2BSalesOrder.findByPk(id);
   if (!order) return null;
   if (order.status === "CANCELLED") {
@@ -355,9 +360,11 @@ const cancelOrder = async ({ id, transaction }) => {
 };
 
 const deleteOrder = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BShipment } = models;
   const order = await B2BSalesOrder.findByPk(id);
   if (!order) return null;
-  const shipmentCount = await db.B2BShipment.count({ where: { b2b_sales_order_id: id, deleted_at: null } });
+  const shipmentCount = await B2BShipment.count({ where: { b2b_sales_order_id: id, deleted_at: null } });
   if (shipmentCount > 0) {
     const err = new Error("Cannot delete order with existing shipments");
     err.statusCode = 400;
@@ -368,6 +375,8 @@ const deleteOrder = async ({ id, transaction }) => {
 };
 
 const getOrderItemsForShipment = async ({ orderId }) => {
+  const models = getTenantModels();
+  const { B2BSalesOrder, B2BSalesOrderItem, B2BClient, B2BClientShipTo, CompanyWarehouse, Product, ProductType, B2BShipment, B2BShipmentItem } = models;
   const order = await B2BSalesOrder.findOne({
     where: { id: orderId, deleted_at: null, status: "CONFIRMED" },
     include: [
@@ -377,15 +386,15 @@ const getOrderItemsForShipment = async ({ orderId }) => {
       {
         model: B2BSalesOrderItem,
         as: "items",
-        include: [{ model: db.Product, as: "product", include: [{ model: db.ProductType, as: "productType" }] }],
+        include: [{ model: Product, as: "product", include: [{ model: ProductType, as: "productType" }] }],
       },
     ],
   });
   if (!order) return null;
   const shippedByProduct = {};
-  const shipments = await db.B2BShipment.findAll({
+  const shipments = await B2BShipment.findAll({
     where: { b2b_sales_order_id: orderId, deleted_at: null },
-    include: [{ model: db.B2BShipmentItem, as: "items" }],
+    include: [{ model: B2BShipmentItem, as: "items" }],
   });
   shipments.forEach((s) => {
     (s.items || []).forEach((it) => {

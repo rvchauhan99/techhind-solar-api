@@ -5,8 +5,7 @@ const db = require('../../models/index.js');
 const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES, USER_STATUS } = require('../../common/utils/constants.js');
 const { clearTeamHierarchyCache } = require('../../common/utils/teamHierarchyCache.js');
-
-const User = db.User;
+const { getTenantModels } = require('../tenant/tenantModels.js');
 
 const normalizeEmail = (email) => (email && String(email).trim().toLowerCase()) || '';
 
@@ -21,6 +20,8 @@ const normalizeManagerId = (value) => {
 
 const validateManager = async (managerId, transaction = null) => {
   if (!managerId) return null;
+  const models = getTenantModels();
+  const { User } = models;
   const manager = await User.findOne({
     where: {
       id: managerId,
@@ -36,6 +37,8 @@ const validateManager = async (managerId, transaction = null) => {
 };
 
 const createUser = async (payload, transaction = null) => {
+  const models = getTenantModels();
+  const { User } = models;
   const normalizedEmail = normalizeEmail(payload.email);
   if (!normalizedEmail) throw new AppError('Email is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
 
@@ -76,13 +79,15 @@ const createUser = async (payload, transaction = null) => {
 };
 
 const getUserById = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { User, Role } = models;
   // include role lookup so callers receive role details alongside user
   const user = await User.findOne({
     where: { id, deleted_at: null },
     transaction,
     include: [
-      { model: db.Role, as: 'role', attributes: ['id', 'name'] },
-      { model: db.User, as: 'manager', attributes: ['id', 'name', 'email'] },
+      { model: Role, as: 'role', attributes: ['id', 'name'] },
+      { model: User, as: 'manager', attributes: ['id', 'name', 'email'] },
     ],
   });
   if (!user) throw new AppError('User not found', RESPONSE_STATUS_CODES.NOT_FOUND);
@@ -155,8 +160,11 @@ const listUsers = async ({
   }
   if (andConds.length) where[Op.and] = andConds;
 
+  const models = getTenantModels();
+  const { User, Role } = models;
+
   const roleInclude = {
-    model: db.Role,
+    model: Role,
     as: 'role',
     attributes: ['id', 'name'],
     required: !!roleName,
@@ -164,7 +172,7 @@ const listUsers = async ({
   };
 
   const managerInclude = {
-    model: db.User,
+    model: User,
     as: 'manager',
     attributes: ['id', 'name', 'email'],
     required: false,
@@ -188,6 +196,8 @@ const listUsers = async ({
 };
 
 const updateUser = async (id, updates, transaction = null) => {
+  const models = getTenantModels();
+  const { User } = models;
   const user = await User.findOne({ where: { id, deleted_at: null }, transaction });
   if (!user) throw new AppError('User not found', RESPONSE_STATUS_CODES.NOT_FOUND);
 
@@ -237,6 +247,8 @@ const updateUser = async (id, updates, transaction = null) => {
 };
 
 const deleteUser = async (id, transaction = null) => {
+  const models = getTenantModels();
+  const { User } = models;
   await User.destroy({ where: { id }, transaction });
   clearTeamHierarchyCache();
   return true;
@@ -246,6 +258,8 @@ const deleteUser = async (id, transaction = null) => {
  * Admin sets a new password for a user (from User Master). No OTP or user interaction.
  */
 const setUserPassword = async (userId, { new_password: newPassword, confirm_password: confirmPassword }, transaction = null) => {
+  const models = getTenantModels();
+  const { User } = models;
   if (!newPassword || String(newPassword).trim() === '') {
     throw new AppError('New password is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }

@@ -1,13 +1,10 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
-
-const BillOfMaterial = db.BillOfMaterial;
-const Product = db.Product;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const listBillOfMaterials = async ({
   page = 1,
@@ -23,6 +20,8 @@ const listBillOfMaterials = async ({
   description_op = null,
   visibility = null,
 } = {}) => {
+  const models = getTenantModels();
+  const { BillOfMaterial, Product } = models;
   const offset = (page - 1) * limit;
 
   const visibilityVal = visibility && ["active", "inactive", "all"].includes(visibility) ? visibility : "active";
@@ -143,7 +142,8 @@ const exportBillOfMaterials = async (params = {}) => {
 
 const getBillOfMaterialById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { BillOfMaterial } = models;
   const bom = await BillOfMaterial.findOne({
     where: { id, deleted_at: null },
   });
@@ -163,7 +163,9 @@ const getBillOfMaterialById = async ({ id } = {}) => {
 };
 
 const createBillOfMaterial = async ({ payload, transaction } = {}) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { BillOfMaterial, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -224,8 +226,9 @@ const createBillOfMaterial = async ({ payload, transaction } = {}) => {
 
 const updateBillOfMaterial = async ({ id, payload, transaction } = {}) => {
   if (!id) return null;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { BillOfMaterial, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -296,8 +299,9 @@ const updateBillOfMaterial = async ({ id, payload, transaction } = {}) => {
 
 const deleteBillOfMaterial = async ({ id, transaction } = {}) => {
   if (!id) return false;
-
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { BillOfMaterial } = models;
+  const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
   try {

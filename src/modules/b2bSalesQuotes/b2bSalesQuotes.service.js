@@ -1,18 +1,18 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildNumberCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
-const { B2BSalesQuote, B2BSalesQuoteItem, B2BClient, B2BClientShipTo, User } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const generateQuoteNumber = async () => {
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
   const mmyy = `${month}${year}`;
+  const models = getTenantModels();
   // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
-  const rows = await db.sequelize.query(
+  const rows = await models.sequelize.query(
     `SELECT quote_no FROM b2b_sales_quotes WHERE quote_no LIKE :pattern AND deleted_at IS NULL ORDER BY quote_no DESC LIMIT 1`,
     { replacements: { pattern: `SQ-${mmyy}%` }, type: QueryTypes.SELECT }
   );
@@ -33,6 +33,8 @@ const listQuotes = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote, B2BSalesQuoteItem, B2BClient, B2BClientShipTo, User, Product, ProductType } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
 
@@ -108,6 +110,8 @@ const listQuotes = async ({
 };
 
 const getQuoteById = async ({ id }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote, B2BSalesQuoteItem, B2BClient, B2BClientShipTo, User, Product, ProductType } = models;
   return B2BSalesQuote.findOne({
     where: { id, deleted_at: null },
     include: [
@@ -117,7 +121,7 @@ const getQuoteById = async ({ id }) => {
       {
         model: B2BSalesQuoteItem,
         as: "items",
-        include: [{ model: db.Product, as: "product", include: [{ model: db.ProductType, as: "productType" }] }],
+        include: [{ model: Product, as: "product", include: [{ model: ProductType, as: "productType" }] }],
       },
     ],
   });
@@ -152,6 +156,8 @@ const computeTotals = (items) => {
 };
 
 const createQuote = async ({ payload, user_id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote, B2BSalesQuoteItem } = models;
   const { items, ...header } = payload;
   if (!items || items.length === 0) {
     const err = new Error("At least one item is required");
@@ -187,6 +193,8 @@ const createQuote = async ({ payload, user_id, transaction }) => {
 };
 
 const updateQuote = async ({ id, payload, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote, B2BSalesQuoteItem } = models;
   const quote = await B2BSalesQuote.findByPk(id);
   if (!quote) return null;
   if (quote.status !== "DRAFT" && quote.status !== "SENT") {
@@ -225,6 +233,8 @@ const updateQuote = async ({ id, payload, transaction }) => {
 };
 
 const approveQuote = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote } = models;
   const quote = await B2BSalesQuote.findByPk(id);
   if (!quote) return null;
   await quote.update({ status: "APPROVED", approved_at: new Date() }, { transaction });
@@ -232,6 +242,8 @@ const approveQuote = async ({ id, transaction }) => {
 };
 
 const unapproveQuote = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote } = models;
   const quote = await B2BSalesQuote.findByPk(id);
   if (!quote) return null;
   await quote.update({ status: "DRAFT", approved_at: null, approved_by: null }, { transaction });
@@ -239,6 +251,8 @@ const unapproveQuote = async ({ id, transaction }) => {
 };
 
 const cancelQuote = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote } = models;
   const quote = await B2BSalesQuote.findByPk(id);
   if (!quote) return null;
   if (quote.converted_to_so) {
@@ -256,6 +270,8 @@ const cancelQuote = async ({ id, transaction }) => {
 };
 
 const deleteQuote = async ({ id, transaction }) => {
+  const models = getTenantModels();
+  const { B2BSalesQuote } = models;
   const quote = await B2BSalesQuote.findByPk(id);
   if (!quote) return null;
   if (quote.converted_to_so) {

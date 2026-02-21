@@ -271,8 +271,7 @@ const update = asyncHandler(async (req, res) => {
         payload.fabricator_id !== undefined ||
         payload.installer_id !== undefined ||
         payload.fabricator_installer_are_same !== undefined ||
-        (payload.stages && payload.stages.assign_fabricator_and_installer !== undefined) ||
-        (payload.current_stage_key && payload.current_stage_key !== existing.current_stage_key);
+        (payload.stages && payload.stages.assign_fabricator_and_installer !== undefined);
 
     const plannedWarehouseId = existing.planned_warehouse_id || payload.planned_warehouse_id;
     if (touchesFabricatorInstallerAssignment && plannedWarehouseId && req.user?.id) {

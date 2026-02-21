@@ -1,10 +1,12 @@
-const { SiteSurvey, SiteVisit, User } = require("../../models");
 const { Op } = require("sequelize");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 /**
  * Create a new site survey
  */
 const createSiteSurvey = async (payload) => {
+    const models = getTenantModels();
+    const { SiteSurvey, SiteVisit, User } = models;
     // Validate that site_visit_id exists and is "visited"
     const siteVisit = await SiteVisit.findByPk(payload.site_visit_id);
 

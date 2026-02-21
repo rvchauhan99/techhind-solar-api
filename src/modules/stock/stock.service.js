@@ -1,15 +1,15 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { SERIAL_STATUS, TRANSACTION_TYPE } = require("../../common/utils/constants.js");
 const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
-
-const { Stock, StockSerial, Product, ProductType, CompanyWarehouse, User } = db;
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 // Helper function to get or create stock record
 const getOrCreateStock = async ({ product_id, warehouse_id, product, transaction }) => {
+  const models = getTenantModels();
+  const { Stock, StockSerial } = models;
   let stock = await Stock.findOne({
     where: {
       product_id,
@@ -61,6 +61,8 @@ const updateStockQuantities = async ({ stock, quantity, last_updated_by, isInwar
 
 // Create stock from PO Inward (called from poInward service)
 const createStockFromPOInward = async ({ poInward, transaction }) => {
+  const models = getTenantModels();
+  const { StockSerial } = models;
   const t = transaction;
 
   for (const item of poInward.items) {
@@ -152,6 +154,8 @@ const listStocks = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { Stock, Product, ProductType, CompanyWarehouse } = models;
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -183,7 +187,7 @@ const listStocks = async ({
     const isLow = low_stock === "true" || low_stock === true;
     where[Op.and] = where[Op.and] || [];
     where[Op.and].push(
-      db.sequelize.literal(`(COALESCE(quantity_available, 0) < COALESCE(min_stock_quantity, 0)) = ${isLow}`)
+      models.sequelize.literal(`(COALESCE(quantity_available, 0) < COALESCE(min_stock_quantity, 0)) = ${isLow}`)
     );
   }
 
@@ -294,7 +298,8 @@ const exportStocks = async (params = {}) => {
 
 const getStockById = async ({ id } = {}) => {
   if (!id) return null;
-
+  const models = getTenantModels();
+  const { Stock, Product, ProductType, CompanyWarehouse, StockSerial } = models;
   const stock = await Stock.findOne({
     where: { id },
     include: [
@@ -332,7 +337,8 @@ const getStockById = async ({ id } = {}) => {
 
 const getStocksByWarehouse = async ({ warehouse_id } = {}) => {
   if (!warehouse_id) return [];
-
+  const models = getTenantModels();
+  const { Stock, Product, ProductType } = models;
   const stocks = await Stock.findAll({
     where: { warehouse_id },
     include: [
@@ -363,7 +369,8 @@ const getStocksByWarehouse = async ({ warehouse_id } = {}) => {
 
 const getAvailableSerials = async ({ product_id, warehouse_id } = {}) => {
   if (!product_id || !warehouse_id) return [];
-
+  const models = getTenantModels();
+  const { StockSerial } = models;
   const serials = await StockSerial.findAll({
     where: {
       product_id: parseInt(product_id),
@@ -386,7 +393,8 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
   if (!trimmed || product_id == null || warehouse_id == null) {
     return { valid: false, message: "Serial number, product_id and warehouse_id are required" };
   }
-
+  const models = getTenantModels();
+  const { StockSerial } = models;
   const row = await StockSerial.findOne({
     where: {
       serial_number: trimmed,

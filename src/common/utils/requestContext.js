@@ -68,6 +68,17 @@ const getContextValue = (key) => {
   return store ? store[key] : undefined;
 };
 
+/**
+ * Get the tenant sequelize for the current request (shared mode).
+ * Returns undefined in dedicated mode or when no tenant context.
+ * Use this for app-data queries that must run on the tenant DB.
+ * @returns {import("sequelize").Sequelize|undefined}
+ */
+const getTenantSequelize = () => {
+  const req = getContextValue("request");
+  return req?.tenant?.sequelize;
+};
+
 module.exports = {
   runWithContext,
   requestContextMiddleware,
@@ -76,4 +87,5 @@ module.exports = {
   setContextValue,
   getContextValue,
   getStore,
+  getTenantSequelize,
 };

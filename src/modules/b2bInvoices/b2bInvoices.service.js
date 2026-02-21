@@ -1,25 +1,17 @@
 "use strict";
 
-const db = require("../../models/index.js");
 const { Op, QueryTypes } = require("sequelize");
-const {
-  B2BInvoice,
-  B2BInvoiceItem,
-  B2BShipment,
-  B2BShipmentItem,
-  B2BClient,
-  B2BClientShipTo,
-  Company,
-} = db;
 const { buildStringCond, buildNumberCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const generateInvoiceNumber = async () => {
+  const models = getTenantModels();
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
   const mmyy = `${month}${year}`;
   // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
-  const rows = await db.sequelize.query(
+  const rows = await models.sequelize.query(
     `SELECT invoice_no FROM b2b_invoices WHERE invoice_no LIKE :pattern AND deleted_at IS NULL ORDER BY invoice_no DESC LIMIT 1`,
     { replacements: { pattern: `INV-${mmyy}%` }, type: QueryTypes.SELECT }
   );
@@ -40,6 +32,8 @@ const listInvoices = async ({
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
+  const models = getTenantModels();
+  const { B2BInvoice, B2BClient, B2BShipment } = models;
   const offset = (page - 1) * limit;
   const where = { deleted_at: null };
   if (q) where.invoice_no = { [Op.iLike]: `%${q}%` };
@@ -74,7 +68,7 @@ const listInvoices = async ({
 
   const include = [
     { model: B2BClient, as: "client", attributes: ["id", "client_code", "client_name"], required: false },
-    { model: db.B2BShipment, as: "shipment", attributes: ["id", "shipment_no"], required: false },
+    { model: B2BShipment, as: "shipment", attributes: ["id", "shipment_no"], required: false },
   ];
 
   const clientNameCond = buildStringCond(
@@ -108,25 +102,27 @@ const listInvoices = async ({
 };
 
 const getInvoiceById = async ({ id }) => {
+  const models = getTenantModels();
+  const { B2BInvoice, B2BClient, B2BClientShipTo, B2BSalesOrder, B2BShipment, B2BInvoiceItem, Product } = models;
   return B2BInvoice.findOne({
     where: { id, deleted_at: null },
     include: [
       { model: B2BClient, as: "client" },
       { model: B2BClientShipTo, as: "shipTo" },
-      { model: db.B2BSalesOrder, as: "salesOrder" },
+      { model: B2BSalesOrder, as: "salesOrder" },
       {
         model: B2BShipment,
         as: "shipment",
         include: [
           { model: B2BClient, as: "client" },
           { model: B2BClientShipTo, as: "shipTo" },
-          { model: db.B2BSalesOrder, as: "salesOrder" },
+          { model: B2BSalesOrder, as: "salesOrder" },
         ],
       },
       {
         model: B2BInvoiceItem,
         as: "items",
-        include: [{ model: db.Product, as: "product" }],
+        include: [{ model: Product, as: "product" }],
       },
     ],
   });
@@ -135,25 +131,28 @@ const getInvoiceById = async ({ id }) => {
 const createFromShipment = async ({ shipmentId, user_id, transaction }) => {
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+  const models = getTenantModels();
+  const { B2BInvoice, B2BInvoiceItem, B2BShipment, B2BShipmentItem, B2BClient, B2BClientShipTo, B2BSalesOrder, B2BSalesOrderItem, Product, MeasurementUnit, ProductType, Company } = models;
+
   const shipment = await B2BShipment.findOne({
     where: { id: shipmentId, deleted_at: null },
     include: [
       { model: B2BClient, as: "client" },
       { model: B2BClientShipTo, as: "shipTo" },
-      { model: db.B2BSalesOrder, as: "salesOrder" },
+      { model: B2BSalesOrder, as: "salesOrder" },
       {
         model: B2BShipmentItem,
         as: "items",
         include: [
           {
-            model: db.Product,
+            model: Product,
             as: "product",
             include: [
-              { model: db.MeasurementUnit, as: "measurementUnit", attributes: ["id", "unit"] },
-              { model: db.ProductType, as: "productType", attributes: ["id", "name"] },
+              { model: MeasurementUnit, as: "measurementUnit", attributes: ["id", "unit"] },
+              { model: ProductType, as: "productType", attributes: ["id", "name"] },
             ],
           },
-          { model: db.B2BSalesOrderItem, as: "salesOrderItem" },
+          { model: B2BSalesOrderItem, as: "salesOrderItem" },
         ],
       },
     ],
@@ -324,6 +323,8 @@ const createFromShipment = async ({ shipmentId, user_id, transaction }) => {
 };
 
 const cancelInvoice = async ({ id, user_id, cancel_reason, transaction }) => {
+  const models = getTenantModels();
+  const { B2BInvoice } = models;
   const invoice = await B2BInvoice.findOne({ where: { id, deleted_at: null }, transaction });
   if (!invoice) {
     const err = new Error("B2B invoice not found");

@@ -2,6 +2,14 @@
 
 Step-by-step guide to deploy the API for **many tenants**: one API, one Registry DB, and one database (and optional bucket) per tenant.
 
+## Tenant-aware behavior
+
+**When tenant registry is configured:** All app modules (orders, quotations, inquiries, products, users, masters, suppliers, etc.) are tenant-aware. Each request uses the tenant's database based on the JWT; users never see data from other tenants.
+
+**When tenant registry is NOT configured:** The platform runs in **dedicated (single-tenant) mode**. The app uses the env-configured database; all modules work independently. No registry, no tenant switching.
+
+**Registry database usage:** Only **Tenant Management** (admin CRUD of tenants) and registry-related flows (tenant records, usage, pricing) use the Registry DB. All other modules use the tenant DB (or env DB in dedicated mode).
+
 ## What is multi-tenant (shared) mode?
 
 - One API instance serves multiple tenants (customers/organizations).

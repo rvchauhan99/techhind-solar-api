@@ -5,6 +5,7 @@ const { authenticator } = require("otplib");
 const qrcode = require("qrcode");
 const AppError = require("../../common/errors/AppError.js");
 const db = require("../../models/index.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const {
   USER_STATUS,
@@ -14,7 +15,8 @@ const {
 const normalizeEmail = (email) => (email && String(email).trim().toLowerCase()) || "";
 
 const checkedToken = async (access_token) => {
-  const token = await db.UserToken.findOne({
+  const { UserToken } = getTenantModels();
+  const token = await UserToken.findOne({
     where: { access_token },
   });
 
@@ -97,53 +99,61 @@ const createUserTokenOnSequelize = async (
 };
 
 const deleteExistingTokens = async (user_id, transaction) => {
-  const result = await db.UserToken.destroy({
+  const { UserToken } = getTenantModels();
+  const result = await UserToken.destroy({
     where: { user_id },
-    transaction
+    transaction,
   });
   return result;
 };
 
 const chcekUserByEmail = async (email, transaction) => {
+  const { User } = getTenantModels();
   const normalizedEmail = normalizeEmail(email);
-  const user = await db.User.findOne(
-    {
-      where: {
-        [Op.and]: [
-          Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), normalizedEmail),
-          { status: USER_STATUS.ACTIVE },
-        ],
-      },
+  const user = await User.findOne({
+    where: {
+      [Op.and]: [
+        Sequelize.where(Sequelize.fn("LOWER", Sequelize.col("email")), normalizedEmail),
+        { status: USER_STATUS.ACTIVE },
+      ],
     },
-    { transaction }
-  );
+    transaction,
+  });
 
   if (!user) return null;
 
-  return user.toJSON(); // .get({ plain: true, clone: true });
+  return user.toJSON();
 };
 
 const findValidRefreshToken = async (user_id, refresh_token) => {
-  const userToken = await db.UserToken.findOne({
+  const { UserToken } = getTenantModels();
+  const userToken = await UserToken.findOne({
     where: { user_id, refresh_token },
   });
 
   if (!userToken) return null;
 
-  return userToken.toJSON(); // .get({ plain: true, clone: true });
+  return userToken.toJSON();
 };
 
-const getUserprofileById = async (id) => {
-  const userProfile = await db.User.findByPk(id, {
+/**
+ * Fetch user profile from default (main) sequelize. Use in dedicated mode.
+ * @param {number} id - User ID
+ * @param {Object} [transaction] - Optional transaction (from main sequelize)
+ * @returns {Promise<object>}
+ */
+const getUserprofileById = async (id, transaction = null) => {
+  const { User, Role, RoleModule, Module } = getTenantModels();
+  const userProfile = await User.findByPk(id, {
     attributes: { exclude: ["password"] },
     include: [
       {
-        model: db.Role,
+        model: Role,
         as: "role",
         attributes: ["id", "name"],
         include: [
           {
-            model: db.RoleModule,
+            model: RoleModule,
             as: "roleModules",
             attributes: [
               "id",
@@ -157,7 +167,7 @@ const getUserprofileById = async (id) => {
             ],
             include: [
               {
-                model: db.Module,
+                model: Module,
                 as: "module",
                 attributes: [
                   "id",
@@ -175,9 +185,84 @@ const getUserprofileById = async (id) => {
         ],
       },
     ],
+    transaction,
   });
   if (!userProfile) throw new AppError("User not found", 404);
   return userProfile.toJSON();
+};
+
+/**
+ * Fetch user profile from tenant DB (shared mode). Uses raw SQL on given sequelize.
+ * @param {import("sequelize").Sequelize} tenantSequelize
+ * @param {number} id - User ID
+ * @returns {Promise<object>}
+ */
+const getUserprofileByIdOnSequelize = async (tenantSequelize, id) => {
+  const userRows = await tenantSequelize.query(
+    `SELECT u.id, u.name, u.email, u.photo, u.role_id, u.status, u.last_login,
+            u.created_at, u.updated_at, u.deleted_at, u.two_factor_enabled,
+            r.id AS "role.id", r.name AS "role.name"
+     FROM users u
+     LEFT JOIN roles r ON u.role_id = r.id AND r.deleted_at IS NULL
+     WHERE u.id = :id AND u.deleted_at IS NULL LIMIT 1`,
+    { replacements: { id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const userRow = Array.isArray(userRows) ? userRows[0] : userRows;
+  if (!userRow) throw new AppError("User not found", 404);
+
+  const roleModulesRows = userRow.role_id
+    ? await tenantSequelize.query(
+        `SELECT rm.id, rm.role_id, rm.module_id, rm.can_create, rm.can_read, rm.can_update, rm.can_delete, rm.listing_criteria,
+                m.id AS "module.id", m.name AS "module.name", m.key AS "module.key", m.parent_id AS "module.parent_id",
+                m.icon AS "module.icon", m.route AS "module.route", m.sequence AS "module.sequence", m.status AS "module.status"
+         FROM role_modules rm
+         JOIN modules m ON rm.module_id = m.id AND m.deleted_at IS NULL
+         WHERE rm.role_id = :role_id AND rm.deleted_at IS NULL
+         ORDER BY m.sequence`,
+        { replacements: { role_id: userRow.role_id }, type: tenantSequelize.QueryTypes.SELECT }
+      )
+    : [];
+  const rmList = Array.isArray(roleModulesRows) ? roleModulesRows : [roleModulesRows];
+
+  const roleModules = rmList.map((rm) => ({
+    id: rm.id,
+    role_id: rm.role_id,
+    module_id: rm.module_id,
+    can_create: rm.can_create,
+    can_read: rm.can_read,
+    can_update: rm.can_update,
+    can_delete: rm.can_delete,
+    listing_criteria: rm.listing_criteria || "my_team",
+    module: rm["module.id"] != null ? {
+      id: rm["module.id"],
+      name: rm["module.name"],
+      key: rm["module.key"],
+      parent_id: rm["module.parent_id"],
+      icon: rm["module.icon"],
+      route: rm["module.route"],
+      sequence: rm["module.sequence"],
+      status: rm["module.status"],
+    } : null,
+  }));
+
+  return {
+    id: userRow.id,
+    name: userRow.name,
+    email: userRow.email,
+    photo: userRow.photo,
+    role_id: userRow.role_id,
+    status: userRow.status,
+    last_login: userRow.last_login,
+    created_at: userRow.created_at,
+    updated_at: userRow.updated_at,
+    deleted_at: userRow.deleted_at,
+    two_factor_enabled: userRow.two_factor_enabled || false,
+    role: {
+      id: userRow["role.id"],
+      name: userRow["role.name"],
+      roleModules,
+    },
+  };
 };
 
 const createUserToken = async (
@@ -188,7 +273,8 @@ const createUserToken = async (
   refresh_exp,
   transaction
 ) => {
-  const usertoken = await db.UserToken.create(
+  const { UserToken } = getTenantModels();
+  const usertoken = await UserToken.create(
     {
       user_id,
       access_token,
@@ -208,13 +294,22 @@ const createUserToken = async (
 };
 
 const deleteUserToken = async (user_id, access_token, transaction) => {
-  const result = await db.UserToken.destroy(
-    {
-      where: { user_id, access_token },
-    },
-    { transaction }
-  );
+  const { UserToken } = getTenantModels();
+  const result = await UserToken.destroy({
+    where: { user_id, access_token },
+    transaction,
+  });
   return result;
+};
+
+/**
+ * Delete user token on tenant DB (shared mode).
+ */
+const deleteUserTokenOnSequelize = async (tenantSequelize, user_id, access_token) => {
+  await tenantSequelize.query(
+    "DELETE FROM user_tokens WHERE user_id = :user_id AND access_token = :access_token",
+    { replacements: { user_id, access_token } }
+  );
 };
 
 const changePassword = async (
@@ -224,7 +319,8 @@ const changePassword = async (
   confirmPassword,
   transaction = null
 ) => {
-  const user = await db.User.findOne({
+  const { User } = getTenantModels();
+  const user = await User.findOne({
     where: { id: user_id, deleted_at: null },
     transaction,
   });
@@ -260,13 +356,41 @@ const changePassword = async (
   return true;
 };
 
+/**
+ * Change password on tenant DB (shared mode).
+ */
+const changePasswordOnSequelize = async (tenantSequelize, user_id, currentPassword, newPassword, confirmPassword) => {
+  const rows = await tenantSequelize.query(
+    "SELECT id, password FROM users WHERE id = :id AND deleted_at IS NULL LIMIT 1",
+    { replacements: { id: user_id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) throw new AppError("User not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+
+  const isMatch = await bcrypt.compare(currentPassword, row.password);
+  if (!isMatch) throw new AppError("Current password is incorrect", RESPONSE_STATUS_CODES.BAD_REQUEST);
+
+  const isSameAsCurrent = await bcrypt.compare(newPassword, row.password);
+  if (isSameAsCurrent) throw new AppError("New password must be different from current password", RESPONSE_STATUS_CODES.BAD_REQUEST);
+
+  if (newPassword !== confirmPassword) throw new AppError("New password and confirm password do not match", RESPONSE_STATUS_CODES.BAD_REQUEST);
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await tenantSequelize.query(
+    "UPDATE users SET password = :password, first_login = true, updated_at = NOW() WHERE id = :id",
+    { replacements: { password: hashed, id: user_id } }
+  );
+  return true;
+};
+
 const updateUserToken = async (
   user_id,
   access_token,
   refresh_token,
   transaction
 ) => {
-  const result = await db.UserToken.update(
+  const { UserToken } = getTenantModels();
+  const result = await UserToken.update(
     {
       access_token,
     },
@@ -279,7 +403,8 @@ const updateUserToken = async (
 };
 
 const generateTwoFactorSecret = async (user_id, transaction = null) => {
-  const user = await db.User.findByPk(user_id, { transaction });
+  const { User } = getTenantModels();
+  const user = await User.findByPk(user_id, { transaction });
   if (!user) throw new AppError("User not found", 404);
 
   const secret = authenticator.generateSecret();
@@ -294,7 +419,8 @@ const generateTwoFactorSecret = async (user_id, transaction = null) => {
 };
 
 const verifyTwoFactorToken = async (user_id, token, transaction = null) => {
-  const user = await db.User.findByPk(user_id, { transaction });
+  const { User } = getTenantModels();
+  const user = await User.findByPk(user_id, { transaction });
   if (!user || !user.two_factor_secret) {
     throw new AppError("2FA not initialized for this user", 400);
   }
@@ -308,18 +434,88 @@ const verifyTwoFactorToken = async (user_id, token, transaction = null) => {
 };
 
 const enableTwoFactor = async (user_id, transaction = null) => {
-  const user = await db.User.findByPk(user_id, { transaction });
+  const { User } = getTenantModels();
+  const user = await User.findByPk(user_id, { transaction });
   if (!user) throw new AppError("User not found", 404);
   await user.update({ two_factor_enabled: true }, { transaction });
   return true;
 };
 
 const disableTwoFactor = async (user_id, transaction = null) => {
-  const user = await db.User.findByPk(user_id, { transaction });
+  const { User } = getTenantModels();
+  const user = await User.findByPk(user_id, { transaction });
   if (!user) throw new AppError("User not found", 404);
   await user.update(
     { two_factor_enabled: false, two_factor_secret: null },
     { transaction }
+  );
+  return true;
+};
+
+/**
+ * Generate 2FA secret on tenant DB (shared mode).
+ */
+const generateTwoFactorSecretOnSequelize = async (tenantSequelize, user_id) => {
+  const rows = await tenantSequelize.query(
+    "SELECT id, email FROM users WHERE id = :id LIMIT 1",
+    { replacements: { id: user_id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) throw new AppError("User not found", 404);
+
+  const secret = authenticator.generateSecret();
+  await tenantSequelize.query(
+    "UPDATE users SET two_factor_secret = :secret, updated_at = NOW() WHERE id = :id",
+    { replacements: { secret, id: user_id } }
+  );
+  const otpauth = authenticator.keyuri(row.email, "SolarSystem", secret);
+  const qrCodeUrl = await qrcode.toDataURL(otpauth);
+  return { secret, qrCodeUrl };
+};
+
+/**
+ * Verify 2FA token on tenant DB (shared mode).
+ */
+const verifyTwoFactorTokenOnSequelize = async (tenantSequelize, user_id, token) => {
+  const rows = await tenantSequelize.query(
+    "SELECT two_factor_secret FROM users WHERE id = :id LIMIT 1",
+    { replacements: { id: user_id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row || !row.two_factor_secret) throw new AppError("2FA not initialized for this user", 400);
+  return authenticator.verify({ token, secret: row.two_factor_secret });
+};
+
+/**
+ * Enable 2FA on tenant DB (shared mode).
+ */
+const enableTwoFactorOnSequelize = async (tenantSequelize, user_id) => {
+  const rows = await tenantSequelize.query(
+    "SELECT id FROM users WHERE id = :id LIMIT 1",
+    { replacements: { id: user_id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) throw new AppError("User not found", 404);
+  await tenantSequelize.query(
+    "UPDATE users SET two_factor_enabled = true, updated_at = NOW() WHERE id = :id",
+    { replacements: { id: user_id } }
+  );
+  return true;
+};
+
+/**
+ * Disable 2FA on tenant DB (shared mode).
+ */
+const disableTwoFactorOnSequelize = async (tenantSequelize, user_id) => {
+  const rows = await tenantSequelize.query(
+    "SELECT id FROM users WHERE id = :id LIMIT 1",
+    { replacements: { id: user_id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) throw new AppError("User not found", 404);
+  await tenantSequelize.query(
+    "UPDATE users SET two_factor_enabled = false, two_factor_secret = NULL, updated_at = NOW() WHERE id = :id",
+    { replacements: { id: user_id } }
   );
   return true;
 };
@@ -331,6 +527,8 @@ const disableTwoFactor = async (user_id, transaction = null) => {
  * @returns {Promise<{otp: string, expires_at: Date}>} - OTP and expiry
  */
 const generatePasswordResetOtp = async (user_id, transaction = null) => {
+  const models = getTenantModels();
+  const { PasswordResetOtp, sequelize } = models;
   // Generate 6-digit random OTP
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -338,12 +536,12 @@ const generatePasswordResetOtp = async (user_id, transaction = null) => {
   const expires_at = new Date();
   expires_at.setMinutes(expires_at.getMinutes() + 10);
 
-  const t = transaction || (await db.sequelize.transaction());
+  const t = transaction || (await sequelize.transaction());
   let committedHere = !transaction;
 
   try {
     // Delete any existing unused OTPs for this user
-    await db.PasswordResetOtp.destroy({
+    await PasswordResetOtp.destroy({
       where: {
         user_id,
         used: false,
@@ -352,7 +550,7 @@ const generatePasswordResetOtp = async (user_id, transaction = null) => {
     });
 
     // Create new OTP record
-    const otpRecord = await db.PasswordResetOtp.create(
+    const otpRecord = await PasswordResetOtp.create(
       {
         user_id,
         otp,
@@ -383,8 +581,8 @@ const generatePasswordResetOtp = async (user_id, transaction = null) => {
  * @returns {Promise<boolean>} - True if valid, throws error if invalid
  */
 const verifyPasswordResetOtp = async (user_id, otp, transaction = null) => {
-  // Find OTP record
-  const otpRecord = await db.PasswordResetOtp.findOne({
+  const { PasswordResetOtp } = getTenantModels();
+  const otpRecord = await PasswordResetOtp.findOne({
     where: {
       user_id,
       otp,
@@ -428,7 +626,9 @@ const resetPassword = async (
   confirmPassword,
   transaction = null
 ) => {
-  const t = transaction || (await db.sequelize.transaction());
+  const models = getTenantModels();
+  const { User, PasswordResetOtp, sequelize } = models;
+  const t = transaction || (await sequelize.transaction());
   let committedHere = !transaction;
 
   try {
@@ -449,7 +649,7 @@ const resetPassword = async (
     }
 
     // Find user
-    const user = await db.User.findOne({
+    const user = await User.findOne({
       where: { id: user_id, deleted_at: null },
       transaction: t,
     });
@@ -459,7 +659,7 @@ const resetPassword = async (
     }
 
     // Verify OTP one more time before resetting password
-    const otpRecord = await db.PasswordResetOtp.findOne({
+    const otpRecord = await PasswordResetOtp.findOne({
       where: {
         user_id,
         otp,
@@ -497,7 +697,7 @@ const resetPassword = async (
     );
 
     // Invalidate all remaining OTPs for this user
-    await db.PasswordResetOtp.destroy({
+    await PasswordResetOtp.destroy({
       where: { user_id, used: false },
       transaction: t,
     });
@@ -526,13 +726,20 @@ module.exports = {
   chcekUserByEmail,
   findValidRefreshToken,
   getUserprofileById,
+  getUserprofileByIdOnSequelize,
   deleteUserToken,
+  deleteUserTokenOnSequelize,
   changePassword,
+  changePasswordOnSequelize,
   updateUserToken,
   generateTwoFactorSecret,
+  generateTwoFactorSecretOnSequelize,
   verifyTwoFactorToken,
+  verifyTwoFactorTokenOnSequelize,
   enableTwoFactor,
+  enableTwoFactorOnSequelize,
   disableTwoFactor,
+  disableTwoFactorOnSequelize,
   generatePasswordResetOtp,
   verifyPasswordResetOtp,
   resetPassword,
