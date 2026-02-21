@@ -390,7 +390,11 @@ const deleteSupplier = async ({ id, transaction } = {}) => {
 
     if (!supplier) throw new Error("Supplier not found");
 
-    await supplier.destroy({ transaction: t });
+    // Deactivate (soft delete): set deleted_at and is_active = false instead of hard delete
+    await supplier.update(
+      { deleted_at: new Date(), is_active: false },
+      { transaction: t }
+    );
 
     if (committedHere) {
       await t.commit();

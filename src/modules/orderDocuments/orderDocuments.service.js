@@ -3,15 +3,15 @@
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
-const createOrderDocument = async (payload, transaction) => {
-    const models = getTenantModels();
+const createOrderDocument = async (payload, transaction, req) => {
+    const models = getTenantModels(req);
     const { OrderDocument } = models;
     const document = await OrderDocument.create(payload, { transaction });
     return document;
 };
 
-const updateOrderDocument = async (id, updates, transaction) => {
-    const models = getTenantModels();
+const updateOrderDocument = async (id, updates, transaction, req) => {
+    const models = getTenantModels(req);
     const { OrderDocument } = models;
     const document = await OrderDocument.findByPk(id);
     if (!document) {
@@ -21,8 +21,8 @@ const updateOrderDocument = async (id, updates, transaction) => {
     return document;
 };
 
-const deleteOrderDocument = async (id, transaction) => {
-    const models = getTenantModels();
+const deleteOrderDocument = async (id, transaction, req) => {
+    const models = getTenantModels(req);
     const { OrderDocument } = models;
     const document = await OrderDocument.findByPk(id);
     if (!document) {
@@ -32,14 +32,14 @@ const deleteOrderDocument = async (id, transaction) => {
     return true;
 };
 
-const getOrderDocumentById = async (id) => {
-    const models = getTenantModels();
+const getOrderDocumentById = async (id, transaction, req) => {
+    const models = getTenantModels(req);
     const { OrderDocument } = models;
     const document = await OrderDocument.findByPk(id);
     return document;
 };
 
-const listOrderDocuments = async ({ order_id, page = 1, limit = 20, q = null }, transaction) => {
+const listOrderDocuments = async ({ order_id, page = 1, limit = 20, q = null }, transaction, req) => {
     const offset = (page - 1) * limit;
 
     const where = {
@@ -57,7 +57,7 @@ const listOrderDocuments = async ({ order_id, page = 1, limit = 20, q = null }, 
         ];
     }
 
-    const models = getTenantModels();
+    const models = getTenantModels(req);
     const { OrderDocument } = models;
     const { count, rows } = await OrderDocument.findAndCountAll({
         where,

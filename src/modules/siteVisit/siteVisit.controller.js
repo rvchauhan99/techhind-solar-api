@@ -77,7 +77,7 @@ const list = asyncHandler(async (req, res) => {
     site_visit_created_at_op,
     sortBy,
     sortOrder,
-  });
+  }, req);
   return responseHandler.sendSuccess(res, result, "Inquiries with site visits fetched", 200);
 });
 
@@ -127,7 +127,7 @@ const exportList = asyncHandler(async (req, res) => {
     site_visit_created_at_to,
     sortBy,
     sortOrder,
-  });
+  }, req);
   const filename = `site-visits-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -283,7 +283,7 @@ const create = asyncHandler(async (req, res) => {
     }
   }
 
-  const created = await siteVisitService.createSiteVisit(payload);
+  const created = await siteVisitService.createSiteVisit(payload, req);
   return responseHandler.sendSuccess(res, created, "Site visit created", 201);
 });
 
