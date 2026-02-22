@@ -2,6 +2,7 @@
 
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
+const { isAuditLogsEnabled } = require("../../config/auditLogs.js");
 const tenantRegistryService = require("./tenantRegistry.service.js");
 const dbPoolManager = require("./dbPoolManager.js");
 const bucketClientFactory = require("./bucketClientFactory.js");
@@ -57,7 +58,7 @@ async function tenantContextMiddleware(req, res, next) {
       console.log(`[tenant_id=${req.tenant.id}] ${req.method} ${req.originalUrl || req.url}`);
     }
 
-    if (process.env.NODE_ENV === "development" && req.tenant) {
+    if (isAuditLogsEnabled() && req.tenant) {
       const cfg = req.tenant.sequelize?.config;
       const db = cfg
         ? { host: cfg.host, port: cfg.port, database: cfg.database, user: cfg.username }

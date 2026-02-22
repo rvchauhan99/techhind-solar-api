@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const { getDialectOptions } = require("./dbSsl.js");
+const { isAuditLogsEnabled } = require("./auditLogs.js");
 
 /**
  * Get DB connection params from DATABASE_URL or DB_* env vars.
@@ -55,7 +56,7 @@ const baseConfig = {
   port: params.port,
   dialect: "postgres",
   logging:
-    nodeEnv === "development"
+    isAuditLogsEnabled()
       ? (sql) => console.log(`[DB:main/${params.database}]`, sql)
       : false,
   pool,

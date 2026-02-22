@@ -63,7 +63,7 @@ router.use("/role-module", roleModulePermissionRoutes);
 router.use("/module-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/module-master" }), moduleMasterRoutes);
 router.use("/role-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/role-master" }), roleMasterRoutes);
 router.use("/role-module", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/role-module" }), roleModuleRoutes);
-router.use("/user-master", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/user-master" }), userMasterRoutes);
+router.use("/user-master", requireAuthWithTenant, userMasterRoutes);
 router.use("/masters", requireAuthWithTenant, mastersRoutes);
 router.use("/company", requireAuthWithTenant, companyMasterRoutes);
 router.use("/site-visit", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/site-visit" }), siteVisitRoutes);
@@ -72,7 +72,7 @@ router.use("/followup", requireAuthWithTenant, requireModulePermissionByMethod({
 router.use("/inquiry-documents", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/inquiry" }), inquiryDocumentsRoutes);
 router.use("/order-documents", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/order" }), orderDocumentsRoutes);
 router.use("/product", requireAuthWithTenant, productRoutes);
-router.use("/bill-of-material", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/bill-of-material" }), billOfMaterialRoutes);
+router.use("/bill-of-material", requireAuthWithTenant, billOfMaterialRoutes);
 router.use("/project-price", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/project-price" }), projectPriceRoutes);
 router.use("/quotation", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/quotation" }), quotationRoutes);
 router.use("/supplier", requireAuthWithTenant, supplierRoutes);

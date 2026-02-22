@@ -4,6 +4,7 @@ const { Sequelize } = require("sequelize");
 const tenantRegistryService = require("./tenantRegistry.service.js");
 const { getRegistrySequelize, isRegistryAvailable } = require("../../config/registryDb.js");
 const { getDialectOptions } = require("../../config/dbSsl.js");
+const { isAuditLogsEnabled } = require("../../config/auditLogs.js");
 const defaultSequelize = require("../../config/db.js");
 
 const poolCache = new Map();
@@ -74,7 +75,7 @@ function getOrCreateTenantPool(tenantId, config) {
     port: db_port || 5432,
     dialect: "postgres",
     logging:
-      !isProduction
+      isAuditLogsEnabled()
         ? (sql) => console.log(`[DB:tenant/${db_name}]`, sql)
         : false,
     pool: defaultPoolConfig,
