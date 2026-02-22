@@ -645,10 +645,21 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                     : quantity;
                 bomByProductId[line.product_id] = { maxQty: planned, line };
             });
+            // Build productIdToName for user-friendly error messages (items not in BOM)
+            const itemProductIds = [...new Set(items.map((i) => i.product_id))];
+            const itemProducts = await Product.findAll({
+                where: { id: itemProductIds, deleted_at: null },
+                attributes: ["id", "product_name"],
+                transaction,
+            });
+            const productIdToName = {};
+            itemProducts.forEach((p) => { productIdToName[p.id] = p.product_name || `Product #${p.id}`; });
+
             for (const item of items) {
                 const bomEntry = bomByProductId[item.product_id];
+                const productName = productIdToName[item.product_id] || `Product #${item.product_id}`;
                 if (!bomEntry) {
-                    const error = new Error(`Product id ${item.product_id} is not in order BOM`);
+                    const error = new Error(`${productName} is not in order BOM`);
                     error.statusCode = 400;
                     throw error;
                 }
@@ -657,8 +668,9 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                 const totalQty = previousQty + currentQty;
                 const maxQty = bomEntry.maxQty;
                 if (totalQty > maxQty) {
+                    const lineProductName = getBomLineProduct(bomEntry.line)?.product_name || productName;
                     const error = new Error(
-                        `Total quantity for product id ${item.product_id} (${totalQty}) exceeds planned quantity (${maxQty}). Previous challan: ${previousQty}, Current: ${currentQty}`
+                        `Total quantity for ${lineProductName} (${totalQty}) exceeds planned quantity (${maxQty}). Previous challan: ${previousQty}, Current: ${currentQty}`
                     );
                     error.statusCode = 400;
                     throw error;
@@ -735,21 +747,23 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
 
         for (const item of items) {
             const qty = Number(item.quantity);
+            const product = productMap[item.product_id];
+            const productName = product?.product_name || `Product #${item.product_id}`;
+
             if (!Number.isFinite(qty) || qty <= 0) {
-                const error = new Error(`Invalid quantity for product id ${item.product_id}`);
+                const error = new Error(`Invalid quantity for ${productName}`);
                 error.statusCode = 400;
                 throw error;
             }
             // Stocks are integer-based; enforce whole quantities
             if (!Number.isInteger(qty)) {
-                const error = new Error(`Quantity for product id ${item.product_id} must be a whole number`);
+                const error = new Error(`Quantity for ${productName} must be a whole number`);
                 error.statusCode = 400;
                 throw error;
             }
 
-            const product = productMap[item.product_id];
             if (!product) {
-                const error = new Error(`Product not found for id ${item.product_id}`);
+                const error = new Error(`Product not found: ${productName}`);
                 error.statusCode = 404;
                 throw error;
             }
@@ -763,7 +777,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
 
             if (stock.quantity_available < qty) {
                 const error = new Error(
-                    `Insufficient stock for product id ${item.product_id}. Available: ${stock.quantity_available}, Required: ${qty}`
+                    `Insufficient stock for ${productName}. Available: ${stock.quantity_available}, Required: ${qty}`
                 );
                 error.statusCode = 400;
                 throw error;
@@ -779,7 +793,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
             if (isSerialized) {
                 if (serialList.length !== qty) {
                     const error = new Error(
-                        `Serial count (${serialList.length}) must match quantity (${qty}) for product id ${item.product_id}`
+                        `Serial count (${serialList.length}) must match quantity (${qty}) for ${productName}`
                     );
                     error.statusCode = 400;
                     throw error;
@@ -798,7 +812,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
 
                     if (!stockSerial) {
                         const error = new Error(
-                            `Serial '${serial}' is not available at this warehouse for product id ${item.product_id}`
+                            `Serial '${serial}' is not available at this warehouse for ${productName}`
                         );
                         error.statusCode = 400;
                         throw error;
@@ -806,7 +820,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
 
                     if (stockSerial.status !== SERIAL_STATUS.AVAILABLE) {
                         const error = new Error(
-                            `Serial ${serial} for product id ${item.product_id} is not available`
+                            `Serial '${serial}' for ${productName} is not available`
                         );
                         error.statusCode = 400;
                         throw error;

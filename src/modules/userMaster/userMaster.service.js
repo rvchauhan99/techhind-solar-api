@@ -46,6 +46,13 @@ const createUser = async (payload, transaction = null) => {
   const existing = await User.findOne({ where: { email: normalizedEmail, deleted_at: null }, transaction });
   if (existing) throw new AppError('Email already in use', RESPONSE_STATUS_CODES.BAD_REQUEST);
 
+  // check duplicate mobile_number when provided (normalize to trimmed value)
+  const mobile = payload.mobile_number ? String(payload.mobile_number).trim() : null;
+  if (mobile) {
+    const existingMobile = await User.findOne({ where: { mobile_number: mobile, deleted_at: null }, transaction });
+    if (existingMobile) throw new AppError('Mobile number already in use', RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+
   // set default password if not provided (we don't accept password from UI per spec)
   const defaultPassword = 'Admin@123';
   const hashedPassword = await bcrypt.hash(defaultPassword, 10);
@@ -64,7 +71,7 @@ const createUser = async (payload, transaction = null) => {
     address: payload.address || null,
     brith_date: payload.brith_date || null,
     blood_group: payload.blood_group || null,
-    mobile_number: payload.mobile_number || null,
+    mobile_number: mobile || null,
     status: payload.status || 'active',
     // default to false on create; do not accept client-supplied value
     first_login: false,
@@ -207,6 +214,13 @@ const updateUser = async (id, updates, transaction = null) => {
     if (exists) throw new AppError('Email already in use', RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
+  // check duplicate mobile_number when being updated
+  const mobileUpdate = updates.mobile_number !== undefined ? (updates.mobile_number ? String(updates.mobile_number).trim() : null) : undefined;
+  if (mobileUpdate !== undefined && mobileUpdate) {
+    const existingMobile = await User.findOne({ where: { mobile_number: mobileUpdate, deleted_at: null, id: { [Op.ne]: id } }, transaction });
+    if (existingMobile) throw new AppError('Mobile number already in use', RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+
   // Do not accept password updates from this UI (per spec)
   const safeUpdates = { ...updates };
   delete safeUpdates.password;
@@ -234,7 +248,7 @@ const updateUser = async (id, updates, transaction = null) => {
     address: safeUpdates.address,
     brith_date: safeUpdates.brith_date,
     blood_group: safeUpdates.blood_group,
-    mobile_number: safeUpdates.mobile_number,
+    mobile_number: mobileUpdate !== undefined ? mobileUpdate : safeUpdates.mobile_number,
   };
 
   await user.update({ ...allowed }, { transaction });
