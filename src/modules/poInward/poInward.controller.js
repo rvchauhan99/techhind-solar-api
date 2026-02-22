@@ -113,22 +113,36 @@ const getById = asyncHandler(async (req, res) => {
 
 const create = asyncHandler(async (req, res) => {
   const payload = { ...req.body, received_by: req.user.id };
-  const created = await poInwardService.createPOInward({
-    payload,
-    transaction: req.transaction,
-  });
-  return responseHandler.sendSuccess(res, created, "PO Inward created", 201);
+  try {
+    const created = await poInwardService.createPOInward({
+      payload,
+      transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, created, "PO Inward created", 201);
+  } catch (err) {
+    if (err.name === "SequelizeUniqueConstraintError") {
+      return responseHandler.sendError(res, "Duplicate serial number for this product type. Use a unique serial within the same product type.", 400);
+    }
+    throw err;
+  }
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const payload = { ...req.body };
-  const updated = await poInwardService.updatePOInward({
-    id,
-    payload,
-    transaction: req.transaction,
-  });
-  return responseHandler.sendSuccess(res, updated, "PO Inward updated", 200);
+  try {
+    const updated = await poInwardService.updatePOInward({
+      id,
+      payload,
+      transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, updated, "PO Inward updated", 200);
+  } catch (err) {
+    if (err.name === "SequelizeUniqueConstraintError") {
+      return responseHandler.sendError(res, "Duplicate serial number for this product type. Use a unique serial within the same product type.", 400);
+    }
+    throw err;
+  }
 });
 
 const approve = asyncHandler(async (req, res) => {

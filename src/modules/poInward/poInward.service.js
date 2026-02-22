@@ -335,10 +335,12 @@ const createPOInward = async ({ payload, transaction } = {}) => {
 
       // Create serials if provided
       if (item.serials && item.serials.length > 0) {
+        const productTypeId = product.product_type_id ?? null;
         const serialPromises = item.serials.map((serial) =>
           POInwardSerial.create(
             {
               po_inward_item_id: inwardItem.id,
+              product_type_id: productTypeId,
               serial_number: serial.serial_number,
               status: "RECEIVED",
             },
@@ -612,10 +614,12 @@ const updatePOInward = async ({ id, payload, transaction } = {}) => {
         );
 
         if (item.serials && item.serials.length > 0) {
+          const productTypeId = product.product_type_id ?? null;
           const serialPromises = item.serials.map((serial) =>
             POInwardSerial.create(
               {
                 po_inward_item_id: inwardItem.id,
+                product_type_id: productTypeId,
                 serial_number: serial.serial_number,
                 status: "RECEIVED",
               },

@@ -62,7 +62,7 @@ const updateStockQuantities = async ({ stock, quantity, last_updated_by, isInwar
 // Create stock from PO Inward (called from poInward service)
 const createStockFromPOInward = async ({ poInward, transaction }) => {
   const models = getTenantModels();
-  const { StockSerial } = models;
+  const { StockSerial, Product } = models;
   const t = transaction;
 
   for (const item of poInward.items) {
@@ -88,17 +88,22 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
 
     // Create serials if serialized
     if (product.serial_required && item.serials && item.serials.length > 0) {
+      const productTypeId = product.product_type_id;
       for (const serial of item.serials) {
-        // Check if serial already exists
+        // Check if serial already exists for this product type (different product types can share same serial)
         const existingSerial = await StockSerial.findOne({
-          where: {
-            serial_number: serial.serial_number,
-          },
+          where: { serial_number: serial.serial_number },
+          include: [{
+            model: Product,
+            as: "product",
+            required: true,
+            where: { product_type_id: productTypeId },
+          }],
           transaction: t,
         });
 
         if (existingSerial) {
-          throw new Error(`Serial number ${serial.serial_number} already exists`);
+          throw new Error(`Serial number "${serial.serial_number}" already exists for this product type. Use a unique serial within the same product type.`);
         }
 
         const unitPrice =
