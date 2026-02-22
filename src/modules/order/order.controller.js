@@ -266,13 +266,12 @@ const update = asyncHandler(async (req, res) => {
     assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
     const payload = { ...req.body };
 
+    // Warehouse manager check only when explicitly assigning fabricator/installer (not when saving planner or other stages)
     const touchesFabricatorInstallerAssignment =
         payload.fabricator_installer_id !== undefined ||
         payload.fabricator_id !== undefined ||
         payload.installer_id !== undefined ||
-        payload.fabricator_installer_are_same !== undefined ||
-        (payload.stages && payload.stages.assign_fabricator_and_installer !== undefined);
-
+        payload.fabricator_installer_are_same !== undefined;
     const plannedWarehouseId = existing.planned_warehouse_id || payload.planned_warehouse_id;
     if (touchesFabricatorInstallerAssignment && plannedWarehouseId && req.user?.id) {
         try {
