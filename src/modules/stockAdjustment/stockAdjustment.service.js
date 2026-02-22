@@ -215,20 +215,55 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
           if (!stockSerialId && (typeof serial === "string" || typeof serial === "number")) {
             const trimmed = String(serial).trim();
             if (trimmed) {
-              const stockSerial = await StockSerial.findOne({
-                where: {
-                  serial_number: trimmed,
+              if (direction === MOVEMENT_TYPE.OUT) {
+                const stockSerial = await StockSerial.findOne({
+                  where: {
+                    serial_number: trimmed,
+                    product_id: item.product_id,
+                    warehouse_id: adjustmentData.warehouse_id,
+                    status: SERIAL_STATUS.AVAILABLE,
+                  },
+                  attributes: ["id"],
+                  transaction: t,
+                });
+                if (!stockSerial) {
+                  throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
+                }
+                stockSerialId = stockSerial.id;
+              } else if (direction === MOVEMENT_TYPE.IN) {
+                const existing = await StockSerial.findOne({
+                  where: {
+                    serial_number: trimmed,
+                    product_id: item.product_id,
+                    warehouse_id: adjustmentData.warehouse_id,
+                  },
+                  attributes: ["id"],
+                  transaction: t,
+                });
+                if (existing) {
+                  throw new Error(`Serial "${trimmed}" already exists for product id ${item.product_id} at this warehouse`);
+                }
+                const stock = await stockService.getOrCreateStock({
                   product_id: item.product_id,
                   warehouse_id: adjustmentData.warehouse_id,
-                  status: SERIAL_STATUS.AVAILABLE,
-                },
-                attributes: ["id"],
-                transaction: t,
-              });
-              if (!stockSerial) {
-                throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
+                  product,
+                  transaction: t,
+                });
+                const newSerial = await StockSerial.create(
+                  {
+                    product_id: item.product_id,
+                    warehouse_id: adjustmentData.warehouse_id,
+                    stock_id: stock.id,
+                    serial_number: trimmed,
+                    status: SERIAL_STATUS.AVAILABLE,
+                    source_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
+                    source_id: created.id,
+                    inward_date: new Date(),
+                  },
+                  { transaction: t }
+                );
+                stockSerialId = newSerial.id;
               }
-              stockSerialId = stockSerial.id;
             }
           }
           if (stockSerialId) {
@@ -331,20 +366,55 @@ const updateStockAdjustment = async ({ id, payload, transaction } = {}) => {
             if (!stockSerialId && (typeof serial === "string" || typeof serial === "number")) {
               const trimmed = String(serial).trim();
               if (trimmed) {
-                const stockSerial = await StockSerial.findOne({
-                  where: {
-                    serial_number: trimmed,
+                if (direction === MOVEMENT_TYPE.OUT) {
+                  const stockSerial = await StockSerial.findOne({
+                    where: {
+                      serial_number: trimmed,
+                      product_id: item.product_id,
+                      warehouse_id: adjustmentData.warehouse_id,
+                      status: SERIAL_STATUS.AVAILABLE,
+                    },
+                    attributes: ["id"],
+                    transaction: t,
+                  });
+                  if (!stockSerial) {
+                    throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
+                  }
+                  stockSerialId = stockSerial.id;
+                } else if (direction === MOVEMENT_TYPE.IN) {
+                  const existing = await StockSerial.findOne({
+                    where: {
+                      serial_number: trimmed,
+                      product_id: item.product_id,
+                      warehouse_id: adjustmentData.warehouse_id,
+                    },
+                    attributes: ["id"],
+                    transaction: t,
+                  });
+                  if (existing) {
+                    throw new Error(`Serial "${trimmed}" already exists for product id ${item.product_id} at this warehouse`);
+                  }
+                  const stock = await stockService.getOrCreateStock({
                     product_id: item.product_id,
                     warehouse_id: adjustmentData.warehouse_id,
-                    status: SERIAL_STATUS.AVAILABLE,
-                  },
-                  attributes: ["id"],
-                  transaction: t,
-                });
-                if (!stockSerial) {
-                  throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
+                    product,
+                    transaction: t,
+                  });
+                  const newSerial = await StockSerial.create(
+                    {
+                      product_id: item.product_id,
+                      warehouse_id: adjustmentData.warehouse_id,
+                      stock_id: stock.id,
+                      serial_number: trimmed,
+                      status: SERIAL_STATUS.AVAILABLE,
+                      source_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
+                      source_id: id,
+                      inward_date: new Date(),
+                    },
+                    { transaction: t }
+                  );
+                  stockSerialId = newSerial.id;
                 }
-                stockSerialId = stockSerial.id;
               }
             }
             if (stockSerialId) {

@@ -10,6 +10,7 @@ router.get("/", ...requireAuthWithTenant, controller.list);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
 router.get("/serials/available", ...requireAuthWithTenant, controller.getAvailableSerials);
 router.get("/serials/validate", ...requireAuthWithTenant, controller.validateSerial);
+router.get("/serials/validate-not-exists", ...requireAuthWithTenant, controller.validateSerialNotExists);
 router.get("/:id", ...requireAuthWithTenant, controller.getById);
 router.get("/warehouse/:warehouseId", ...requireAuthWithTenant, controller.getByWarehouse);
 
