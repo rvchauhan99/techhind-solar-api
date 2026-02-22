@@ -13,8 +13,8 @@ const uploadMemory = require('../../common/middlewares/uploadMemory.js');
 const masters = (action) => requireModulePermission({ moduleRoute: "/masters", action });
 const referenceRead = requireOpenedModuleReadPermission({ fallbackModuleRoute: "/masters" });
 
-router.get('/master-list', ...requireAuthWithTenant, masters("read"), controller.masterList);
-router.get('/list/:model', ...requireAuthWithTenant, masters("read"), controller.list);
+router.get('/master-list', ...requireAuthWithTenant, referenceRead, controller.masterList);
+router.get('/list/:model', ...requireAuthWithTenant, referenceRead, controller.list);
 router.get('/reference-options', ...requireAuthWithTenant, referenceRead, controller.getReferenceOptions);
 router.get('/constants', ...requireAuthWithTenant, referenceRead, controller.getAppConstants);
 router.get('/state/default', ...requireAuthWithTenant, referenceRead, controller.getDefaultState);
