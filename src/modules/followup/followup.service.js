@@ -282,9 +282,11 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     if (Reflect.ownKeys(followupWhere.created_at).length === 0) delete followupWhere.created_at;
   }
 
-  // Filter by inquiry status (from Inquiry) if provided
+  // Filter by inquiry status (from Inquiry). Always exclude Converted inquiries from followup list.
   if (filters.status) {
-    inquiryWhere.status = filters.status;
+    inquiryWhere.status = filters.status === "Converted" ? "__NO_MATCH__" : filters.status;
+  } else {
+    inquiryWhere.status = { [Op.ne]: "Converted" };
   }
 
   // Filter by inquiry date_of_inquiry range
@@ -355,6 +357,7 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     where: Object.keys(inquiryWhere).length > 1 ? inquiryWhere : undefined, // Only add if more than just deleted_at
     attributes: [
       "id",
+      "inquiry_number",
       "date_of_inquiry",
       "status",
       "capacity",
@@ -432,6 +435,7 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
 
       // Inquiry fields (flattened to root level)
       id: inquiry.id || null,
+      inquiry_number: inquiry.inquiry_number || null,
       date_of_inquiry: inquiry.date_of_inquiry || null,
       status: inquiry.status || null,
       capacity: inquiry.capacity || null,

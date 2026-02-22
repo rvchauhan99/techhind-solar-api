@@ -10,6 +10,7 @@ router.get("/", ...requireAuthWithTenant, controller.list);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
 router.post("/", ...requireAuthWithTenant, controller.create);
 router.get("/:id", ...requireAuthWithTenant, controller.getById);
+router.put("/:id", ...requireAuthWithTenant, controller.update);
 router.post("/:id/approve", ...requireAuthWithTenant, controller.approve);
 router.post("/:id/post", ...requireAuthWithTenant, controller.post);
 
