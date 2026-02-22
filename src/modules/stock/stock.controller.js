@@ -64,6 +64,21 @@ const validateSerial = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, result, result.valid ? "Serial is available" : result.message, 200);
 });
 
+const validateSerialNotExists = asyncHandler(async (req, res) => {
+  const { serial_number, product_id, warehouse_id } = req.query;
+  const result = await stockService.validateSerialNotExists({
+    serial_number,
+    product_id: product_id != null ? parseInt(product_id, 10) : null,
+    warehouse_id: warehouse_id != null ? parseInt(warehouse_id, 10) : null,
+  });
+  return responseHandler.sendSuccess(
+    res,
+    result,
+    result.exists === false ? "Serial does not exist (ok for Found)" : result.message,
+    200
+  );
+});
+
 module.exports = {
   list,
   exportList,
@@ -71,5 +86,6 @@ module.exports = {
   getByWarehouse,
   getAvailableSerials,
   validateSerial,
+  validateSerialNotExists,
 };
 
