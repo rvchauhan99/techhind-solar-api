@@ -51,6 +51,7 @@ const User = sequelize.define(
     mobile_number: {
       type: DataTypes.STRING,
       allowNull: true,
+      unique: true,
     },
     role_id: {
       type: DataTypes.INTEGER,

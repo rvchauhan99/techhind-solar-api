@@ -399,7 +399,7 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
     return { valid: false, message: "Serial number, product_id and warehouse_id are required" };
   }
   const models = getTenantModels();
-  const { StockSerial } = models;
+  const { StockSerial, Product } = models;
   const row = await StockSerial.findOne({
     where: {
       serial_number: trimmed,
@@ -413,7 +413,12 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
   if (row) {
     return { valid: true };
   }
-  return { valid: false, message: "Serial is not available at this warehouse" };
+
+  const product = await Product.findByPk(parseInt(product_id, 10), {
+    attributes: ["id", "product_name"],
+  });
+  const productName = product?.product_name || `Product #${product_id}`;
+  return { valid: false, message: `Serial '${trimmed}' is not available for ${productName} at this warehouse` };
 };
 
 module.exports = {

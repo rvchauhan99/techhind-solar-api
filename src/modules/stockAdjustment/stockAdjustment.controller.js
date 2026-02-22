@@ -84,6 +84,20 @@ const getById = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, item, "Stock adjustment fetched", 200);
 });
 
+const update = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const payload = { ...req.body };
+  const updated = await stockAdjustmentService.updateStockAdjustment({
+    id: parseInt(id, 10),
+    payload,
+    transaction: req.transaction,
+  });
+  if (!updated) {
+    return responseHandler.sendError(res, "Stock adjustment not found", 404);
+  }
+  return responseHandler.sendSuccess(res, updated, "Stock adjustment updated", 200);
+});
+
 const create = asyncHandler(async (req, res) => {
   const payload = { ...req.body, requested_by: req.user.id };
   const created = await stockAdjustmentService.createStockAdjustment({
@@ -117,6 +131,7 @@ module.exports = {
   exportList,
   getById,
   create,
+  update,
   approve,
   post,
 };

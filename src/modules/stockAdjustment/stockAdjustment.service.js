@@ -21,7 +21,8 @@ const listStockAdjustments = async ({
   total_quantity,
   total_quantity_op,
   total_quantity_to,
-  reason = null,
+  reason: reasonParam = null,
+  remarks = null,
 } = {}) => {
   const models = getTenantModels();
   const { StockAdjustment, CompanyWarehouse, User } = models;
@@ -31,7 +32,8 @@ const listStockAdjustments = async ({
   if (status) where.status = status;
   if (adjustment_type) where.adjustment_type = adjustment_type;
   if (adjustmentNumber) where.adjustment_number = { [Op.iLike]: `%${adjustmentNumber}%` };
-  if (reason) where.reason = { [Op.iLike]: `%${reason}%` };
+  const remarksFilter = remarks ?? reasonParam;
+  if (remarksFilter) where.remarks = { [Op.iLike]: `%${remarksFilter}%` };
   if (adjustmentDateFrom || adjustmentDateTo) {
     const dateCond = {};
     if (adjustmentDateFrom) dateCond[Op.gte] = adjustmentDateFrom;
@@ -93,7 +95,7 @@ const exportStockAdjustments = async (params = {}) => {
     { header: "Type", key: "adjustment_type", width: 14 },
     { header: "Status", key: "status", width: 12 },
     { header: "Total Qty", key: "total_quantity", width: 12 },
-    { header: "Reason", key: "reason", width: 28 },
+    { header: "Remarks", key: "remarks", width: 28 },
     { header: "Created At", key: "created_at", width: 22 },
   ];
   worksheet.getRow(1).font = { bold: true };
@@ -106,7 +108,7 @@ const exportStockAdjustments = async (params = {}) => {
       adjustment_type: a.adjustment_type || "",
       status: a.status || "",
       total_quantity: a.total_quantity != null ? a.total_quantity : "",
-      reason: a.reason || "",
+      remarks: a.remarks || "",
       created_at: a.created_at ? new Date(a.created_at).toISOString() : "",
     });
   });
@@ -144,7 +146,7 @@ const getStockAdjustmentById = async ({ id } = {}) => {
 
 const createStockAdjustment = async ({ payload, transaction } = {}) => {
   const models = getTenantModels();
-  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, Product } = models;
+  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, StockSerial, Product } = models;
   const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
 
@@ -209,13 +211,35 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
 
       if (item.serials && item.serials.length > 0) {
         for (const serial of item.serials) {
-          await StockAdjustmentSerial.create(
-            {
-              stock_adjustment_item_id: adjustmentItem.id,
-              stock_serial_id: serial.stock_serial_id,
-            },
-            { transaction: t }
-          );
+          let stockSerialId = typeof serial === "object" && serial?.stock_serial_id != null ? serial.stock_serial_id : null;
+          if (!stockSerialId && (typeof serial === "string" || typeof serial === "number")) {
+            const trimmed = String(serial).trim();
+            if (trimmed) {
+              const stockSerial = await StockSerial.findOne({
+                where: {
+                  serial_number: trimmed,
+                  product_id: item.product_id,
+                  warehouse_id: adjustmentData.warehouse_id,
+                  status: SERIAL_STATUS.AVAILABLE,
+                },
+                attributes: ["id"],
+                transaction: t,
+              });
+              if (!stockSerial) {
+                throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
+              }
+              stockSerialId = stockSerial.id;
+            }
+          }
+          if (stockSerialId) {
+            await StockAdjustmentSerial.create(
+              {
+                stock_adjustment_item_id: adjustmentItem.id,
+                stock_serial_id: stockSerialId,
+              },
+              { transaction: t }
+            );
+          }
         }
       }
     }
@@ -229,6 +253,128 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
     if (committedHere) {
       await t.rollback();
     }
+    throw err;
+  }
+};
+
+const updateStockAdjustment = async ({ id, payload, transaction } = {}) => {
+  if (!id) return null;
+  const models = getTenantModels();
+  const { StockAdjustment, StockAdjustmentItem, StockAdjustmentSerial, StockSerial, Product } = models;
+  const t = transaction || (await models.sequelize.transaction());
+  let committedHere = !transaction;
+
+  try {
+    const adjustment = await StockAdjustment.findOne({
+      where: { id, deleted_at: null },
+      transaction: t,
+    });
+    if (!adjustment) throw new Error("Stock adjustment not found");
+    if (adjustment.status !== ADJUSTMENT_STATUS.DRAFT) {
+      throw new Error(`Stock adjustment cannot be edited when status is ${adjustment.status}`);
+    }
+
+    const { items, ...adjustmentData } = payload;
+
+    await adjustment.update(
+      {
+        adjustment_date: adjustmentData.adjustment_date,
+        warehouse_id: adjustmentData.warehouse_id,
+        adjustment_type: adjustmentData.adjustment_type,
+        remarks: adjustmentData.remarks || null,
+      },
+      { transaction: t }
+    );
+
+    await StockAdjustmentItem.destroy({
+      where: { stock_adjustment_id: id },
+      transaction: t,
+    });
+
+    if (items && items.length > 0) {
+      const getDirection = (type) => {
+        if (type === ADJUSTMENT_TYPE.FOUND) return MOVEMENT_TYPE.IN;
+        if (type === ADJUSTMENT_TYPE.DAMAGE || type === ADJUSTMENT_TYPE.LOSS) return MOVEMENT_TYPE.OUT;
+        return null;
+      };
+      const defaultDirection = getDirection(adjustmentData.adjustment_type);
+
+      for (const item of items) {
+        const product = await Product.findByPk(item.product_id, { transaction: t });
+        if (!product) throw new Error(`Product with id ${item.product_id} not found`);
+
+        const direction = item.adjustment_direction || defaultDirection;
+        if (!direction) throw new Error("Adjustment direction must be specified for AUDIT type");
+
+        if (product.serial_required && item.serials) {
+          if (item.serials.length !== item.adjustment_quantity) {
+            throw new Error(`Serial count (${item.serials.length}) must match adjustment quantity (${item.adjustment_quantity})`);
+          }
+        }
+
+        const adjustmentItem = await StockAdjustmentItem.create(
+          {
+            stock_adjustment_id: id,
+            product_id: item.product_id,
+            tracking_type: product.tracking_type === "SERIAL" ? "SERIAL" : "NONE",
+            serial_required: product.serial_required,
+            adjustment_quantity: item.adjustment_quantity,
+            adjustment_direction: direction,
+            reason: item.reason || null,
+          },
+          { transaction: t }
+        );
+
+        if (item.serials && item.serials.length > 0) {
+          for (const serial of item.serials) {
+            let stockSerialId = typeof serial === "object" && serial?.stock_serial_id != null ? serial.stock_serial_id : null;
+            if (!stockSerialId && (typeof serial === "string" || typeof serial === "number")) {
+              const trimmed = String(serial).trim();
+              if (trimmed) {
+                const stockSerial = await StockSerial.findOne({
+                  where: {
+                    serial_number: trimmed,
+                    product_id: item.product_id,
+                    warehouse_id: adjustmentData.warehouse_id,
+                    status: SERIAL_STATUS.AVAILABLE,
+                  },
+                  attributes: ["id"],
+                  transaction: t,
+                });
+                if (!stockSerial) {
+                  throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
+                }
+                stockSerialId = stockSerial.id;
+              }
+            }
+            if (stockSerialId) {
+              await StockAdjustmentSerial.create(
+                {
+                  stock_adjustment_item_id: adjustmentItem.id,
+                  stock_serial_id: stockSerialId,
+                },
+                { transaction: t }
+              );
+            }
+          }
+        }
+      }
+    }
+
+    if (committedHere) await t.commit();
+    const updated = await StockAdjustment.findByPk(id, {
+      include: [
+        { model: models.CompanyWarehouse, as: "warehouse", attributes: ["id", "name"] },
+        {
+          model: StockAdjustmentItem,
+          as: "items",
+          include: [{ model: Product, as: "product", attributes: ["id", "product_name"] }],
+        },
+      ],
+    });
+    return updated ? updated.toJSON() : null;
+  } catch (err) {
+    if (committedHere) await t.rollback();
     throw err;
   }
 };
@@ -437,6 +583,7 @@ module.exports = {
   listStockAdjustments,
   getStockAdjustmentById,
   createStockAdjustment,
+  updateStockAdjustment,
   approveStockAdjustment,
   postStockAdjustment,
 };
