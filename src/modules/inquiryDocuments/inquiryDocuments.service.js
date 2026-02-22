@@ -5,8 +5,8 @@ const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
-const createInquiryDocument = async (payload, transaction = null) => {
-  const models = getTenantModels();
+const createInquiryDocument = async (payload, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { InquiryDocument, Inquiry, OrderDocumentType } = models;
   // Validation: Check required fields
   if (!payload.inquiry_id) {
@@ -87,8 +87,8 @@ const createInquiryDocument = async (payload, transaction = null) => {
   return createdDocument.toJSON();
 };
 
-const updateInquiryDocument = async (id, payload, transaction = null) => {
-  const models = getTenantModels();
+const updateInquiryDocument = async (id, payload, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { InquiryDocument, Inquiry } = models;
   const document = await InquiryDocument.findOne({
     where: { id, deleted_at: null },
@@ -122,8 +122,8 @@ const updateInquiryDocument = async (id, payload, transaction = null) => {
   return updatedDocument.toJSON();
 };
 
-const deleteInquiryDocument = async (id, transaction = null) => {
-  const models = getTenantModels();
+const deleteInquiryDocument = async (id, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { InquiryDocument } = models;
   const document = await InquiryDocument.findOne({
     where: { id, deleted_at: null },
@@ -138,8 +138,8 @@ const deleteInquiryDocument = async (id, transaction = null) => {
   return true;
 };
 
-const getInquiryDocumentById = async (id, transaction = null) => {
-  const models = getTenantModels();
+const getInquiryDocumentById = async (id, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { InquiryDocument, Inquiry } = models;
   const document = await InquiryDocument.findOne({
     where: { id, deleted_at: null },
@@ -161,8 +161,8 @@ const getInquiryDocumentById = async (id, transaction = null) => {
   return document.toJSON();
 };
 
-const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null }, transaction = null) => {
-  const models = getTenantModels();
+const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null }, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { InquiryDocument, Inquiry } = models;
   const where = { deleted_at: null };
 

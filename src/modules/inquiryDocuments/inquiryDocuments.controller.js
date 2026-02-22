@@ -25,7 +25,7 @@ const createInquiryDocument = asyncHandler(async (req, res) => {
     }
   }
 
-  const created = await inquiryDocumentsService.createInquiryDocument(payload, req.transaction);
+  const created = await inquiryDocumentsService.createInquiryDocument(payload, req.transaction, req);
   return responseHandler.sendSuccess(res, created, "Document uploaded successfully", 201);
 });
 
@@ -34,7 +34,7 @@ const updateInquiryDocument = asyncHandler(async (req, res) => {
   const updates = { ...req.body };
 
   if (req.file) {
-    const existing = await inquiryDocumentsService.getInquiryDocumentById(id);
+    const existing = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction, req);
     if (existing && existing.document_path && !existing.document_path.startsWith("/")) {
       try {
         await bucketService.deleteFile(existing.document_path);
@@ -54,14 +54,14 @@ const updateInquiryDocument = asyncHandler(async (req, res) => {
     }
   }
 
-  const updated = await inquiryDocumentsService.updateInquiryDocument(id, updates, req.transaction);
+  const updated = await inquiryDocumentsService.updateInquiryDocument(id, updates, req.transaction, req);
   return responseHandler.sendSuccess(res, updated, "Document updated successfully", 200);
 });
 
 const deleteInquiryDocument = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const document = await inquiryDocumentsService.getInquiryDocumentById(id);
+  const document = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction, req);
   if (document && document.document_path && !document.document_path.startsWith("/")) {
     try {
       await bucketService.deleteFile(document.document_path);
@@ -71,19 +71,19 @@ const deleteInquiryDocument = asyncHandler(async (req, res) => {
     }
   }
 
-  await inquiryDocumentsService.deleteInquiryDocument(id, req.transaction);
+  await inquiryDocumentsService.deleteInquiryDocument(id, req.transaction, req);
   return responseHandler.sendSuccess(res, null, "Document deleted successfully", 200);
 });
 
 const getInquiryDocumentById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const document = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction);
+  const document = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction, req);
   return responseHandler.sendSuccess(res, document, "Document fetched successfully", 200);
 });
 
 const getDocumentUrl = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const document = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction);
+  const document = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction, req);
   if (!document) {
     return responseHandler.sendError(res, "Document not found", 404);
   }
@@ -116,7 +116,8 @@ const listInquiryDocuments = asyncHandler(async (req, res) => {
       limit: limit ? parseInt(limit, 10) : 20,
       q: q || null,
     },
-    req.transaction
+    req.transaction,
+    req
   );
   return responseHandler.sendSuccess(res, result, "Documents fetched successfully", 200);
 });

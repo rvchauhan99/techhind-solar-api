@@ -4,6 +4,7 @@ const { Sequelize } = require("sequelize");
 require("dotenv").config();
 
 const { getDialectOptions } = require("./dbSsl.js");
+const { isAuditLogsEnabled } = require("./auditLogs.js");
 
 let registrySequelize = null;
 /** @type {boolean|null} null = not yet checked, true = healthy, false = configured but unreachable */
@@ -31,7 +32,7 @@ function getRegistrySequelize() {
     })();
   registrySequelize = new Sequelize(process.env.TENANT_REGISTRY_DB_URL, {
     dialect: "postgres",
-    logging: isProduction ? false : (sql) => console.log(`[DB:registry/${registryDbName}]`, sql),
+    logging: isAuditLogsEnabled() ? (sql) => console.log(`[DB:registry/${registryDbName}]`, sql) : false,
     dialectOptions,
     pool: {
       max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
@@ -76,7 +77,7 @@ async function initializeRegistryConnection() {
       })();
     const sequelize = new Sequelize(process.env.TENANT_REGISTRY_DB_URL, {
       dialect: "postgres",
-      logging: isProduction ? false : (sql) => console.log(`[DB:registry/${registryDbName}]`, sql),
+      logging: isAuditLogsEnabled() ? (sql) => console.log(`[DB:registry/${registryDbName}]`, sql) : false,
       dialectOptions,
       pool: {
         max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
