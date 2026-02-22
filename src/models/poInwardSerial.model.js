@@ -16,6 +16,11 @@ const POInwardSerial = sequelize.define(
       allowNull: false,
       references: { model: "po_inward_items", key: "id" },
     },
+    product_type_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "product_types", key: "id" },
+    },
     serial_number: {
       type: DataTypes.STRING(100),
       allowNull: true,

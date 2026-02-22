@@ -270,6 +270,7 @@ const listInquiries = async ({
       next_reminder_date: row.next_reminder_date,
       created_at: row.created_at,
       branch_name: row.branch?.name || null,
+      branch_id: row.branch_id ?? row.branch?.id ?? null,
       email_id: row.customer?.email_id || null,
       state_id: row.customer?.state_id || null,
       city_id: row.customer?.city_id || null,
