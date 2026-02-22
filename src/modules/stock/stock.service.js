@@ -421,6 +421,38 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
   return { valid: false, message: `Serial '${trimmed}' is not available for ${productName} at this warehouse` };
 };
 
+/**
+ * Validate that a serial does NOT already exist for this product + warehouse (any status).
+ * Used for IN/Found adjustments - new serials must not already exist.
+ * Returns { exists: false } or { exists: true, message: string }.
+ */
+const validateSerialNotExists = async ({ serial_number, product_id, warehouse_id } = {}) => {
+  const trimmed = (serial_number != null && String(serial_number).trim()) ? String(serial_number).trim() : null;
+  if (!trimmed || product_id == null || warehouse_id == null) {
+    return { exists: true, message: "Serial number, product_id and warehouse_id are required" };
+  }
+  const models = getTenantModels();
+  const { StockSerial, Product } = models;
+  const row = await StockSerial.findOne({
+    where: {
+      serial_number: trimmed,
+      product_id: parseInt(product_id, 10),
+      warehouse_id: parseInt(warehouse_id, 10),
+    },
+    attributes: ["id"],
+  });
+
+  if (row) {
+    const product = await Product.findByPk(parseInt(product_id, 10), {
+      attributes: ["id", "product_name"],
+    });
+    const productName = product?.product_name || `Product #${product_id}`;
+    return { exists: true, message: `Serial '${trimmed}' already exists for ${productName} at this warehouse` };
+  }
+
+  return { exists: false };
+};
+
 module.exports = {
   listStocks,
   exportStocks,
@@ -428,6 +460,7 @@ module.exports = {
   getStocksByWarehouse,
   getAvailableSerials,
   validateSerialAvailable,
+  validateSerialNotExists,
   createStockFromPOInward,
   updateStockQuantities,
   getOrCreateStock,
