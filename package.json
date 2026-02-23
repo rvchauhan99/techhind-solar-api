@@ -22,7 +22,9 @@
     "assign-inventory-to-superadmin": "node scripts/assign-inventory-to-superadmin-once.js",
     "test:db-permissions": "node scripts/test-db-permissions.js",
     "test:smoke-rbac": "node scripts/smoke-rbac.js",
-    "order-import": "node scripts/order-import/import-orders.js"
+    "order-import": "node scripts/order-import/import-orders.js",
+    "cutover:users": "node scripts/cutover/load-user-master.js",
+    "cutover:inventory": "node scripts/cutover/load-inventory.js"
   },
   "dependencies": {
     "aws-sdk": "^2.1691.0",
