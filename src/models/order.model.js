@@ -365,6 +365,12 @@ const Order = sequelize.define(
             type: DataTypes.DATE,
             allowNull: true,
         },
+        planner_activity_log: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            defaultValue: [],
+            comment: "Append-only log of planner/BOM actions",
+        },
 
         // Stage 5: Assign Fabricator & Installer
         assign_fabricator_installer_completed_at: {
