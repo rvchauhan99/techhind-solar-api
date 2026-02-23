@@ -1,11 +1,11 @@
 const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
-const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
+const { RESPONSE_STATUS_CODES, USER_STATUS } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const getCompanyProfile = async (transaction = null) => {
   const models = getTenantModels();
-  const { Company, CompanyBankAccount } = models;
+  const { Company, CompanyBankAccount, User } = models;
   // Get the first company (assuming single company setup)
   // If multiple companies, you might want to add company_id parameter
   const company = await Company.findOne({
@@ -51,7 +51,15 @@ const getCompanyProfile = async (transaction = null) => {
     };
   }
 
-  return company.toJSON();
+  // Actual active user count (status = active, not soft-deleted)
+  const activeUserCount = await User.count({
+    where: { status: USER_STATUS.ACTIVE },
+    transaction,
+  });
+
+  const profile = company.toJSON();
+  profile.user_limit_used = activeUserCount;
+  return profile;
 };
 
 const updateCompanyProfile = async (payload, transaction = null) => {

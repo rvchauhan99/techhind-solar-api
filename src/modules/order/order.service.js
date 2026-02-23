@@ -22,6 +22,106 @@ const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     return out;
 };
 
+/**
+ * Get product name from a BOM line (nested product_snapshot or flat).
+ * @param {object} line - BOM line
+ * @returns {string}
+ */
+const getBomLineProductName = (line) => {
+    const product = getBomLineProduct(line);
+    return product?.product_name ?? line?.product_name ?? "—";
+};
+
+/**
+ * Get planned/quantity from a BOM line.
+ * @param {object} line - BOM line
+ * @returns {number}
+ */
+const getBomLineQty = (line) => {
+    const n = line?.planned_qty ?? line?.quantity;
+    return n != null && !Number.isNaN(Number(n)) ? Number(n) : 0;
+};
+
+/**
+ * Compute planner activity entries from old vs new BOM snapshot.
+ * @param {Array} oldBom - previous bom_snapshot (array or null)
+ * @param {Array} newBom - normalized new bom_snapshot
+ * @param {{ id: number, name?: string }} user - current user
+ * @returns {Array<{ action, at, user_id, user_name?, product_id?, product_name?, old_qty?, new_qty? }>}
+ */
+const computeBomDiffActivity = (oldBom, newBom, user) => {
+    const entries = [];
+    const at = new Date().toISOString();
+    const userId = user?.id ?? null;
+    const userName = user?.name ?? null;
+
+    const oldArr = Array.isArray(oldBom) ? oldBom : [];
+    const newArr = Array.isArray(newBom) ? newBom : [];
+
+    const oldByProductId = new Map();
+    oldArr.forEach((line) => {
+        const pid = line?.product_id;
+        if (pid != null) oldByProductId.set(pid, line);
+    });
+    const newByProductId = new Map();
+    newArr.forEach((line) => {
+        const pid = line?.product_id;
+        if (pid != null) newByProductId.set(pid, line);
+    });
+
+    // Added: in new, not in old
+    newByProductId.forEach((newLine, productId) => {
+        if (!oldByProductId.has(productId)) {
+            entries.push({
+                action: "bom_line_added",
+                at,
+                user_id: userId,
+                user_name: userName,
+                product_id: productId,
+                product_name: getBomLineProductName(newLine),
+                new_qty: getBomLineQty(newLine),
+            });
+        }
+    });
+
+    // Removed: in old, not in new
+    oldByProductId.forEach((oldLine, productId) => {
+        if (!newByProductId.has(productId)) {
+            entries.push({
+                action: "bom_line_removed",
+                at,
+                user_id: userId,
+                user_name: userName,
+                product_id: productId,
+                product_name: getBomLineProductName(oldLine),
+                old_qty: getBomLineQty(oldLine),
+            });
+        }
+    });
+
+    // Qty changed: same product_id, different planned_qty/quantity
+    newByProductId.forEach((newLine, productId) => {
+        const oldLine = oldByProductId.get(productId);
+        if (!oldLine) return;
+        const oldQty = getBomLineQty(oldLine);
+        const newQty = getBomLineQty(newLine);
+        if (oldQty !== newQty) {
+            entries.push({
+                action: "bom_qty_changed",
+                at,
+                user_id: userId,
+                user_name: userName,
+                product_id: productId,
+                product_name: getBomLineProductName(newLine),
+                old_qty: oldQty,
+                new_qty: newQty,
+            });
+        }
+    });
+
+    return entries;
+};
+
 /** Normalize order bom_snapshot for API: ensure shipped_qty, returned_qty, pending_qty, planned_qty, delivered_qty on each line (backward compat). */
 const normalizeOrderBomSnapshot = (bom_snapshot) => {
     if (bom_snapshot == null || !Array.isArray(bom_snapshot)) return bom_snapshot;
@@ -486,6 +586,7 @@ const getOrderById = async ({ id } = {}) => {
         planned_has_earthing_kit: row.planned_has_earthing_kit,
         planned_has_cables: row.planned_has_cables,
         planner_completed_at: row.planner_completed_at,
+        planner_activity_log: Array.isArray(row.planner_activity_log) ? row.planner_activity_log : [],
 
         // Stage 5: Assign Fabricator & Installer / Stage 6: Fabrication
         assign_fabricator_installer_completed_at: row.assign_fabricator_installer_completed_at,
@@ -758,7 +859,7 @@ const createOrder = async ({ payload, transaction } = {}) => {
     }
 };
 
-const updateOrder = async ({ id, payload, transaction } = {}) => {
+const updateOrder = async ({ id, payload, transaction, user } = {}) => {
     if (!id) return null;
     const models = getTenantModels();
     const {
@@ -776,6 +877,18 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
         });
 
         if (!order) throw new Error("Order not found");
+
+        // Planner activity log: when bom_snapshot is updated, compute diff and append entries
+        let plannerActivityLogUpdate = undefined;
+        if (payload.bom_snapshot != null && Array.isArray(payload.bom_snapshot)) {
+            const oldBom = order.bom_snapshot ?? [];
+            const newBom = normalizeOrderBomSnapshot(payload.bom_snapshot);
+            const activityEntries = computeBomDiffActivity(oldBom, newBom, user || {});
+            if (activityEntries.length > 0) {
+                const existingLog = Array.isArray(order.planner_activity_log) ? order.planner_activity_log : [];
+                plannerActivityLogUpdate = [...existingLog, ...activityEntries];
+            }
+        }
 
         // Auto-transition order to completed when final stage is completed.
         // Rule: if Subsidy Disbursed stage is completed AND subsidy_disbursed is true, close the order.
@@ -894,6 +1007,7 @@ const updateOrder = async ({ id, payload, transaction } = {}) => {
                 planned_has_earthing_kit: payload.planned_has_earthing_kit ?? order.planned_has_earthing_kit,
                 planned_has_cables: payload.planned_has_cables ?? order.planned_has_cables,
                 planner_completed_at: payload.planner_completed_at ?? order.planner_completed_at,
+                ...(plannerActivityLogUpdate !== undefined && { planner_activity_log: plannerActivityLogUpdate }),
 
                 // Stage 5: Assign Fabricator & Installer / Stage 6: Fabrication
                 assign_fabricator_installer_completed_at: payload.assign_fabricator_installer_completed_at ?? order.assign_fabricator_installer_completed_at,

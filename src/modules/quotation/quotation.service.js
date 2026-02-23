@@ -967,7 +967,7 @@ const getQuotationCountByInquiry = async ({ inquiry_id }) => {
 
 const getAllProducts = async () => {
     const models = getTenantModels();
-    const { Product, ProductType, ProductMake } = models;
+    const { Product, ProductType, ProductMake, MeasurementUnit } = models;
 
     const products = await Product.findAll({
         where: { deleted_at: null },
@@ -982,6 +982,12 @@ const getAllProducts = async () => {
                 as: 'productMake',
                 attributes: ['id', 'name'],
                 required: false
+            },
+            {
+                model: MeasurementUnit,
+                as: 'measurementUnit',
+                attributes: ['id', 'unit'],
+                required: false
             }
         ]
     });
@@ -995,7 +1001,8 @@ const getAllProducts = async () => {
             : makeId != null
                 ? { id: makeId, name: (p.productMake && (p.productMake.name ?? p.productMake.get?.('name'))) ?? null }
                 : null;
-        return { ...row, product_make_id: makeId, productMake };
+        const measurementUnitName = row.measurementUnit?.unit ?? null;
+        return { ...row, product_make_id: makeId, productMake, measurement_unit_name: measurementUnitName };
     });
     list.sort((a, b) => {
         const orderA = a.productType?.display_order != null ? Number(a.productType.display_order) : Number.MAX_SAFE_INTEGER;

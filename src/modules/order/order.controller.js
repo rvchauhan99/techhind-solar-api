@@ -297,6 +297,7 @@ const update = asyncHandler(async (req, res) => {
         id,
         payload,
         transaction: req.transaction,
+        user: req.user,
     });
     return responseHandler.sendSuccess(res, updated, "Order updated", 200);
 });
