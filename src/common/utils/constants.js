@@ -119,6 +119,8 @@ const TRANSACTION_TYPE = {
   B2B_SHIPMENT_OUT: "B2B_SHIPMENT_OUT",
   // B2B shipment cancel reversal
   B2B_SHIPMENT_CANCEL_IN: "B2B_SHIPMENT_CANCEL_IN",
+  // Cutover go-live: opening stock upload
+  CUTOVER_OPENING: "CUTOVER_OPENING",
 };
 
 const MOVEMENT_TYPE = {

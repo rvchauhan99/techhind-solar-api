@@ -1,0 +1,3 @@
+name,email,mobile_number,role_name,manager_email,address,status,blood_group,brith_date
+John Doe,john@example.com,9876543210,Sales Manager,,123 Main St,active,O+,1990-05-15
+Jane Smith,jane@example.com,9988776655,Sales Executive,john@example.com,456 Park Ave,active,A+,1992-08-20
