@@ -265,6 +265,22 @@ const getUserprofileByIdOnSequelize = async (tenantSequelize, id) => {
   };
 };
 
+/**
+ * Fetch minimal user by id from tenant DB for token creation (e.g. after verify-2fa).
+ * @param {import("sequelize").Sequelize} tenantSequelize
+ * @param {number} id - User ID
+ * @returns {Promise<{ id, email, role_id, first_login }>}
+ */
+const getUserByIdOnSequelize = async (tenantSequelize, id) => {
+  const rows = await tenantSequelize.query(
+    `SELECT id, email, role_id, first_login FROM users WHERE id = :id AND deleted_at IS NULL LIMIT 1`,
+    { replacements: { id }, type: tenantSequelize.QueryTypes.SELECT }
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) throw new AppError("User not found", 404);
+  return row;
+};
+
 const createUserToken = async (
   user_id,
   access_token,
@@ -727,6 +743,7 @@ module.exports = {
   findValidRefreshToken,
   getUserprofileById,
   getUserprofileByIdOnSequelize,
+  getUserByIdOnSequelize,
   deleteUserToken,
   deleteUserTokenOnSequelize,
   changePassword,
