@@ -706,9 +706,9 @@ const resetPassword = async (
     // Hash new password
     const hashed = await bcrypt.hash(newPassword, 10);
 
-    // Update password
+    // Update password and disable 2FA (user did not use current password)
     await user.update(
-      { password: hashed },
+      { password: hashed, two_factor_enabled: false, two_factor_secret: null },
       { transaction: t }
     );
 

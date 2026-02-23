@@ -14,6 +14,7 @@
 const path = require("path");
 const fs = require("fs");
 const { parse } = require("csv-parse/sync");
+const ExcelJS = require("exceljs");
 
 require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 
@@ -24,6 +25,7 @@ const {
     Order,
     Customer,
     User,
+    Product,
     InquirySource,
     ProjectScheme,
     OrderType,
@@ -109,6 +111,7 @@ async function resolveReferences() {
         divisions,
         subDivisions,
         users,
+        products,
     ] = await Promise.all([
         InquirySource.findAll({ where: { deleted_at: null }, attributes: ["id", "source_name"] }),
         ProjectScheme.findAll({ where: { deleted_at: null }, attributes: ["id", "name"] }),
@@ -121,6 +124,7 @@ async function resolveReferences() {
         Division.findAll({ where: { deleted_at: null }, attributes: ["id", "name"] }),
         SubDivision.findAll({ where: { deleted_at: null }, attributes: ["id", "name", "division_id"] }),
         User.findAll({ where: { deleted_at: null }, attributes: ["id", "email"] }),
+        Product.findAll({ where: { deleted_at: null }, attributes: ["id", "product_name"] }),
     ]);
 
     const byName = (arr, key) => {
@@ -153,7 +157,8 @@ async function resolveReferences() {
         division: byName(divisions, "name"),
         subDivision: new Map(), // needs division; resolve per row
         userByEmail: byEmail(),
-        _raw: { inquirySources, projectSchemes, orderTypes, discoms, branches, warehouses, states, cities, divisions, subDivisions, users },
+        productByName: byName(products, "product_name"),
+        _raw: { inquirySources, projectSchemes, orderTypes, discoms, branches, warehouses, states, cities, divisions, subDivisions, users, products },
     };
 }
 
@@ -206,6 +211,11 @@ function resolveRowReferences(row, refs) {
     const plannedWarehouseId = getOptional(refs.warehouse, row.planned_warehouse_name);
     const fabricatorInstallerId = getOptional(refs.userByEmail, row.fabricator_installer_email);
 
+    const solarPanelId = getOptional(refs.productByName, row.solar_panel);
+    if (trim(row.solar_panel) && solarPanelId == null) errs.push(`solar_panel not found: "${trim(row.solar_panel)}"`);
+    const inverterId = getOptional(refs.productByName, row.inverter);
+    if (trim(row.inverter) && inverterId == null) errs.push(`inverter not found: "${trim(row.inverter)}"`);
+
     return {
         branchId,
         projectSchemeId,
@@ -221,6 +231,8 @@ function resolveRowReferences(row, refs) {
         channelPartnerId,
         plannedWarehouseId,
         fabricatorInstallerId,
+        solarPanelId,
+        inverterId,
         errors: errs,
     };
 }
@@ -353,10 +365,6 @@ async function processRow(row, status, refs, dryRun, errorsOut) {
             where: { order_number: orderNumber, deleted_at: null },
             transaction: t,
         });
-        if (existingOrder) {
-            await t.commit();
-            return { ok: true, skipped: true, reason: "order_number already exists" };
-        }
 
         const cust = await findOrCreateCustomer(row, ids, t);
         if (cust.error) {
@@ -365,9 +373,13 @@ async function processRow(row, status, refs, dryRun, errorsOut) {
             return { ok: false, skipped: false };
         }
 
-        const createPayload = {
-            order_number: orderNumber,
-            status,
+        const currentStageKey = trim(row.current_stage_key) || "estimate_generated";
+        const isRowClosed =
+            currentStageKey.toLowerCase() === "subsidy_disbursed" || currentStageKey.toLowerCase() === "completed";
+        const rowStatus = isRowClosed ? "completed" : status;
+
+        const basePayload = {
+            status: rowStatus,
             order_date: parseDate(row.order_date) || new Date().toISOString().slice(0, 10),
             inquiry_source_id: ids.inquirySourceId,
             inquiry_by: ids.inquiryById,
@@ -386,22 +398,32 @@ async function processRow(row, status, refs, dryRun, errorsOut) {
             sub_division_id: ids.subDivisionId || null,
             circle: trim(row.circle) || null,
             reference_from: trim(row.reference_from) || null,
+            solar_panel_id: ids.solarPanelId ?? null,
+            inverter_id: ids.inverterId ?? null,
         };
 
-        const created = await orderService.createOrder({ payload: createPayload, transaction: t });
-        const orderId = created.id;
-
-        const currentStageKey = trim(row.current_stage_key) || "estimate_generated";
-        const stagePayload = buildStagePayload(row, currentStageKey, status);
+        const stagePayload = buildStagePayload(row, currentStageKey, rowStatus);
         stagePayload.planned_warehouse_id = ids.plannedWarehouseId || null;
         stagePayload.fabricator_installer_id = ids.fabricatorInstallerId || null;
         stagePayload.fabricator_id = ids.fabricatorInstallerId || null;
         stagePayload.installer_id = ids.fabricatorInstallerId || null;
 
+        if (existingOrder) {
+            const updatePayload = { ...basePayload, ...stagePayload };
+            if (row.order_remarks) updatePayload.order_remarks = trim(row.order_remarks);
+            await orderService.updateOrder({ id: existingOrder.id, payload: updatePayload, transaction: t });
+            await t.commit();
+            return { ok: true, skipped: false, updated: true, orderId: existingOrder.id, order_number: orderNumber };
+        }
+
+        const createPayload = { order_number: orderNumber, ...basePayload };
+        const created = await orderService.createOrder({ payload: createPayload, transaction: t });
+        const orderId = created.id;
+
         await orderService.updateOrder({ id: orderId, payload: stagePayload, transaction: t });
 
         await t.commit();
-        return { ok: true, skipped: false, orderId };
+        return { ok: true, skipped: false, orderId, order_number: orderNumber };
     } catch (err) {
         await t.rollback();
         errorsOut.push({
@@ -413,16 +435,43 @@ async function processRow(row, status, refs, dryRun, errorsOut) {
     }
 }
 
-function writeErrorsCsv(errors, outputPath) {
-    if (errors.length === 0) return;
-    const header = "row,order_number,error\n";
-    const rows = errors.map((e) => {
-        const row = String(e.row);
-        const on = String(e.order_number || "").replace(/"/g, '""');
-        const err = String(e.error || "").replace(/"/g, '""');
-        return `${row},"${on}","${err}"`;
+function writeResultExcel(errors, createdRows, updatedRows, outputPath) {
+    const workbook = new ExcelJS.Workbook();
+
+    const errorsSheet = workbook.addWorksheet("errors", { headerRow: true });
+    errorsSheet.columns = [
+        { header: "row", key: "row", width: 8 },
+        { header: "order_number", key: "order_number", width: 22 },
+        { header: "error", key: "error", width: 50 },
+    ];
+    errorsSheet.getRow(1).font = { bold: true };
+    (errors || []).forEach((e) => {
+        errorsSheet.addRow({ row: e.row, order_number: e.order_number || "", error: e.error || "" });
     });
-    fs.writeFileSync(outputPath, header + rows.join("\n"), "utf8");
+
+    const createdSheet = workbook.addWorksheet("created", { headerRow: true });
+    createdSheet.columns = [
+        { header: "row", key: "row", width: 8 },
+        { header: "order_number", key: "order_number", width: 22 },
+        { header: "order_id", key: "order_id", width: 12 },
+    ];
+    createdSheet.getRow(1).font = { bold: true };
+    (createdRows || []).forEach((r) => {
+        createdSheet.addRow({ row: r.row, order_number: r.order_number || "", order_id: r.order_id ?? "" });
+    });
+
+    const updatedSheet = workbook.addWorksheet("updated", { headerRow: true });
+    updatedSheet.columns = [
+        { header: "row", key: "row", width: 8 },
+        { header: "order_number", key: "order_number", width: 22 },
+        { header: "order_id", key: "order_id", width: 12 },
+    ];
+    updatedSheet.getRow(1).font = { bold: true };
+    (updatedRows || []).forEach((r) => {
+        updatedSheet.addRow({ row: r.row, order_number: r.order_number || "", order_id: r.order_id ?? "" });
+    });
+
+    return workbook.xlsx.writeFile(outputPath);
 }
 
 function inferStatusFromFilename(filePath) {
@@ -453,8 +502,11 @@ async function main() {
     if (dryRun) console.log("DRY RUN – no changes will be written.\n");
 
     const errors = [];
+    const createdRows = [];
+    const updatedRows = [];
     let total = 0;
     let created = 0;
+    let updated = 0;
     let skipped = 0;
     let failed = 0;
 
@@ -487,23 +539,41 @@ async function main() {
 
         for (let i = 0; i < rows.length; i++) {
             rows[i]._rowIndex = i;
+            const rowNum = i + 2;
             total++;
             const result = await processRow(rows[i], status, refs, dryRun, errors);
-            if (result.skipped) skipped++;
-            else if (result.ok) created++;
-            else failed++;
+            if (result.updated) {
+                updated++;
+                updatedRows.push({
+                    row: rowNum,
+                    order_number: result.order_number || "",
+                    order_id: result.orderId ?? "",
+                });
+            } else if (result.skipped) {
+                skipped++;
+            } else if (result.ok) {
+                created++;
+                createdRows.push({
+                    row: rowNum,
+                    order_number: result.order_number || "",
+                    order_id: result.orderId ?? "",
+                });
+            } else {
+                failed++;
+            }
         }
     }
 
     console.log("\n--- Summary ---");
     console.log("Total rows:", total);
     console.log("Created:", created);
-    console.log("Skipped (existing):", skipped);
+    console.log("Updated:", updated);
+    console.log("Skipped:", skipped);
     console.log("Failed:", failed);
 
-    const errorsPath = path.join(process.cwd(), "import-errors.csv");
-    writeErrorsCsv(errors, path.resolve(errorsPath));
-    if (errors.length) console.log("Errors written to:", path.resolve(errorsPath));
+    const resultPath = path.resolve(process.cwd(), "import-result.xlsx");
+    await writeResultExcel(errors, createdRows, updatedRows, resultPath);
+    console.log("Result file (errors, created, updated):", resultPath);
 
     await db.sequelize.close();
     process.exit(failed > 0 ? 1 : 0);
