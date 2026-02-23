@@ -183,6 +183,24 @@ const remove = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, null, "Product deactivated", 200);
 });
 
+const downloadSampleCsv = asyncHandler(async (req, res) => {
+  const buffer = productService.getSampleCsvBuffer();
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", 'attachment; filename="product-import-sample.csv"');
+  return res.send(buffer);
+});
+
+const importProducts = asyncHandler(async (req, res) => {
+  if (!req.file || !req.file.buffer) {
+    return responseHandler.sendError(res, "No file uploaded. Please upload a CSV file.", 400);
+  }
+  const result = await productService.importProductsFromCsv({
+    fileBuffer: req.file.buffer,
+    req,
+  });
+  return responseHandler.sendSuccess(res, result, "Product import completed", 200);
+});
+
 module.exports = {
   list,
   exportList,
@@ -190,5 +208,7 @@ module.exports = {
   create,
   update,
   remove,
+  downloadSampleCsv,
+  importProducts,
 };
 
