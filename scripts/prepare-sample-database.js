@@ -1,26 +1,43 @@
 #!/usr/bin/env node
 /**
  * Prepares the connected default database as a sample DB for new customers:
- * - Keeps: master data (from masters.json), roles, modules, role_modules, one SuperAdmin user
+ * - Keeps: master data (from masters.json), roles, modules, role_modules, one SuperAdmin user — unless --delete-masters
  * - Removes: all operational/transactional/history data, products, bill of materials, other users
+ * - If --delete-masters: also deletes all master data from tables listed in masters.json
  *
  * Usage: node scripts/prepare-sample-database.js --confirm
+ *        node scripts/prepare-sample-database.js --confirm --delete-masters
  *    or: CONFIRM_SAMPLE_RESET=1 node scripts/prepare-sample-database.js
+ *        DELETE_MASTERS=1 node scripts/prepare-sample-database.js --confirm
  */
 
 /* eslint-disable no-console */
 require("dotenv").config();
 
+const path = require("path");
 const db = require("../src/models/index.js");
 
 const CONFIRM_FLAG = process.argv.includes("--confirm");
 const CONFIRM_ENV = process.env.CONFIRM_SAMPLE_RESET === "1" || process.env.CONFIRM_SAMPLE_RESET === "true";
+const DELETE_MASTERS_FLAG = process.argv.includes("--delete-masters");
+const DELETE_MASTERS_ENV = process.env.DELETE_MASTERS === "1" || process.env.DELETE_MASTERS === "true";
+const DELETE_MASTERS = DELETE_MASTERS_FLAG || DELETE_MASTERS_ENV;
 
 if (!CONFIRM_FLAG && !CONFIRM_ENV) {
   console.error("This script will wipe operational data from the database.");
   console.error("Run with --confirm or set CONFIRM_SAMPLE_RESET=1 to proceed.");
   process.exit(1);
 }
+
+/** model_name (e.g. "state.model") -> PascalCase model key (e.g. "State") */
+function modelNameToKey(modelName) {
+  if (!modelName || typeof modelName !== "string") return null;
+  const base = modelName.replace(/\.model$/i, "").trim();
+  return base.split("_").map((s) => s.charAt(0).toUpperCase() + (s.slice(1) || "").toLowerCase()).join("");
+}
+
+/** Master tables that reference other master tables — delete these first (child before parent). */
+const MASTER_TABLES_FIRST = ["cities", "sub_divisions", "product_makes", "service_types", "discoms"];
 
 /** Tables to clear, in FK-safe order (children before parents). */
 const TABLES_TO_CLEAR = [
@@ -75,9 +92,39 @@ const TABLES_TO_CLEAR = [
   "suppliers",
 ];
 
+/**
+ * Returns master table names from masters.json in FK-safe order (children first).
+ * Tables not found in db are skipped.
+ */
+function getMasterTablesToClear() {
+  const mastersPath = path.join(__dirname, "..", "src", "common", "utils", "masters.json");
+  let masters;
+  try {
+    masters = require(mastersPath);
+  } catch (err) {
+    console.warn("  Could not load masters.json:", err.message);
+    return [];
+  }
+  if (!Array.isArray(masters)) return [];
+
+  const tableToName = {};
+  for (const m of masters) {
+    const key = modelNameToKey(m.model_name);
+    if (!key || !db[key]) continue;
+    const tableName = db[key].tableName || db[key].options?.tableName;
+    if (tableName) tableToName[tableName] = m.name || tableName;
+  }
+
+  const firstSet = new Set(MASTER_TABLES_FIRST);
+  const rest = Object.keys(tableToName).filter((t) => !firstSet.has(t));
+  return [...MASTER_TABLES_FIRST.filter((t) => tableToName[t] !== undefined), ...rest];
+}
+
 async function run() {
   console.log("Preparing sample database...");
-  console.log("DB: %s\n", process.env.DB_NAME || "(from config)");
+  console.log("DB: %s", process.env.DB_NAME || "(from config)");
+  if (DELETE_MASTERS) console.log("Mode: will also DELETE all master data (--delete-masters)\n");
+  else console.log("Mode: keeping master data\n");
 
   try {
     await db.sequelize.authenticate();
@@ -126,6 +173,23 @@ async function run() {
           console.log("  Skipped (no table): %s", tableName);
         } else {
           throw err;
+        }
+      }
+    }
+
+    // 2b. If --delete-masters, clear all master tables from masters.json (child tables first)
+    if (DELETE_MASTERS) {
+      const masterTables = getMasterTablesToClear();
+      for (const tableName of masterTables) {
+        try {
+          await db.sequelize.query(`DELETE FROM "${tableName}"`, { transaction });
+          console.log("  Cleared (master): %s", tableName);
+        } catch (err) {
+          if (err.message && err.message.includes("does not exist")) {
+            console.log("  Skipped (no table): %s", tableName);
+          } else {
+            throw err;
+          }
         }
       }
     }
