@@ -35,18 +35,22 @@ Import old orders into the system from CSV files. No documents, images, or chall
 
 ### Optional
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `address` | string | Customer address |
-| `state_name` | string | State name |
-| `city_name` | string | City name |
-| `pin_code` | string | Pincode |
-| `discount` | number | Discount amount |
-| `division_name` | string | Division name |
-| `sub_division_name` | string | Sub-division name |
-| `circle` | string | Circle |
-| `channel_partner_email` | string | Channel partner user email |
-| `reference_from` | string | Reference text |
+| Column | Type | Description | Lookup |
+|--------|------|-------------|--------|
+| `address` | string | Customer address | - |
+| `state_name` | string | State name | → State.id |
+| `city_name` | string | City name | - |
+| `pin_code` | string | Pincode | - |
+| `discount` | number | Discount amount | - |
+| `solar_panel` | string | Product name for solar panel | → Product.id (Order.solar_panel_id) |
+| `inverter` | string | Product name for inverter | → Product.id (Order.inverter_id) |
+| `division_name` | string | Division name | → Division.id |
+| `sub_division_name` | string | Sub-division name | → SubDivision.id |
+| `circle` | string | Circle | - |
+| `channel_partner_email` | string | Channel partner user email | → User.id |
+| `reference_from` | string | Reference text | - |
+
+Both `solar_panel` and `inverter` are optional; names must match an existing product's `product_name` exactly (case-insensitive).
 
 ### Stage Detail (fill only if stage reached)
 
@@ -78,6 +82,8 @@ Use exactly these values:
 
 The importer infers `stages` from `current_stage_key`: earlier stages = completed, current = pending, later = locked.
 
+**Per-row closed orders:** In a single CSV (e.g. open-orders), a row with `current_stage_key` = `subsidy_disbursed` or `completed` is imported as a **closed** order (status `completed`); other rows are open (`confirmed`). So one file can mix open and closed orders without separate CSVs.
+
 ## Usage
 
 ```bash
@@ -94,6 +100,16 @@ npm run order-import -- --file completed-orders.csv
 # Import both
 npm run order-import -- --file open-orders.csv --file completed-orders.csv
 ```
+
+## Output
+
+After each run, the script writes **import-result.xlsx** (in the current working directory) with three sheets:
+
+| Sheet    | Contents                                      |
+|---------|-----------------------------------------------|
+| **errors**  | row, order_number, error (rows that failed)   |
+| **created** | row, order_number, order_id (new orders)      |
+| **updated** | row, order_number, order_id (existing orders updated) |
 
 ## Out of Scope
 

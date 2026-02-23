@@ -289,7 +289,10 @@ const setUserPassword = async (userId, { new_password: newPassword, confirm_pass
   });
   if (!user) throw new AppError('User not found', RESPONSE_STATUS_CODES.NOT_FOUND);
   const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await user.update({ password: hashedPassword, first_login: true }, { transaction });
+  await user.update(
+    { password: hashedPassword, first_login: true, two_factor_enabled: false, two_factor_secret: null },
+    { transaction }
+  );
   const obj = user.toJSON();
   delete obj.password;
   return obj;
