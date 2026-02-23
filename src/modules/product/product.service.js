@@ -1,6 +1,7 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
+const { parse } = require("csv-parse/sync");
 const db = require("../../models/index.js");
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
@@ -460,6 +461,287 @@ const exportProducts = async (params = {}) => {
   return buffer;
 };
 
+const PRODUCT_IMPORT_CSV_HEADERS = [
+  "product_type_name",
+  "product_make_name",
+  "product_name",
+  "measurement_unit_name",
+  "capacity",
+  "hsn_ssn_code",
+  "tracking_type",
+  "gst_percent",
+  "min_stock_quantity",
+  "is_active",
+  "product_description",
+  "panel_type",
+  "panel_technology_name",
+  "material",
+  "warranty",
+  "additional_type",
+  "additional_warranty",
+  "additional_performance_warranty",
+  "ac_quantity",
+  "dc_quantity",
+  "purchase_price",
+  "selling_price",
+  "mrp",
+];
+
+function getSampleCsvBuffer() {
+  const header = PRODUCT_IMPORT_CSV_HEADERS.join(",");
+  const row1 = [
+    "Panel",
+    "ADANI",
+    "ADANI DCR TOPCON 11 WP",
+    "Nos",
+    "11",
+    "854140",
+    "LOT",
+    "18",
+    "0",
+    "true",
+    "Sample panel product",
+    "DCR",
+    "TOPCON",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+  ].join(",");
+  const row2 = [
+    "Inverter",
+    "LUMINOUS",
+    "LUMINOUS 3KVA Inverter",
+    "Nos",
+    "3",
+    "8504",
+    "LOT",
+    "18",
+    "0",
+    "true",
+    "",
+    "",
+    "",
+    "5 Years",
+    "",
+    "",
+    "",
+    "",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+  ].join(",");
+  return Buffer.from([header, row1, row2].join("\r\n"), "utf8");
+}
+
+const trim = (s) => (typeof s === "string" ? s.trim() : s == null ? "" : String(s));
+const parseNum = (v) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+};
+const parseBool = (v) => {
+  const s = String(v || "").toLowerCase().trim();
+  return s === "true" || s === "1" || s === "yes";
+};
+
+async function importProductsFromCsv({ fileBuffer, req } = {}) {
+  const models = getTenantModels(req);
+  const { Product, ProductType, ProductMake, MeasurementUnit, PanelTechnology } = models;
+  if (!Product || !ProductType || !ProductMake || !MeasurementUnit) {
+    throw new Error("Product import requires tenant models");
+  }
+
+  let rows;
+  try {
+    rows = parse(fileBuffer, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+      relax_quotes: true,
+    });
+  } catch (err) {
+    throw new Error(`Invalid CSV: ${err.message}`);
+  }
+
+  const [productTypes, productMakes, measurementUnits, panelTechnologies] = await Promise.all([
+    ProductType.findAll({ where: { deleted_at: null }, attributes: ["id", "name"] }),
+    ProductMake.findAll({ where: { deleted_at: null }, attributes: ["id", "name", "product_type_id"] }),
+    MeasurementUnit.findAll({ where: { deleted_at: null }, attributes: ["id", "unit"] }),
+    PanelTechnology ? PanelTechnology.findAll({ where: { deleted_at: null }, attributes: ["id", "name"] }) : Promise.resolve([]),
+  ]);
+
+  const byNameLower = (arr, key) => {
+    const m = new Map();
+    (arr || []).forEach((r) => {
+      const n = (r[key] ?? r.name ?? r.unit ?? "").toString().toLowerCase().trim();
+      if (n && !m.has(n)) m.set(n, r);
+    });
+    return m;
+  };
+  const productTypeByName = byNameLower(productTypes, "name");
+  const measurementUnitByUnit = byNameLower(measurementUnits, "unit");
+  const panelTechByName = PanelTechnology ? byNameLower(panelTechnologies, "name") : new Map();
+
+  const getProductMakeId = (makeName, productTypeId) => {
+    const nameLower = trim(makeName).toLowerCase();
+    if (!nameLower || !productTypeId) return null;
+    const make = (productMakes || []).find(
+      (m) => m.name && m.name.toLowerCase().trim() === nameLower && Number(m.product_type_id) === Number(productTypeId)
+    );
+    return make ? make.id : null;
+  };
+
+  const created = [];
+  const skipped = [];
+  const errors = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = i + 2;
+    const productName = trim(row.product_name ?? row["Product Name"] ?? "");
+    if (!productName) {
+      errors.push({ row: rowNum, product_name: "", message: "Product name is required" });
+      continue;
+    }
+
+    const typeName = trim(row.product_type_name ?? row["Product Type"] ?? "");
+    const makeName = trim(row.product_make_name ?? row["Product Make"] ?? "");
+    const unitName = trim(row.measurement_unit_name ?? row["Measurement Unit"] ?? "");
+
+    const productType = typeName ? productTypeByName.get(typeName.toLowerCase()) : null;
+    const productTypeId = productType ? productType.id : null;
+    if (!productTypeId) {
+      errors.push({ row: rowNum, product_name: productName, message: `Product type not found: "${typeName}"` });
+      continue;
+    }
+
+    const productMakeId = getProductMakeId(makeName, productTypeId);
+    if (!productMakeId) {
+      errors.push({ row: rowNum, product_name: productName, message: `Product make not found: "${makeName}" for type "${typeName}"` });
+      continue;
+    }
+
+    const mu = unitName ? measurementUnitByUnit.get(unitName.toLowerCase()) : null;
+    const measurementUnitId = mu ? mu.id : null;
+    if (!measurementUnitId) {
+      errors.push({ row: rowNum, product_name: productName, message: `Measurement unit not found: "${unitName}"` });
+      continue;
+    }
+
+    const trackingTypeRaw = trim(row.tracking_type ?? row["Tracking Type"] ?? "LOT");
+    const trackingType = trackingTypeRaw ? trackingTypeRaw.toUpperCase() : "LOT";
+    if (trackingType !== "LOT" && trackingType !== "SERIAL") {
+      errors.push({ row: rowNum, product_name: productName, message: "Tracking type must be LOT or SERIAL" });
+      continue;
+    }
+
+    const gstPercent = parseNum(row.gst_percent ?? row["GST Percent"] ?? 0);
+    if (gstPercent === null || gstPercent < 0) {
+      errors.push({ row: rowNum, product_name: productName, message: "GST percent is required and must be >= 0" });
+      continue;
+    }
+
+    const minStockQty = parseNum(row.min_stock_quantity ?? row["Min Stock Quantity"] ?? 0);
+    const minStockQuantity = minStockQty !== null && minStockQty >= 0 ? minStockQty : 0;
+
+    const typeNameLower = (productType.name || "").toLowerCase().trim();
+    const isPanel = typeNameLower === "panel";
+    if (isPanel) {
+      const panelType = trim(row.panel_type ?? row["Panel Type"] ?? "").toUpperCase();
+      if (!panelType || !["DCR", "NON DCR"].includes(panelType)) {
+        errors.push({ row: rowNum, product_name: productName, message: "Panel type must be DCR or NON DCR" });
+        continue;
+      }
+    }
+
+    const existing = await Product.findOne({
+      where: { product_name: { [Op.iLike]: productName }, deleted_at: null },
+    });
+    if (existing) {
+      skipped.push({ row: rowNum, product_name: productName });
+      continue;
+    }
+
+    const capacity = parseNum(row.capacity ?? row["Capacity"] ?? null);
+    const isActive = row.is_active === undefined && row["Is Active"] === undefined ? true : parseBool(row.is_active ?? row["Is Active"] ?? true);
+    const productDescription = trim(row.product_description ?? row["Product Description"] ?? null) || null;
+    const hsnSsnCode = trim(row.hsn_ssn_code ?? row["HSN/SSN Code"] ?? null) || null;
+    const purchasePrice = parseNum(row.purchase_price ?? row["Purchase Price"] ?? 0);
+    const sellingPrice = parseNum(row.selling_price ?? row["Selling Price"] ?? 0);
+    const mrpVal = parseNum(row.mrp ?? row["MRP"] ?? 0);
+
+    const warranty = trim(row.warranty ?? row["Warranty"] ?? null) || null;
+    const material = trim(row.material ?? row["Material"] ?? null) || null;
+    const panelTypeVal = trim(row.panel_type ?? row["Panel Type"] ?? null) || null;
+    const panelTechName = trim(row.panel_technology_name ?? row["Panel Technology"] ?? null) || null;
+    const additionalType = trim(row.additional_type ?? row["Additional Type"] ?? null) || null;
+    const additionalWarranty = trim(row.additional_warranty ?? row["Additional Warranty"] ?? null) || null;
+    const additionalPerfWarranty = trim(row.additional_performance_warranty ?? row["Additional Performance Warranty"] ?? null) || null;
+    const acQty = parseNum(row.ac_quantity ?? row["AC Quantity"] ?? null);
+    const dcQty = parseNum(row.dc_quantity ?? row["DC Quantity"] ?? null);
+
+    const typeKey = typeNameLower.replace(/\s+/g, "_");
+    const payloadProperties = { additional: { type: additionalType, warranty: additionalWarranty, performance_warranty: additionalPerfWarranty } };
+
+    if (typeNameLower === "structure") {
+      payloadProperties.structure = { material, warranty };
+    } else if (typeNameLower === "panel") {
+      let panelTechnologyId = null;
+      if (panelTechName && panelTechByName.size) {
+        const pt = panelTechByName.get(panelTechName.toLowerCase());
+        panelTechnologyId = pt ? pt.id : null;
+      }
+      payloadProperties.panel = { type: panelTypeVal, panel_technology_id: panelTechnologyId };
+    } else if (["inverter", "hybrid_inverter", "earthing", "acdb", "dcdb", "la"].includes(typeKey)) {
+      payloadProperties[typeKey] = { warranty };
+    } else if (typeKey === "battery") {
+      const extraType = trim(row.extra_type ?? row["Extra Type"] ?? null) || null;
+      payloadProperties.battery = { type: extraType, warranty };
+    } else if (typeKey === "ac_cable") {
+      payloadProperties.ac_cable = { ac_quantity: acQty, warranty };
+    } else if (typeKey === "dc_cable") {
+      payloadProperties.dc_cable = { dc_quantity: dcQty, warranty };
+    }
+
+    const payload = {
+      product_type_id: productTypeId,
+      product_make_id: productMakeId,
+      product_name: productName,
+      product_description: productDescription,
+      hsn_ssn_code: hsnSsnCode,
+      measurement_unit_id: measurementUnitId,
+      capacity: capacity != null ? capacity : null,
+      is_active: isActive,
+      purchase_price: purchasePrice != null ? purchasePrice : 0,
+      selling_price: sellingPrice != null ? sellingPrice : 0,
+      mrp: mrpVal != null ? mrpVal : 0,
+      gst_percent: gstPercent,
+      min_stock_quantity: minStockQuantity,
+      tracking_type: trackingType,
+      serial_required: trackingType === "SERIAL",
+      properties: payloadProperties,
+    };
+
+    try {
+      const createdProduct = await createProduct({ payload, transaction: null });
+      created.push({ row: rowNum, product_name: productName, product_id: createdProduct?.id });
+    } catch (err) {
+      errors.push({ row: rowNum, product_name: productName, message: err.message || String(err) });
+    }
+  }
+
+  return { created: created.length, skipped: skipped.length, errors, createdRows: created, skippedRows: skipped };
+}
+
 module.exports = {
   listProducts,
   exportProducts,
@@ -467,5 +749,7 @@ module.exports = {
   createProduct,
   updateProduct,
   deleteProduct,
+  getSampleCsvBuffer,
+  importProductsFromCsv,
 };
 

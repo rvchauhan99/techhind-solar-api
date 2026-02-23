@@ -1,0 +1,92 @@
+# Inquiry Import
+
+Import inquiries from CSV files. Matches the format of `Inquiry.sample.csv`. Creates or updates inquiries and finds or creates customers by mobile/name.
+
+**Note:** Replace sample values with actual master names and user names from your database (Branch, Project Scheme, Source, Handled By, etc.) before importing.
+
+## Usage
+
+```bash
+node scripts/inquiry-import/import-inquiries.js --file inquiries.csv
+node scripts/inquiry-import/import-inquiries.js --file inquiries.csv --dry-run
+node scripts/inquiry-import/import-inquiries.js --file inquiries.csv --update-existing
+```
+
+- `--file <path>` – Path to CSV (can be repeated for multiple files).
+- `--dry-run` – Validate and resolve references only; no DB writes.
+- `--update-existing` – If a row has PUI and an inquiry with that `inquiry_number` already exists, update that inquiry and its customer instead of failing.
+
+## CSV columns
+
+Headers must match exactly (including spaces and casing). Sample header:
+
+`Action`, `PUI`, `Stage`, `Project Scheme`, `Capacity`, `Name`, `Mobile`, `Address`, `Area`, `City`, `State`, `Pincode`, `Discom`, `Rating`, `Last Call On`, `Last Call Remarks`, `Next Reminder`, `Order Type`, `Source`, `Reference`, `Company`, `Phone No`, `Inquiry Remarks`, `Assigned On`, `Handled By`, `Inquiry By`, `Channel Partner`, `Created On`, `Branch`
+
+### Required
+
+| Column   | Description        | Lookup / notes                    |
+|----------|--------------------|-----------------------------------|
+| Name     | Customer name      | At least one of Name or Mobile    |
+| Mobile   | Customer mobile    | At least one of Name or Mobile    |
+| Branch   | Branch name        | → CompanyBranch.name (required)   |
+
+### Optional (inquiry and customer)
+
+| Column          | Inquiry / customer field  | Lookup / notes                          |
+|-----------------|---------------------------|------------------------------------------|
+| PUI             | inquiry_number            | Unique; used for idempotency / update    |
+| Stage           | status                    | See Stage → status below                 |
+| Project Scheme  | project_scheme_id         | → ProjectScheme.name                     |
+| Capacity        | capacity                  | Number; default 0                       |
+| Address         | Customer.address          | -                                        |
+| Area            | Customer.landmark_area    | -                                        |
+| City            | Customer.city_id          | → City.name (and State)                  |
+| State           | Customer.state_id         | → State.name                             |
+| Pincode         | Customer.pin_code         | -                                        |
+| Discom          | discom_id                 | → Discom.name                            |
+| Rating          | rating                    | String as-is                             |
+| Next Reminder   | next_reminder_date        | Date DD-MM-YYYY                          |
+| Order Type      | order_type                | → OrderType.name                         |
+| Source          | inquiry_source_id         | → InquirySource.source_name              |
+| Reference       | reference_from            | -                                        |
+| Company         | Customer.company_name     | -                                        |
+| Phone No        | Customer.phone_no         | -                                        |
+| Inquiry Remarks | remarks                   | -                                        |
+| Handled By      | handled_by                | → User.name (case-insensitive)           |
+| Inquiry By      | inquiry_by                | → User.name                              |
+| Channel Partner | channel_partner           | → User.name                              |
+| Created On      | date_of_inquiry           | DD-MM-YYYY                               |
+
+### Not imported
+
+- **Last Call On**, **Last Call Remarks**, **Assigned On**, **Action** – Not stored on the inquiry model; reserved for future follow-up or UI use.
+
+## Stage → status
+
+| CSV Stage           | Inquiry status        |
+|---------------------|------------------------|
+| New                 | New                    |
+| Quotation           | Quotation              |
+| Connected           | Connected              |
+| Site Visit Done     | Site Visit Done        |
+| Under Discussion    | Under Discussion       |
+| Converted           | Converted              |
+| (anything else)     | New                    |
+
+## PUI and idempotency
+
+- **PUI** is written to `inquiry_number` when provided. It must be unique.
+- Without `--update-existing`: if an inquiry with that `inquiry_number` already exists, the row fails (error in report).
+- With `--update-existing`: existing inquiry (and its customer) is updated from the row.
+
+If PUI is empty, `inquiry_number` is auto-generated by the system.
+
+## Result file
+
+After each run, `inquiry-import-result.xlsx` is written in the current working directory with sheets:
+
+- **errors** – Row number, inquiry_number (or PUI), and error message.
+- **created** – Row number, inquiry_number, inquiry_id.
+- **updated** – Row number, inquiry_number, inquiry_id (when `--update-existing` was used).
+
+Exit code is 1 if any row failed, 0 otherwise.
