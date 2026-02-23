@@ -129,32 +129,66 @@ const verifyTwoFactor = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, "Invalid or expired session", 401);
   }
 
-  const isValid = await authService.verifyTwoFactorToken(decoded.id, code);
-  if (!isValid) {
-    return responseHandler.sendError(res, "Invalid 2FA code", 400);
+  const tenantId = decoded.tenant_id || null;
+  const isSharedMode = dbPoolManager.isSharedMode();
+  let user;
+  let tenantSequelize = null;
+
+  if (tenantId && isSharedMode) {
+    // Multi-tenant: resolve tenant and run all queries on tenant DB
+    const tenant = await tenantRegistryService.getTenantById(tenantId);
+    if (!tenant) {
+      return responseHandler.sendError(res, "Tenant not found", 400);
+    }
+    tenantSequelize = await dbPoolManager.getPool(tenantId, tenant);
+
+    const isValid = await authService.verifyTwoFactorTokenOnSequelize(tenantSequelize, decoded.id, code);
+    if (!isValid) {
+      return responseHandler.sendError(res, "Invalid 2FA code", 400);
+    }
+
+    user = await authService.getUserByIdOnSequelize(tenantSequelize, decoded.id);
+    user.tenant_id = tenantId;
+  } else {
+    // Dedicated or no tenant in token: use default/global models
+    const isValid = await authService.verifyTwoFactorToken(decoded.id, code);
+    if (!isValid) {
+      return responseHandler.sendError(res, "Invalid 2FA code", 400);
+    }
+
+    user = await authService.chcekUserByEmail(decoded.email, req.transaction);
+    user.tenant_id = tenantId || process.env.DEDICATED_TENANT_ID || null;
   }
 
-  // 2FA Success - Generate real tokens
-  const user = await authService.chcekUserByEmail(decoded.email, req.transaction); // Re-fetch user
-  user.tenant_id = decoded.tenant_id || process.env.DEDICATED_TENANT_ID || null;
+  // Generate real tokens
   const accessToken = tokenHandler.accessToken(user);
   const refreshToken = tokenHandler.refreshToken(user);
 
-  // Decode refresh token
   const decodedRefreshToken = jwt.decode(refreshToken);
   const refreshIat = new Date(decodedRefreshToken.iat * 1000);
   const refreshExp = new Date(decodedRefreshToken.exp * 1000);
 
-  await authService.deleteExistingTokens(user.id, req.transaction);
-
-  await authService.createUserToken(
-    user.id,
-    accessToken,
-    refreshToken,
-    refreshIat,
-    refreshExp,
-    req.transaction
-  );
+  if (tenantSequelize) {
+    await authService.deleteExistingTokensOnSequelize(tenantSequelize, user.id);
+    await authService.createUserTokenOnSequelize(
+      tenantSequelize,
+      user.id,
+      accessToken,
+      refreshToken,
+      refreshIat,
+      refreshExp
+    );
+  } else {
+    await authService.deleteExistingTokens(user.id, req.transaction);
+    await authService.createUserToken(
+      user.id,
+      accessToken,
+      refreshToken,
+      refreshIat,
+      refreshExp,
+      req.transaction
+    );
+  }
 
   const payload = {
     id: user.id,
