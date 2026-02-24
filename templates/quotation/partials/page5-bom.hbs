@@ -9,35 +9,7 @@
   </div>
   <div class="bom-underline"></div>
 
-  {{#if bom_snapshot}}
-  <!-- BOM from snapshot (full product params + qty) -->
-  <div class="bom-snapshot-table">
-    <table class="bom-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Product Name</th>
-          <th>Type</th>
-          <th>Make</th>
-          <th>Capacity / Spec</th>
-          <th>Qty</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{#each bom_snapshot}}
-        <tr>
-          <td>{{add @index 1}}</td>
-          <td>{{#if this.product_name}}{{this.product_name}}{{else}}-{{/if}}</td>
-          <td>{{#if this.product_type_name}}{{this.product_type_name}}{{else}}-{{/if}}</td>
-          <td>{{#if this.product_make_name}}{{this.product_make_name}}{{else}}-{{/if}}</td>
-          <td>{{#if this.capacity}}{{this.capacity}}{{#if this.measurement_unit_name}} {{this.measurement_unit_name}}{{/if}}{{else}}-{{/if}}</td>
-          <td>{{this.quantity}}</td>
-        </tr>
-        {{/each}}
-      </tbody>
-    </table>
-  </div>
-  {{else}}
+  {{#if bom_show_panel}}
   <!-- Panel Section -->
   <div class="bom-section">
     <div class="bom-section-icon">
@@ -90,7 +62,9 @@
     </div>
     <div class="bom-section-label">Panel</div>
   </div>
+  {{/if}}
 
+  {{#if bom_show_inverter}}
   <!-- Inverter Section -->
   <div class="bom-section">
     <div class="bom-section-icon">
@@ -135,7 +109,9 @@
     </div>
     <div class="bom-section-label">Inverter</div>
   </div>
+  {{/if}}
 
+  {{#if bom_show_hybrid_inverter}}
   <!-- Hybrid Inverter Section -->
   <div class="bom-section">
     <div class="bom-section-icon">
@@ -177,7 +153,9 @@
     </div>
     <div class="bom-section-label">Hybrid<br/>Inverter</div>
   </div>
+  {{/if}}
 
+  {{#if bom_show_battery}}
   <!-- Battery Section -->
   <div class="bom-section">
     <div class="bom-section-icon">
@@ -226,7 +204,9 @@
     </div>
     <div class="bom-section-label">Battery</div>
   </div>
+  {{/if}}
 
+  {{#if bom_show_cables}}
   <!-- Cables Section -->
   <div class="bom-section">
     <div class="bom-section-icon">
@@ -263,7 +243,9 @@
     </div>
     <div class="bom-section-label">Cables</div>
   </div>
+  {{/if}}
 
+  {{#if bom_show_structure}}
   <!-- Structure Section -->
   <div class="bom-text-section">
     <h3 class="bom-text-title">Structure</h3>
@@ -271,7 +253,9 @@
     <p><strong>Material:</strong> {{structure.material}}</p>
     <p><strong>System Warranty:</strong> {{structure.warranty}} Year</p>
   </div>
+  {{/if}}
 
+  {{#if bom_show_balance_of_system}}
   <!-- Balance of System Section -->
   <div class="bom-text-section">
     <h3 class="bom-text-title">Balance of System</h3>
