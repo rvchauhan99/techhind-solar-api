@@ -43,6 +43,19 @@ handlebars.registerHelper("add", function (a, b) {
     return (Number(a) || 0) + (Number(b) || 0);
 });
 
+handlebars.registerHelper("formatYears", function (value) {
+    if (value === null || value === undefined || value === "") {
+        return "";
+    }
+    const str = String(value).trim();
+    const num = parseFloat(str);
+    if (Number.isNaN(num)) {
+        // Fallback: return original string if we can't parse a number
+        return str;
+    }
+    return `${num} Year`;
+});
+
 /**
  * Load and compile a template file
  * @param {string} templatePath - Relative path from template directory
