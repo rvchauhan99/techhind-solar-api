@@ -43,6 +43,19 @@ handlebars.registerHelper("add", function (a, b) {
     return (Number(a) || 0) + (Number(b) || 0);
 });
 
+handlebars.registerHelper("formatYears", function (value) {
+    if (value === null || value === undefined || value === "") {
+        return "";
+    }
+    const str = String(value).trim();
+    const num = parseFloat(str);
+    if (Number.isNaN(num)) {
+        // Fallback: return original string if we can't parse a number
+        return str;
+    }
+    return `${num} Year`;
+});
+
 /**
  * Load and compile a template file
  * @param {string} templatePath - Relative path from template directory
@@ -402,6 +415,126 @@ const getMakeLogos = async (makeIds, productMakesMap, bucketClient) => {
     return logos;
 };
 
+const normType = (s) => (s || "").toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+
+/**
+ * Derive BOM section data (panel, inverter, structure, cables, balance_of_system, etc.)
+ * from normalized bom_snapshot so the section-based PDF layout can be populated when
+ * quotation has bom_snapshot but flat fields are empty.
+ * @param {Array} normalizedBomSnapshot - Array of flat BOM lines (product_type_name, product_make_name, capacity, quantity, etc.)
+ * @param {Map} productMakesMap - Map of ProductMake ID to { name, logo }
+ * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
+ * @returns {Promise<Object>} Section objects: panel, inverter, hybrid_inverter, battery, cables, structure, balance_of_system
+ */
+const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakesMap, bucketClient) => {
+    if (!Array.isArray(normalizedBomSnapshot) || normalizedBomSnapshot.length === 0) {
+        return null;
+    }
+
+    const emptyPanel = () => ({ watt_peak: 0, quantity: 0, type: "", make: "", warranty: 0, performance_warranty: 0, make_logos: [] });
+    const emptyInverter = () => ({ size: 0, quantity: 0, make: "", warranty: 0, make_logos: [] });
+    const emptyHybridInverter = () => ({ size: 0, quantity: 0, make: "", warranty: "", make_logos: [] });
+    const emptyBattery = () => ({ size: 0, quantity: 0, type: "", make: "", warranty: "", make_logos: [] });
+    const emptyCables = () => ({
+        ac_cable_make: "", ac_cable_qty: "", ac_cable_description: "",
+        dc_cable_make: "", dc_cable_qty: "", dc_cable_description: "",
+        earthing_make: "", earthing_qty: "", earthing_description: "",
+        la_make: "", la_qty: "", la_description: "",
+    });
+    const emptyStructure = () => ({ height: "", material: "", warranty: 0 });
+    const emptyBos = () => ({ acdb: "", dcdb: "", earthing: "", lightening_arrestor: "", miscellaneous: "" });
+
+    const panel = emptyPanel();
+    const inverter = emptyInverter();
+    const hybrid_inverter = emptyHybridInverter();
+    const battery = emptyBattery();
+    const cables = emptyCables();
+    const structure = emptyStructure();
+    const balance_of_system = emptyBos();
+
+    const panelMakeIds = [];
+    const inverterMakeIds = [];
+    const hybridInverterMakeIds = [];
+    const batteryMakeIds = [];
+
+    const capNum = (v) => (v != null && !Number.isNaN(parseFloat(v))) ? parseFloat(v) : 0;
+    const qtyNum = (v) => (v != null && !Number.isNaN(parseFloat(v))) ? parseFloat(v) : 0;
+    const str = (v) => (v != null && String(v).trim() !== "") ? String(v).trim() : "";
+
+    for (const line of normalizedBomSnapshot) {
+        const typeNorm = normType(line.product_type_name);
+        const makeName = str(line.product_make_name);
+        const makeId = line.product_make_id != null ? parseInt(line.product_make_id, 10) : null;
+        const qty = qtyNum(line.quantity);
+        const capacity = capNum(line.capacity);
+        const productName = str(line.product_name);
+        const unit = line.measurement_unit_name ? String(line.measurement_unit_name).trim() : "";
+
+        if (typeNorm === "panel") {
+            panel.watt_peak = capacity || panel.watt_peak;
+            panel.quantity = qty || panel.quantity;
+            if (productName) panel.type = productName;
+            if (makeName) panel.make = makeName;
+            if (makeId && !Number.isNaN(makeId)) panelMakeIds.push(makeId);
+        } else if (typeNorm === "inverter") {
+            inverter.size = capacity || inverter.size;
+            inverter.quantity = qty || inverter.quantity;
+            if (makeName) inverter.make = makeName;
+            if (makeId && !Number.isNaN(makeId)) inverterMakeIds.push(makeId);
+        } else if (typeNorm === "hybrid_inverter" || typeNorm === "hybridinverter") {
+            hybrid_inverter.size = capacity || hybrid_inverter.size;
+            hybrid_inverter.quantity = qty || hybrid_inverter.quantity;
+            if (makeName) hybrid_inverter.make = makeName;
+            if (makeId && !Number.isNaN(makeId)) hybridInverterMakeIds.push(makeId);
+        } else if (typeNorm === "battery") {
+            battery.size = capacity || battery.size;
+            battery.quantity = qty || battery.quantity;
+            if (productName) battery.type = productName;
+            if (makeName) battery.make = makeName;
+            if (makeId && !Number.isNaN(makeId)) batteryMakeIds.push(makeId);
+        } else if (typeNorm === "structure") {
+            structure.height = (qty != null && qty > 0) ? String(qty) : (structure.height || productName || "");
+            if (productName && !structure.material) structure.material = productName;
+        } else if (typeNorm === "ac_cable") {
+            cables.ac_cable_make = makeName || cables.ac_cable_make;
+            cables.ac_cable_qty = (qty > 0 ? String(qty) : cables.ac_cable_qty) || "";
+            if (productName) cables.ac_cable_description = productName;
+        } else if (typeNorm === "dc_cable") {
+            cables.dc_cable_make = makeName || cables.dc_cable_make;
+            cables.dc_cable_qty = (qty > 0 ? String(qty) : cables.dc_cable_qty) || "";
+            if (productName) cables.dc_cable_description = productName;
+        } else if (typeNorm === "earthing") {
+            cables.earthing_make = makeName || cables.earthing_make;
+            cables.earthing_qty = (qty > 0 ? String(qty) : cables.earthing_qty) || "";
+            cables.earthing_description = productName || cables.earthing_description;
+            if (productName && !balance_of_system.earthing) balance_of_system.earthing = productName;
+        } else if (typeNorm === "la" || typeNorm === "lightening_arrestor" || typeNorm === "lightning_arrestor") {
+            cables.la_make = makeName || cables.la_make;
+            cables.la_qty = (qty > 0 ? String(qty) : cables.la_qty) || "";
+            cables.la_description = productName || cables.la_description;
+            balance_of_system.lightening_arrestor = productName || makeName || balance_of_system.lightening_arrestor;
+        } else if (typeNorm === "acdb") {
+            balance_of_system.acdb = productName || makeName || balance_of_system.acdb;
+        } else if (typeNorm === "dcdb") {
+            balance_of_system.dcdb = productName || makeName || balance_of_system.dcdb;
+        }
+    }
+
+    panel.make_logos = await getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient);
+    inverter.make_logos = await getMakeLogos([...new Set(inverterMakeIds)], productMakesMap, bucketClient);
+    hybrid_inverter.make_logos = await getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient);
+    battery.make_logos = await getMakeLogos([...new Set(batteryMakeIds)], productMakesMap, bucketClient);
+
+    return {
+        panel,
+        inverter,
+        hybrid_inverter,
+        battery,
+        cables,
+        structure,
+        balance_of_system,
+    };
+};
 
 /**
  * Prepare quotation data for PDF generation
@@ -473,6 +606,111 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const annualSavings = Math.round(yearlyGeneration * pricePerUnit);
     const paybackPeriod = annualSavings > 0 ? +(finalCost / annualSavings).toFixed(1) : 0;
 
+    // Build BOM section data from quotation flat fields
+    let panel = {
+        watt_peak: quotation.panel_size || 0,
+        quantity: quotation.panel_quantity || 0,
+        type: quotation.panel_type || "",
+        make: getMakeNames(quotation.panel_make_ids, productMakesMap),
+        warranty: quotation.panel_warranty || 0,
+        performance_warranty: quotation.panel_performance_warranty || 0,
+        make_logos: await getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient),
+    };
+    let inverter = {
+        size: quotation.inverter_size || 0,
+        quantity: quotation.inverter_quantity || 0,
+        make: getMakeNames(quotation.inverter_make_ids, productMakesMap),
+        warranty: quotation.inverter_warranty || 0,
+        make_logos: await getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient),
+    };
+    let hybrid_inverter = {
+        size: quotation.hybrid_inverter_size || 0,
+        quantity: quotation.hybrid_inverter_quantity || 0,
+        make: getMakeNames(quotation.hybrid_inverter_make_ids, productMakesMap),
+        warranty: quotation.hybrid_inverter_warranty || "",
+        make_logos: await getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient),
+    };
+    let battery = {
+        size: quotation.battery_size || 0,
+        quantity: quotation.battery_quantity || 0,
+        type: quotation.battery_type || "",
+        make: getMakeNames(quotation.battery_make_ids, productMakesMap),
+        warranty: quotation.battery_warranty || "",
+        make_logos: await getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient),
+    };
+    let cables = {
+        ac_cable_make: getMakeNames(quotation.cable_ac_make_ids, productMakesMap),
+        ac_cable_qty: quotation.cable_ac_quantity || "",
+        ac_cable_description: quotation.cable_ac_description || "",
+        dc_cable_make: getMakeNames(quotation.cable_dc_make_ids, productMakesMap),
+        dc_cable_qty: quotation.cable_dc_quantity || "",
+        dc_cable_description: quotation.cable_dc_description || "",
+        earthing_make: getMakeNames(quotation.earthing_make_ids, productMakesMap),
+        earthing_qty: quotation.earthing_quantity || "",
+        earthing_description: quotation.earthing_description || "",
+        la_make: getMakeNames(quotation.la_make_ids, productMakesMap),
+        la_qty: quotation.la_quantity || "",
+        la_description: quotation.la_description || "",
+    };
+    let structure = {
+        height: quotation.structure_height || "",
+        material: quotation.structure_material || "",
+        warranty: quotation.system_warranty_years || 0,
+    };
+    let balance_of_system = {
+        acdb: quotation.acdb_description || "",
+        dcdb: quotation.dcdb_description || "",
+        earthing: quotation.earthing_description || "",
+        lightening_arrestor: quotation.la_description || "",
+        miscellaneous: quotation.mis_description || "",
+    };
+
+    // When quotation has bom_snapshot, derive section data from it so section-based BOM page is populated.
+    // Snapshot data should drive the BOM composition (size, qty, make, etc.) but we KEEP warranty fields
+    // from the quotation form (since BOM lines typically don't carry warranty info).
+    if (Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0) {
+        const normalizedSnapshot = normalizeBomSnapshotForDisplay(quotation.bom_snapshot);
+        const derived = await deriveBomSectionsFromSnapshot(normalizedSnapshot, productMakesMap, bucketClient);
+        if (derived) {
+            panel = {
+                ...panel,
+                ...derived.panel,
+                // Preserve warranties from form
+                warranty: panel.warranty,
+                performance_warranty: panel.performance_warranty,
+            };
+            inverter = {
+                ...inverter,
+                ...derived.inverter,
+                // Preserve warranty from form
+                warranty: inverter.warranty,
+            };
+            hybrid_inverter = {
+                ...hybrid_inverter,
+                ...derived.hybrid_inverter,
+                // Preserve warranty from form
+                warranty: hybrid_inverter.warranty,
+            };
+            battery = {
+                ...battery,
+                ...derived.battery,
+                // Preserve warranty from form
+                warranty: battery.warranty,
+            };
+            cables = {
+                ...cables,
+                ...derived.cables,
+            };
+            structure = {
+                ...structure,
+                ...derived.structure,
+            };
+            balance_of_system = {
+                ...balance_of_system,
+                ...derived.balance_of_system,
+            };
+        }
+    }
 
     return {
         // Quotation details
@@ -558,70 +796,39 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
             }
             : null,
 
-        // Bill of Material data - using correct field names from quotation model
-        panel: {
-            watt_peak: quotation.panel_size || 0,
-            quantity: quotation.panel_quantity || 0,
-            type: quotation.panel_type || "",
-            make: getMakeNames(quotation.panel_make_ids, productMakesMap),
-            warranty: quotation.panel_warranty || 0,
-            performance_warranty: quotation.panel_performance_warranty || 0,
-            make_logos: await getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient),
-        },
-        inverter: {
-            size: quotation.inverter_size || 0,
-            quantity: quotation.inverter_quantity || 0,
-            make: getMakeNames(quotation.inverter_make_ids, productMakesMap),
-            warranty: quotation.inverter_warranty || 0,
-            make_logos: await getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient),
-        },
-        hybrid_inverter: {
-            size: quotation.hybrid_inverter_size || 0,
-            quantity: quotation.hybrid_inverter_quantity || 0,
-            make: getMakeNames(quotation.hybrid_inverter_make_ids, productMakesMap),
-            warranty: quotation.hybrid_inverter_warranty || "",
-            make_logos: await getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient),
-        },
-        battery: {
-            size: quotation.battery_size || 0,
-            quantity: quotation.battery_quantity || 0,
-            type: quotation.battery_type || "",
-            make: getMakeNames(quotation.battery_make_ids, productMakesMap),
-            warranty: quotation.battery_warranty || "",
-            make_logos: await getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient),
-        },
-        cables: {
-            ac_cable_make: getMakeNames(quotation.cable_ac_make_ids, productMakesMap),
-            ac_cable_qty: quotation.cable_ac_quantity || "",
-            ac_cable_description: quotation.cable_ac_description || "",
-            dc_cable_make: getMakeNames(quotation.cable_dc_make_ids, productMakesMap),
-            dc_cable_qty: quotation.cable_dc_quantity || "",
-            dc_cable_description: quotation.cable_dc_description || "",
-            earthing_make: getMakeNames(quotation.earthing_make_ids, productMakesMap),
-            earthing_qty: quotation.earthing_quantity || "",
-            earthing_description: quotation.earthing_description || "",
-            la_make: getMakeNames(quotation.la_make_ids, productMakesMap),
-            la_qty: quotation.la_quantity || "",
-            la_description: quotation.la_description || "",
-        },
-        structure: {
-            height: quotation.structure_height || "",
-            material: quotation.structure_material || "",
-            warranty: quotation.system_warranty_years || 0,
-        },
-        balance_of_system: {
-            acdb: quotation.acdb_description || "",
-            dcdb: quotation.dcdb_description || "",
-            earthing: quotation.earthing_description || "",
-            lightening_arrestor: quotation.la_description || "",
-            miscellaneous: quotation.mis_description || "",
-        },
+        // Bill of Material data - section-based layout only (panel, inverter, etc. from flat fields or derived from bom_snapshot)
+        panel,
+        inverter,
+        hybrid_inverter,
+        battery,
+        cables,
+        structure,
+        balance_of_system,
 
-        // Full BOM snapshot (when present, PDF BOM page uses this; else falls back to panel/inverter/etc. above)
-        // Normalize to flat format for template (supports both nested and flat stored formats)
-        bom_snapshot: Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0
-            ? normalizeBomSnapshotForDisplay(quotation.bom_snapshot)
-            : null,
+        // Only show BOM sections when qty > 0 (optional products hidden)
+        bom_show_panel: (parseFloat(panel.quantity) || 0) > 0,
+        bom_show_inverter: (parseFloat(inverter.quantity) || 0) > 0,
+        bom_show_hybrid_inverter: (parseFloat(hybrid_inverter.quantity) || 0) > 0,
+        bom_show_battery: (parseFloat(battery.quantity) || 0) > 0,
+        bom_show_cables:
+            (parseFloat(cables.ac_cable_qty) || 0) > 0 ||
+            (parseFloat(cables.dc_cable_qty) || 0) > 0 ||
+            (parseFloat(cables.earthing_qty) || 0) > 0 ||
+            (parseFloat(cables.la_qty) || 0) > 0,
+        bom_show_structure:
+            (parseFloat(structure.height) || 0) > 0 ||
+            (structure.material != null && String(structure.material).trim() !== ""),
+        bom_show_balance_of_system:
+            Boolean(
+                (balance_of_system.acdb != null && String(balance_of_system.acdb).trim() !== "") ||
+                (balance_of_system.dcdb != null && String(balance_of_system.dcdb).trim() !== "") ||
+                (balance_of_system.earthing != null && String(balance_of_system.earthing).trim() !== "") ||
+                (balance_of_system.lightening_arrestor != null && String(balance_of_system.lightening_arrestor).trim() !== "") ||
+                (balance_of_system.miscellaneous != null && String(balance_of_system.miscellaneous).trim() !== "")
+            ),
+
+        // BOM page always uses section-based layout; never pass bom_snapshot so table is never rendered
+        bom_snapshot: null,
 
         // Savings and Payback data
         savings: {
