@@ -223,6 +223,8 @@ const createShipment = async ({ payload, user_id, transaction }) => {
   const productMap = {};
   products.forEach((p) => { productMap[p.id] = p; });
 
+  const transactionReferenceNo = order?.order_no ?? null;
+
   for (const item of items) {
     await B2BShipmentItem.create(
       {
@@ -291,6 +293,8 @@ const createShipment = async ({ payload, user_id, transaction }) => {
             outward_date: new Date(),
             source_type: TRANSACTION_TYPE.B2B_SHIPMENT_OUT,
             source_id: shipment.id,
+            issued_against: "b2b_sales_order",
+            reference_number: transactionReferenceNo,
           },
           { transaction }
         );
@@ -300,6 +304,7 @@ const createShipment = async ({ payload, user_id, transaction }) => {
           stock_id: stock.id,
           transaction_type: TRANSACTION_TYPE.B2B_SHIPMENT_OUT,
           transaction_id: shipment.id,
+          transaction_reference_no: transactionReferenceNo,
           movement_type: MOVEMENT_TYPE.OUT,
           quantity: 1,
           serial_id: stockSerial.id,
@@ -318,6 +323,7 @@ const createShipment = async ({ payload, user_id, transaction }) => {
         stock_id: stock.id,
         transaction_type: TRANSACTION_TYPE.B2B_SHIPMENT_OUT,
         transaction_id: shipment.id,
+        transaction_reference_no: transactionReferenceNo,
         movement_type: MOVEMENT_TYPE.OUT,
         quantity: qty,
         rate: null,
@@ -352,7 +358,7 @@ const createShipment = async ({ payload, user_id, transaction }) => {
 
 const deleteShipment = async ({ id, user_id, transaction }) => {
   const models = getTenantModels();
-  const { B2BShipment, B2BShipmentItem, B2BSalesOrderItem, Product, B2BInvoice, StockSerial } = models;
+  const { B2BShipment, B2BShipmentItem, B2BSalesOrder, B2BSalesOrderItem, Product, B2BInvoice, StockSerial } = models;
   const shipment = await B2BShipment.findOne({
     where: { id, deleted_at: null },
     include: [{ model: B2BShipmentItem, as: "items" }],
@@ -368,6 +374,12 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
     const products = await Product.findAll({ where: { id: productIds, deleted_at: null }, transaction });
     const productMap = {};
     products.forEach((p) => { productMap[p.id] = p; });
+
+    const salesOrder = await B2BSalesOrder.findByPk(shipment.b2b_sales_order_id, {
+      transaction,
+      attributes: ["order_no"],
+    });
+    const transactionReferenceNo = salesOrder?.order_no ?? null;
 
     for (const item of shipment.items) {
       const qty = parseInt(item.quantity, 10) || 0;
@@ -400,6 +412,8 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
                 warehouse_id: warehouseId,
                 stock_id: stock.id,
                 source_type: TRANSACTION_TYPE.B2B_SHIPMENT_CANCEL_IN,
+                issued_against: null,
+                reference_number: null,
               },
               { transaction }
             );
@@ -409,6 +423,7 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
               stock_id: stock.id,
               transaction_type: TRANSACTION_TYPE.B2B_SHIPMENT_CANCEL_IN,
               transaction_id: shipment.id,
+              transaction_reference_no: transactionReferenceNo,
               movement_type: MOVEMENT_TYPE.IN,
               quantity: 1,
               serial_id: stockSerial.id,
@@ -426,6 +441,7 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
               stock_id: stock.id,
               transaction_type: TRANSACTION_TYPE.B2B_SHIPMENT_CANCEL_IN,
               transaction_id: shipment.id,
+              transaction_reference_no: transactionReferenceNo,
               movement_type: MOVEMENT_TYPE.IN,
               quantity: 1,
               serial_id: null,
@@ -445,6 +461,7 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
           stock_id: stock.id,
           transaction_type: TRANSACTION_TYPE.B2B_SHIPMENT_CANCEL_IN,
           transaction_id: shipment.id,
+          transaction_reference_no: transactionReferenceNo,
           movement_type: MOVEMENT_TYPE.IN,
           quantity: qty,
           serial_id: null,

@@ -40,7 +40,7 @@ router.put("/warehouses/:id/managers", ...requireAuthWithTenant, company("update
 
 // Images: reference read for URL (display), own module for upload/delete
 router.get("/images/:imageType/url", ...requireAuthWithTenant, refRead, controller.getImageUrl);
-router.post("/images/upload", ...requireAuthWithTenant, uploadMemory.single("image"), company("update"), controller.uploadImage);
+router.post("/images/upload", ...requireAuthWithTenant, company("update"), uploadMemory.single("image"), controller.uploadImage);
 router.post("/images/delete", ...requireAuthWithTenant, company("update"), controller.deleteImage);
 
 module.exports = router;

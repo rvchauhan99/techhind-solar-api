@@ -47,6 +47,14 @@ const StockSerial = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    issued_against: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+    reference_number: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
     unit_price: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: true,

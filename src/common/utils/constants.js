@@ -129,6 +129,12 @@ const MOVEMENT_TYPE = {
   ADJUST: "ADJUST",
 };
 
+/** Type of document a serial was issued against (e.g. delivery challan → customer_order, B2B shipment → b2b_sales_order) */
+const ISSUED_AGAINST = {
+  CUSTOMER_ORDER: "customer_order",
+  B2B_SALES_ORDER: "b2b_sales_order",
+};
+
 module.exports = {
   RESPONSE_STATUS_CODES,
   USER_STATUS,
@@ -150,4 +156,5 @@ module.exports = {
   SERIAL_STATUS,
   TRANSACTION_TYPE,
   MOVEMENT_TYPE,
+  ISSUED_AGAINST,
 };

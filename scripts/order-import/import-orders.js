@@ -98,6 +98,13 @@ function parseIntegerSafe(v) {
     return Number.isInteger(n) ? n : null;
 }
 
+/** Normalize CSV row: map headers with spaces to snake_case for consistent access. */
+function normalizeCsvRow(row) {
+    if (row["Application No"] !== undefined) row.application_no = row.application_no ?? row["Application No"];
+    if (row["Registration Date"] !== undefined) row.registration_date = row.registration_date ?? row["Registration Date"];
+    if (row["Payment Type"] !== undefined) row.payment_type = row.payment_type ?? row["Payment Type"];
+}
+
 async function resolveReferences() {
     const [
         inquirySources,
@@ -321,10 +328,14 @@ function buildStagePayload(row, currentStageKey, status = "confirmed") {
 
     if (row.subsidy_claim != null && row.subsidy_claim !== "") payload.subsidy_claim = parseBool(row.subsidy_claim);
     if (row.claim_date) payload.claim_date = parseDate(row.claim_date);
+    if (row.claim_amount != null && row.claim_amount !== "")
+        payload.claim_amount = parseFloatSafe(row.claim_amount);
     if (row.subsidy_disbursed != null && row.subsidy_disbursed !== "")
         payload.subsidy_disbursed = parseBool(row.subsidy_disbursed);
     else if (status === "completed") payload.subsidy_disbursed = true;
     if (row.disbursed_date) payload.disbursed_date = parseDate(row.disbursed_date);
+    if (row.disbursed_amount != null && row.disbursed_amount !== "")
+        payload.disbursed_amount = parseFloatSafe(row.disbursed_amount);
 
     if (row.order_remarks) payload.order_remarks = trim(row.order_remarks);
 
@@ -400,6 +411,9 @@ async function processRow(row, status, refs, dryRun, errorsOut) {
             reference_from: trim(row.reference_from) || null,
             solar_panel_id: ids.solarPanelId ?? null,
             inverter_id: ids.inverterId ?? null,
+            application_no: trim(row.application_no) || null,
+            date_of_registration_gov: parseDate(row.registration_date) || null,
+            payment_type: trim(row.payment_type) || null,
         };
 
         const stagePayload = buildStagePayload(row, currentStageKey, rowStatus);
@@ -539,6 +553,7 @@ async function main() {
 
         for (let i = 0; i < rows.length; i++) {
             rows[i]._rowIndex = i;
+            normalizeCsvRow(rows[i]);
             const rowNum = i + 2;
             total++;
             const result = await processRow(rows[i], status, refs, dryRun, errors);
