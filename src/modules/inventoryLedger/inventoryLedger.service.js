@@ -12,6 +12,7 @@ const createLedgerEntry = async ({
   stock_id,
   transaction_type,
   transaction_id,
+  transaction_reference_no = null,
   movement_type,
   quantity,
   serial_id = null,
@@ -46,6 +47,7 @@ const createLedgerEntry = async ({
       stock_id,
       transaction_type,
       transaction_id,
+      transaction_reference_no,
       movement_type,
       quantity,
       serial_id,
@@ -66,8 +68,14 @@ const createLedgerEntry = async ({
 // Create ledger entries for PO Inward
 const createPOInwardLedgerEntries = async ({ poInward, transaction }) => {
   const models = getTenantModels();
-  const { Stock, StockSerial } = models;
+  const { Stock, StockSerial, PurchaseOrder } = models;
   const t = transaction;
+
+  const po = await PurchaseOrder.findByPk(poInward.purchase_order_id, {
+    transaction: t,
+    attributes: ["po_number"],
+  });
+  const transactionReferenceNo = po?.po_number ?? null;
 
   for (const item of poInward.items) {
     const stock = await Stock.findOne({
@@ -110,6 +118,7 @@ const createPOInwardLedgerEntries = async ({ poInward, transaction }) => {
           stock_id: stock.id,
           transaction_type: TRANSACTION_TYPE.PO_INWARD,
           transaction_id: poInward.id,
+          transaction_reference_no: transactionReferenceNo,
           movement_type: MOVEMENT_TYPE.IN,
           quantity: 1,
           serial_id: stockSerial ? stockSerial.id : null,
@@ -133,6 +142,7 @@ const createPOInwardLedgerEntries = async ({ poInward, transaction }) => {
         stock_id: stock.id,
         transaction_type: TRANSACTION_TYPE.PO_INWARD,
         transaction_id: poInward.id,
+        transaction_reference_no: transactionReferenceNo,
         movement_type: MOVEMENT_TYPE.IN,
         quantity: acceptedQuantity,
         rate: parseFloat(rate.toFixed(2)),
@@ -298,6 +308,7 @@ const exportLedgerEntries = async (params = {}) => {
     { header: "Product Type", key: "product_type_name", width: 18 },
     { header: "Warehouse", key: "warehouse_name", width: 22 },
     { header: "Transaction Type", key: "transaction_type", width: 18 },
+    { header: "Reference No", key: "transaction_reference_no", width: 22 },
     { header: "Movement", key: "movement_type", width: 12 },
     { header: "Quantity", key: "quantity", width: 12 },
     { header: "Opening", key: "opening_quantity", width: 12 },
@@ -312,6 +323,7 @@ const exportLedgerEntries = async (params = {}) => {
       product_type_name: r.product_type_name ?? r.product?.productType?.name ?? "",
       warehouse_name: r.warehouse?.name || "",
       transaction_type: r.transaction_type || "",
+      transaction_reference_no: r.transaction_reference_no ?? "",
       movement_type: r.movement_type || "",
       quantity: r.quantity ?? "",
       opening_quantity: r.opening_quantity ?? "",

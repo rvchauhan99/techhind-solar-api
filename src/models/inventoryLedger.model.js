@@ -35,6 +35,10 @@ const InventoryLedger = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    transaction_reference_no: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
     movement_type: {
       type: DataTypes.STRING(10),
       allowNull: false,
