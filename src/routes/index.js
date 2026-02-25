@@ -31,6 +31,7 @@ const stockTransferRoutes = require('../modules/stockTransfer/stockTransfer.rout
 const stockAdjustmentRoutes = require('../modules/stockAdjustment/stockAdjustment.routes.js');
 const confirmOrdersRoutes = require('../modules/confirmOrders/confirmOrders.routes.js');
 const closedOrdersRoutes = require('../modules/closedOrders/closedOrders.routes.js');
+const marketingLeadRoutes = require('../modules/marketingLead/marketingLead.routes.js');
 const challanRoutes = require('../modules/challan/challan.routes.js');
 const b2bClientsRoutes = require('../modules/b2bClients/b2bClients.routes.js');
 const b2bSalesQuotesRoutes = require('../modules/b2bSalesQuotes/b2bSalesQuotes.routes.js');
@@ -93,6 +94,7 @@ router.use("/inquiry", inquiryRoutes);
 router.use("/order", orderRoutes);
 router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
+router.use("/marketing-leads", marketingLeadRoutes);
 router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), challanRoutes);
 router.use("/order-payments", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), orderPaymentsRoutes);
 

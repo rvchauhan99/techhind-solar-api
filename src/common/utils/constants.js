@@ -121,6 +121,8 @@ const TRANSACTION_TYPE = {
   B2B_SHIPMENT_CANCEL_IN: "B2B_SHIPMENT_CANCEL_IN",
   // Cutover go-live: opening stock upload
   CUTOVER_OPENING: "CUTOVER_OPENING",
+  // Go-live: used serialized inventory import (already issued against customer orders)
+  USED_INVENTORY_IMPORT: "USED_INVENTORY_IMPORT",
 };
 
 const MOVEMENT_TYPE = {

@@ -1,0 +1,168 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #111827;
+  font-size: 12px;
+  padding: 10px 2px;
+}
+
+.copy-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #d1d5db;
+  padding: 10px;
+}
+
+.company-block {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.logo {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+}
+
+.company-block h1 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.company-block p {
+  margin: 2px 0;
+}
+
+.copy-meta {
+  min-width: 220px;
+  border-left: 1px solid #e5e7eb;
+  padding-left: 10px;
+}
+
+.copy-label {
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 700;
+  color: #065f46;
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.grid-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.card {
+  border: 1px solid #d1d5db;
+  padding: 8px;
+  min-height: 108px;
+}
+
+.card h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.card p {
+  margin: 3px 0;
+}
+
+.card p span {
+  color: #4b5563;
+  margin-right: 6px;
+}
+
+.items-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 11px;
+}
+
+.items-table th,
+.items-table td {
+  border: 1px solid #d1d5db;
+  padding: 5px;
+  vertical-align: top;
+}
+
+.items-table thead th {
+  background: #f3f4f6;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.items-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.items-table .wrap {
+  word-break: break-word;
+}
+
+.items-table tfoot td {
+  font-weight: 700;
+  background: #f9fafb;
+}
+
+.total-label {
+  text-align: right;
+}
+
+.items-table tfoot tr.grand-total td {
+  background: #f3f4f6;
+}
+
+.notes-signatures {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.notes-signatures .sign {
+  border: 1px solid #d1d5db;
+  min-height: 110px;
+  padding: 8px;
+}
+
+.notes-signatures .sign h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.notes-signatures .sign p {
+  margin: 5px 0;
+}
+
+.muted {
+  color: #6b7280;
+}
+
+.receipt-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}

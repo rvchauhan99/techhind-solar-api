@@ -147,6 +147,16 @@ const normalizeOrderBomSnapshot = (bom_snapshot) => {
     });
 };
 
+/** Escape string for safe use in SQL LIKE pattern (%, _) and in string literal (single quote). */
+const escapeSearchForLike = (s) => {
+    if (s == null || typeof s !== "string") return "";
+    return String(s)
+        .replace(/\\/g, "\\\\")
+        .replace(/%/g, "\\%")
+        .replace(/_/g, "\\_")
+        .replace(/'/g, "''");
+};
+
 const listOrders = async ({
     page = 1,
     limit = 20,
@@ -158,6 +168,12 @@ const listOrders = async ({
     order_date_from,
     order_date_to,
     customer_name,
+    mobile_number,
+    branch_id,
+    inquiry_source_id,
+    consumer_no,
+    application_no,
+    reference_from,
     capacity,
     capacity_op,
     capacity_to,
@@ -182,6 +198,28 @@ const listOrders = async ({
 
     if (order_number) {
         where.order_number = { [Op.iLike]: `%${order_number}%` };
+    }
+
+    if (branch_id != null && String(branch_id).trim() !== "") {
+        const bid = parseInt(branch_id, 10);
+        if (!Number.isNaN(bid)) where.branch_id = bid;
+    }
+
+    if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
+        const sid = parseInt(inquiry_source_id, 10);
+        if (!Number.isNaN(sid)) where.inquiry_source_id = sid;
+    }
+
+    if (consumer_no) {
+        where.consumer_no = { [Op.iLike]: `%${consumer_no}%` };
+    }
+
+    if (application_no) {
+        where.application_no = { [Op.iLike]: `%${application_no}%` };
+    }
+
+    if (reference_from) {
+        where.reference_from = { [Op.iLike]: `%${reference_from}%` };
     }
 
     if (order_date_from || order_date_to) {
@@ -223,16 +261,22 @@ const listOrders = async ({
         }
     }
 
+    let searchReplacements = undefined;
     if (search) {
-        const searchOr = {
-            [Op.or]: [
-                { order_number: { [Op.iLike]: `%${search}%` } },
-                { consumer_no: { [Op.iLike]: `%${search}%` } },
-                { reference_from: { [Op.iLike]: `%${search}%` } },
-                { application_no: { [Op.iLike]: `%${search}%` } },
-                { guvnl_no: { [Op.iLike]: `%${search}%` } },
-            ],
-        };
+        const searchEscaped = escapeSearchForLike(search);
+        const searchPat = `%${searchEscaped}%`;
+        searchReplacements = { searchPat };
+        const searchOrConditions = [
+            { order_number: { [Op.iLike]: searchPat } },
+            { consumer_no: { [Op.iLike]: searchPat } },
+            { reference_from: { [Op.iLike]: searchPat } },
+            { application_no: { [Op.iLike]: searchPat } },
+            { guvnl_no: { [Op.iLike]: searchPat } },
+            models.sequelize.literal(`(SELECT 1 FROM customers WHERE customers.id = "Order".customer_id AND (customers.customer_name ILIKE :searchPat OR customers.mobile_number ILIKE :searchPat) LIMIT 1)`),
+            models.sequelize.literal(`(SELECT 1 FROM company_branches WHERE company_branches.id = "Order".branch_id AND company_branches.name ILIKE :searchPat LIMIT 1)`),
+            models.sequelize.literal(`(SELECT 1 FROM inquiry_sources WHERE inquiry_sources.id = "Order".inquiry_source_id AND inquiry_sources.source_name ILIKE :searchPat LIMIT 1)`),
+        ];
+        const searchOr = { [Op.or]: searchOrConditions };
         where[Op.and] = where[Op.and] ? [...where[Op.and], searchOr] : [searchOr];
     }
     if (Array.isArray(enforcedHandledByIds)) {
@@ -243,11 +287,14 @@ const listOrders = async ({
         }
     }
 
-    const customerWhere = customer_name ? { customer_name: { [Op.iLike]: `%${customer_name}%` } } : undefined;
+    const customerWhereParts = [];
+    if (customer_name) customerWhereParts.push({ customer_name: { [Op.iLike]: `%${customer_name}%` } });
+    if (mobile_number) customerWhereParts.push({ mobile_number: { [Op.iLike]: `%${mobile_number}%` } });
+    const customerWhere = customerWhereParts.length > 0 ? { [Op.and]: customerWhereParts } : undefined;
     const customerInclude = {
         model: Customer,
         as: "customer",
-        required: !!customer_name,
+        required: !!(customer_name || mobile_number),
         where: customerWhere,
         include: [
             { model: State, as: "state", attributes: ["id", "name"] },
@@ -275,7 +322,7 @@ const listOrders = async ({
         { model: ProjectPhase, as: "projectPhase", attributes: ["id", "name"], required: false },
     ];
 
-    const { count, rows } = await Order.findAndCountAll({
+    const findOptions = {
         where,
         attributes: {
             include: [
@@ -295,7 +342,9 @@ const listOrders = async ({
         limit,
         offset,
         distinct: true,
-    });
+    };
+    if (searchReplacements) findOptions.replacements = searchReplacements;
+    const { count, rows } = await Order.findAndCountAll(findOptions);
 
     const data = rows.map((order) => {
         const row = order.toJSON();
