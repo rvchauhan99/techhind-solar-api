@@ -69,6 +69,8 @@ module.exports = (db) => {
     B2BShipmentItem,
     B2BInvoice,
     B2BInvoiceItem,
+    MarketingLead,
+    MarketingLeadFollowUp,
   } = db;
 
   // User ↔ Role
@@ -320,6 +322,40 @@ module.exports = (db) => {
   if (Inquiry && InquiryDocument) {
     Inquiry.hasMany(InquiryDocument, { foreignKey: "inquiry_id", as: "documents" });
     InquiryDocument.belongsTo(Inquiry, { foreignKey: "inquiry_id", as: "inquiry" });
+  }
+
+  // MarketingLead associations
+  if (MarketingLead && CompanyBranch) {
+    MarketingLead.belongsTo(CompanyBranch, { foreignKey: "branch_id", as: "branch" });
+    CompanyBranch.hasMany(MarketingLead, { foreignKey: "branch_id", as: "marketingLeads" });
+  }
+  if (MarketingLead && InquirySource) {
+    MarketingLead.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
+    InquirySource.hasMany(MarketingLead, { foreignKey: "inquiry_source_id", as: "marketingLeads" });
+  }
+  if (MarketingLead && User) {
+    MarketingLead.belongsTo(User, { foreignKey: "assigned_to", as: "assignedTo" });
+    User.hasMany(MarketingLead, { foreignKey: "assigned_to", as: "assignedMarketingLeads" });
+  }
+  if (MarketingLead && State) {
+    MarketingLead.belongsTo(State, { foreignKey: "state_id", as: "state" });
+    State.hasMany(MarketingLead, { foreignKey: "state_id", as: "marketingLeads" });
+  }
+  if (MarketingLead && City) {
+    MarketingLead.belongsTo(City, { foreignKey: "city_id", as: "city" });
+    City.hasMany(MarketingLead, { foreignKey: "city_id", as: "marketingLeads" });
+  }
+  if (MarketingLead && Inquiry) {
+    MarketingLead.belongsTo(Inquiry, { foreignKey: "converted_inquiry_id", as: "convertedInquiry" });
+    Inquiry.hasMany(MarketingLead, { foreignKey: "converted_inquiry_id", as: "marketingLeads" });
+  }
+  if (MarketingLead && MarketingLeadFollowUp) {
+    MarketingLead.hasMany(MarketingLeadFollowUp, { foreignKey: "lead_id", as: "followUps" });
+    MarketingLeadFollowUp.belongsTo(MarketingLead, { foreignKey: "lead_id", as: "lead" });
+  }
+  if (MarketingLeadFollowUp && User) {
+    MarketingLeadFollowUp.belongsTo(User, { foreignKey: "created_by", as: "createdBy" });
+    User.hasMany(MarketingLeadFollowUp, { foreignKey: "created_by", as: "marketingLeadFollowUps" });
   }
   if (ProjectPrice && State) {
     ProjectPrice.belongsTo(State, { foreignKey: "state_id", as: "state" });

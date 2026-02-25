@@ -2,11 +2,14 @@
 
 const fs = require("fs");
 const path = require("path");
+const handlebars = require("handlebars");
 const puppeteer = require("puppeteer");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 const bucketService = require("../../common/services/bucket.service.js");
 
 const PUBLIC_DIR = path.join(__dirname, "../../../public");
+const TEMPLATE_DIR = path.join(__dirname, "../../../templates/purchase-order");
+const STYLES_PATH = path.join(TEMPLATE_DIR, "styles/purchase-order.css");
 
 const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
     try {
@@ -51,6 +54,17 @@ const formatDateLong = (value) => {
 };
 
 const safe = (value) => (value != null && String(value).trim() !== "" ? String(value).trim() : "");
+
+handlebars.registerHelper("safe", (value) => {
+    if (value == null) return "-";
+    const v = String(value).trim();
+    return v === "" ? "-" : v;
+});
+handlebars.registerHelper("formatCurrency", (value) => {
+    const n = Number(value);
+    if (Number.isNaN(n)) return "0.00";
+    return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+});
 
 /**
  * Build vendor address from supplier (address, city, state if available)
@@ -183,310 +197,15 @@ const preparePurchaseOrderPdfData = async (po, options = {}) => {
 };
 
 /**
- * Build full HTML document for the PO PDF (same structure as sample)
+ * Build full HTML document for the PO PDF using Handlebars template (same format as b2b-sales-order / delivery challan).
  */
 const buildPurchaseOrderHtml = (data) => {
-    const rows = data.items
-        .map(
-            (item) => `
-      <tr class="item-row">
-        <td>${item.index}</td>
-        <td class="item-desc">
-          <strong>${escapeHtml(item.name)}</strong>${item.description ? "<br/>" + escapeHtml(item.description) : ""}<br/>
-          <b>HSN:</b> ${escapeHtml(item.hsn)}
-        </td>
-        <td>${item.qty}<br/>${item.unit}</td>
-        <td>${item.rate.toFixed(2)}</td>
-        <td>${item.cgst.toFixed(2)}</td>
-        <td>${item.sgst.toFixed(2)}</td>
-        <td>${item.igst.toFixed(2)}</td>
-        <td>${item.amount.toFixed(2)}</td>
-      </tr>
-    `
-        )
-        .join("");
-
-    const logoBlock = data.company.logo_data_url
-        ? `<img src="${data.company.logo_data_url}" alt="${escapeHtml(data.company.name)}" class="company-logo" /><span class="logo-text">${escapeHtml(data.company.name)}</span>`
-        : `<span class="logo-text">${escapeHtml(data.company.name)}</span>`;
-
-    return `
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <meta charset="utf-8">
-    <style>
-      :root {
-        --po-primary: #059669;
-        --po-primary-light: #ecfdf5;
-        --po-primary-dark: #065f46;
-        --po-muted: #6b7280;
-      }
-
-      body {
-        font-family: Arial, sans-serif;
-        font-size: 12px;
-        padding: 30px;
-        border: 2px solid var(--po-primary);
-        color: #171717;
-      }
-
-      .po-main-title {
-        text-align: center;
-        margin: 0 0 16px 0;
-        font-size: 24px;
-        font-weight: bold;
-        color: var(--po-primary);
-      }
-
-      .top-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .logo {
-        font-size: 28px;
-        font-weight: bold;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 12px;
-      }
-
-      .company-logo {
-        max-height: 48px;
-        max-width: 140px;
-        object-fit: contain;
-        display: block;
-      }
-
-      .logo-text {
-        font-size: 20px;
-        font-weight: bold;
-        color: var(--po-primary);
-      }
-
-      .po-title {
-        text-align: right;
-      }
-
-      .po-title .recipient-label {
-        font-size: 11px;
-        color: var(--po-muted);
-      }
-
-      .po-title .po-meta {
-        margin-top: 4px;
-      }
-
-      hr {
-        margin: 10px 0;
-        border: none;
-        border-top: 1px solid var(--po-primary);
-      }
-
-      .address-section {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 10px;
-      }
-
-      .address-box {
-        width: 32%;
-      }
-
-      table.po-items {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-        font-size: 10px;
-        line-height: 1.2;
-      }
-
-      table.po-items, table.po-items th, table.po-items td {
-        border: 1px solid var(--po-primary-dark);
-      }
-
-      table.po-items th, table.po-items td {
-        padding: 2px 4px;
-        text-align: center;
-        vertical-align: top;
-      }
-
-      table.po-items th {
-        background: var(--po-primary-light);
-        color: var(--po-primary-dark);
-        font-size: 10px;
-      }
-
-      table.po-items .item-row td {
-        padding: 2px 4px;
-      }
-
-      table.po-items .item-desc {
-        text-align: left;
-      }
-
-      .summary {
-        width: 40%;
-        float: right;
-        margin-top: 16px;
-        font-size: 11px;
-        background: var(--po-primary-light);
-        border: 1px solid var(--po-primary-dark);
-      }
-
-      .summary td {
-        text-align: right;
-        padding: 2px 6px;
-      }
-
-      .summary tr:last-child td {
-        font-weight: bold;
-        color: var(--po-primary-dark);
-      }
-
-      .signature {
-        margin-top: 100px;
-        display: flex;
-        justify-content: space-between;
-      }
-
-      .note {
-        margin-top: 20px;
-        font-size: 11px;
-      }
-
-      .amount-words {
-        text-align: right;
-        margin-top: 10px;
-        font-style: italic;
-        color: var(--po-primary-dark);
-      }
-    </style>
-  </head>
-
-  <body>
-
-    <h1 class="po-main-title">PURCHASE ORDER</h1>
-
-    <div class="top-header">
-      <div class="logo">
-        ${logoBlock}
-      </div>
-      <div class="po-title">
-        <div class="recipient-label">Original for Recipient</div>
-        <div class="po-meta">
-          <div><b>PO No.:</b> ${escapeHtml(data.poNumber)}</div>
-          <div><b>Date:</b> ${escapeHtml(data.date)}</div>
-          <div><b>Due Date:</b> ${escapeHtml(data.shippingDate)}</div>
-        </div>
-      </div>
-    </div>
-
-    <hr/>
-
-    <div class="address-section">
-      <div class="address-box">
-        <b>Bill To</b><br/>
-        ${escapeHtml(data.company.name)}<br/>
-        ${escapeHtml(data.company.address)}<br/>
-        ${data.company.phone ? "&#9742; " + escapeHtml(data.company.phone) : ""}<br/>
-        ${data.company.email ? "&#9993; " + escapeHtml(data.company.email) : ""}<br/>
-        GSTIN: ${escapeHtml(data.company.gstin)}
-      </div>
-
-      <div class="address-box">
-        <b>Vendor:</b><br/>
-        ${escapeHtml(data.vendor.name)}<br/>
-        ${escapeHtml(data.vendor.address)}<br/>
-        ${data.vendor.phone ? "&#9742; " + escapeHtml(data.vendor.phone) : ""}<br/>
-        GSTIN: ${escapeHtml(data.vendor.gstin)}<br/>
-        Vendor Code: ${escapeHtml(data.vendor.code)}
-      </div>
-
-      <div class="address-box">
-        <b>Ship To:</b><br/>
-        ${escapeHtml(data.shipTo.name)}<br/>
-        ${escapeHtml(data.shipTo.address)}<br/>
-        ${data.shipTo.phone ? "&#9742; " + escapeHtml(data.shipTo.phone) : ""}
-      </div>
-    </div>
-
-    <table class="po-items">
-      <thead>
-        <tr>
-          <th>No</th>
-          <th>Product / Service</th>
-          <th>Preparation Column</th>
-          <th>Purchase Rate</th>
-          <th>CGST</th>
-          <th>SGST</th>
-          <th>IGST</th>
-          <th>Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows}
-        <tr>
-          <td colspan="4"><b>TOTAL</b></td>
-          <td>${data.totalCGST.toFixed(2)}</td>
-          <td>${data.totalSGST.toFixed(2)}</td>
-          <td>${data.totalIGST.toFixed(2)}</td>
-          <td><b>${data.grandTotal.toFixed(2)}</b></td>
-        </tr>
-      </tbody>
-    </table>
-
-    <table class="summary">
-      <tr>
-        <td>Total Before Tax</td>
-        <td>${data.subtotal.toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td>Total Tax Amount</td>
-        <td>${data.totalTax.toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td>Rounded Off</td>
-        <td>0.00</td>
-      </tr>
-      <tr>
-        <td><b>Total Amount</b></td>
-        <td><b>&#8377; ${data.grandTotal.toFixed(2)}</b></td>
-      </tr>
-    </table>
-
-    <div class="amount-words">
-      ${data.amountInWords ? "&#8377; " + escapeHtml(data.amountInWords) : ""}
-    </div>
-
-    <div class="signature">
-      <div>
-        <b>AUTHORIZED SIGNATORY</b>
-      </div>
-    </div>
-
-    <div class="note">
-      <b>NOTE:</b><br/>
-      ${escapeHtml(data.note)}
-    </div>
-
-  </body>
-  </html>
-  `;
+    const styles = fs.readFileSync(STYLES_PATH, "utf-8");
+    const templatePath = path.join(TEMPLATE_DIR, "purchase-order.hbs");
+    const templateString = fs.readFileSync(templatePath, "utf-8");
+    const compiled = handlebars.compile(templateString);
+    return compiled({ ...data, styles });
 };
-
-function escapeHtml(text) {
-    if (text == null) return "";
-    const s = String(text);
-    return s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
 
 /**
  * Generate PDF buffer from prepared data (same pattern as order/challan PDF)
@@ -498,13 +217,13 @@ const generatePurchaseOrderPDF = async (data) => {
         browser = await puppeteer.launch(puppeteerService.getLaunchOptions());
         const page = await browser.newPage();
         await page.setContent(html, {
-            waitUntil: "networkidle0",
+            waitUntil: "domcontentloaded",
             timeout: 60000,
         });
         return await page.pdf({
             format: "A4",
             printBackground: true,
-            margin: { top: "20px", bottom: "20px", left: "20px", right: "20px" },
+            margin: { top: "10mm", right: "10mm", bottom: "12mm", left: "10mm" },
             timeout: 60000,
         });
     } finally {
