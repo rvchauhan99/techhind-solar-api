@@ -745,6 +745,12 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
         const productMap = {};
         products.forEach((p) => { productMap[p.id] = p; });
 
+        const orderForRef = await Order.findByPk(challanData.order_id, {
+            transaction,
+            attributes: ["order_number"],
+        });
+        const transactionReferenceNo = orderForRef?.order_number ?? null;
+
         for (const item of items) {
             const qty = Number(item.quantity);
             const product = productMap[item.product_id];
@@ -832,6 +838,8 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                             outward_date: new Date(),
                             source_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
                             source_id: challan.id,
+                            issued_against: "customer_order",
+                            reference_number: transactionReferenceNo,
                         },
                         { transaction }
                     );
@@ -842,6 +850,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                         stock_id: stock.id,
                         transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
                         transaction_id: challan.id,
+                        transaction_reference_no: transactionReferenceNo,
                         movement_type: MOVEMENT_TYPE.OUT,
                         quantity: 1,
                         serial_id: stockSerial.id,
@@ -860,6 +869,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                     stock_id: stock.id,
                     transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_OUT,
                     transaction_id: challan.id,
+                    transaction_reference_no: transactionReferenceNo,
                     movement_type: MOVEMENT_TYPE.OUT,
                     quantity: qty,
                     rate: null,
@@ -1004,6 +1014,12 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
         const productMap = {};
         products.forEach((p) => { productMap[p.id] = p; });
 
+        const orderForRef = await Order.findByPk(challan.order_id, {
+            transaction,
+            attributes: ["order_number"],
+        });
+        const transactionReferenceNo = orderForRef?.order_number ?? null;
+
         for (const item of challan.items) {
             const qty = Number(item.quantity);
             if (!Number.isFinite(qty) || qty <= 0) {
@@ -1045,6 +1061,8 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                                 stock_id: stock.id,
                                 // keep outward_date as history
                                 source_type: stockSerial.source_type || TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
+                                issued_against: null,
+                                reference_number: null,
                             },
                             { transaction }
                         );
@@ -1055,6 +1073,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                             stock_id: stock.id,
                             transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
                             transaction_id: challan.id,
+                            transaction_reference_no: transactionReferenceNo,
                             movement_type: MOVEMENT_TYPE.IN,
                             quantity: 1,
                             serial_id: stockSerial.id,
@@ -1073,6 +1092,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                             stock_id: stock.id,
                             transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
                             transaction_id: challan.id,
+                            transaction_reference_no: transactionReferenceNo,
                             movement_type: MOVEMENT_TYPE.IN,
                             quantity: 1,
                             serial_id: null,
@@ -1092,6 +1112,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                     stock_id: stock.id,
                     transaction_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
                     transaction_id: challan.id,
+                    transaction_reference_no: transactionReferenceNo,
                     movement_type: MOVEMENT_TYPE.IN,
                     quantity: qty,
                     serial_id: null,

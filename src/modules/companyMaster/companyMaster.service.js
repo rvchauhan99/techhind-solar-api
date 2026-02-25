@@ -747,8 +747,8 @@ const setWarehouseManagers = async (warehouseId, userIds = [], transaction = nul
 };
 
 // Image Management Methods
-const uploadCompanyImage = async (imageType, filePath, transaction = null) => {
-  const models = getTenantModels();
+const uploadCompanyImage = async (imageType, filePath, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { Company } = models;
   // Get company
   const company = await Company.findOne({
@@ -794,8 +794,8 @@ const uploadCompanyImage = async (imageType, filePath, transaction = null) => {
   };
 };
 
-const deleteCompanyImage = async (imageType, transaction = null) => {
-  const models = getTenantModels();
+const deleteCompanyImage = async (imageType, transaction = null, req = null) => {
+  const models = getTenantModels(req);
   const { Company } = models;
   // Get company
   const company = await Company.findOne({

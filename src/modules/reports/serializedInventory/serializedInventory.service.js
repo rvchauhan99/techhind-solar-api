@@ -17,6 +17,8 @@ const getSerializedInventoryReport = async ({
   start_date = null,
   end_date = null,
   product_type_id = null,
+  issued_against = null,
+  reference_number = null,
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
@@ -46,6 +48,14 @@ const getSerializedInventoryReport = async ({
 
   if (serial_number) {
     where.serial_number = { [Op.iLike]: `%${serial_number}%` };
+  }
+
+  if (issued_against) {
+    where.issued_against = issued_against;
+  }
+
+  if (reference_number) {
+    where.reference_number = { [Op.iLike]: `%${reference_number}%` };
   }
 
   if (start_date || end_date) {
@@ -113,6 +123,8 @@ const getSerializedInventoryReport = async ({
       outward_date: serial.outward_date,
       source_type: serial.source_type,
       source_id: serial.source_id,
+      issued_against: serial.issued_against,
+      reference_number: serial.reference_number,
       unit_price: serial.unit_price != null ? parseFloat(serial.unit_price) : null,
       created_at: serial.created_at,
       updated_at: serial.updated_at,
@@ -285,6 +297,8 @@ const exportSerializedInventoryReport = async ({
   start_date = null,
   end_date = null,
   product_type_id = null,
+  issued_against = null,
+  reference_number = null,
   format = "csv",
 } = {}) => {
   // Get all data without pagination for export
@@ -298,6 +312,8 @@ const exportSerializedInventoryReport = async ({
     start_date,
     end_date,
     product_type_id,
+    issued_against,
+    reference_number,
   });
 
   if (format === "csv") {
@@ -312,6 +328,11 @@ const exportSerializedInventoryReport = async ({
 /**
  * Generate CSV content
  */
+const ISSUED_AGAINST_LABELS = {
+  customer_order: "Customer Order",
+  b2b_sales_order: "Sales Order",
+};
+
 const generateCSV = (data) => {
   const headers = [
     "Serial Number",
@@ -320,6 +341,8 @@ const generateCSV = (data) => {
     "HSN Code",
     "Warehouse",
     "Status",
+    "Issued Against",
+    "Reference Number",
     "Unit Price",
     "Inward Date",
     "Outward Date",
@@ -334,6 +357,8 @@ const generateCSV = (data) => {
     item.hsn_code || "",
     item.warehouse_name || "",
     item.status || "",
+    (item.issued_against && ISSUED_AGAINST_LABELS[item.issued_against]) || item.issued_against || "",
+    item.reference_number || "",
     item.unit_price != null ? String(item.unit_price) : "",
     item.inward_date || "",
     item.outward_date || "",

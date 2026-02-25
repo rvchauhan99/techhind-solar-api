@@ -425,6 +425,7 @@ const approveStockTransfer = async ({ id, approved_by, transaction } = {}) => {
       }
 
       // Create ledger entries
+      const transactionReferenceNo = transfer.transfer_number ?? null;
       // OUT from source
       await inventoryLedgerService.createLedgerEntry({
         product_id: item.product_id,
@@ -432,6 +433,7 @@ const approveStockTransfer = async ({ id, approved_by, transaction } = {}) => {
         stock_id: sourceStock.id,
         transaction_type: TRANSACTION_TYPE.TRANSFER_OUT,
         transaction_id: transfer.id,
+        transaction_reference_no: transactionReferenceNo,
         movement_type: MOVEMENT_TYPE.OUT,
         quantity: item.transfer_quantity,
         performed_by: approved_by,
@@ -445,6 +447,7 @@ const approveStockTransfer = async ({ id, approved_by, transaction } = {}) => {
         stock_id: destStock.id,
         transaction_type: TRANSACTION_TYPE.TRANSFER_IN,
         transaction_id: transfer.id,
+        transaction_reference_no: transactionReferenceNo,
         movement_type: MOVEMENT_TYPE.IN,
         quantity: item.transfer_quantity,
         performed_by: approved_by,

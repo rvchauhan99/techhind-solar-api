@@ -140,7 +140,7 @@ const uploadImage = asyncHandler(async (req, res) => {
     throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
   }
 
-  const result = await companyService.uploadCompanyImage(imageType, bucketKey, req.transaction);
+  const result = await companyService.uploadCompanyImage(imageType, bucketKey, req.transaction, req);
 
   // Delete old file from bucket if it was a bucket key (use same client for consistency)
   if (result.oldImagePath && !result.oldImagePath.startsWith("/")) {
@@ -160,7 +160,7 @@ const deleteImage = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, "Image type is required", 400);
   }
 
-  const result = await companyService.deleteCompanyImage(imageType, req.transaction);
+  const result = await companyService.deleteCompanyImage(imageType, req.transaction, req);
   const deletedImagePath = result.deletedImagePath;
 
   if (deletedImagePath && !deletedImagePath.startsWith("/")) {

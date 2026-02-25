@@ -620,6 +620,7 @@ const postStockAdjustment = async ({ id, transaction } = {}) => {
         stock_id: stock.id,
         transaction_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
         transaction_id: adjustment.id,
+        transaction_reference_no: adjustment.adjustment_number ?? null,
         movement_type: item.adjustment_direction,
         quantity: item.adjustment_quantity,
         reason: item.reason || `${adjustment.adjustment_type} adjustment`,

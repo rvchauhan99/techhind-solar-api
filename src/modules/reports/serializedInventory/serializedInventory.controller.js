@@ -15,6 +15,8 @@ const list = asyncHandler(async (req, res) => {
     start_date = null,
     end_date = null,
     product_type_id = null,
+    issued_against = null,
+    reference_number = null,
     sortBy = "id",
     sortOrder = "DESC",
   } = req.query;
@@ -41,6 +43,8 @@ const list = asyncHandler(async (req, res) => {
     start_date,
     end_date,
     product_type_id: product_type_id ? parseInt(product_type_id) : null,
+    issued_against: issued_against || null,
+    reference_number: reference_number || null,
     sortBy,
     sortOrder,
   });
@@ -70,6 +74,8 @@ const exportReport = asyncHandler(async (req, res) => {
     start_date = null,
     end_date = null,
     product_type_id = null,
+    issued_against = null,
+    reference_number = null,
     format = "csv",
   } = req.query;
 
@@ -93,6 +99,8 @@ const exportReport = asyncHandler(async (req, res) => {
     start_date,
     end_date,
     product_type_id: product_type_id ? parseInt(product_type_id) : null,
+    issued_against: issued_against || null,
+    reference_number: reference_number || null,
     format,
   });
 
