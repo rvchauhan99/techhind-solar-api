@@ -145,7 +145,7 @@ async function getOrCreateStock({ product_id, warehouse_id, product, transaction
   return stock;
 }
 
-async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows, rowNum) {
+async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows, updatedRowsOut, rowNum) {
   const orderNumber = trim(row.order_number ?? row.PUI ?? "");
   const serialNumber = trim(row.serial_number ?? row["Serial Number"] ?? "");
   const productName = trim(row.product_name ?? "");
@@ -191,6 +191,48 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
 
   const t = await db.sequelize.transaction();
   try {
+    // Lookup by serial_number + reference_number first (allows correcting wrong product from previous upload)
+    const existingByRef = await StockSerial.findOne({
+      where: { serial_number: serialNumber, reference_number: orderInfo.order_number },
+      transaction: t,
+    });
+
+    if (existingByRef) {
+      if (existingByRef.product_id === product.id) {
+        await t.commit();
+        skippedRows.push({
+          row: rowNum,
+          order_number: orderNumber,
+          serial_number: serialNumber,
+          reason: "Duplicate serial (same product, no update needed)",
+        });
+        return { ok: true, skipped: true };
+      }
+      // Wrong product: update to correct product and relink stock/warehouse
+      const stock = await getOrCreateStock({
+        product_id: product.id,
+        warehouse_id: warehouseId,
+        product,
+        transaction: t,
+      });
+      if (!dryRun) {
+        await existingByRef.update(
+          { product_id: product.id, stock_id: stock.id, warehouse_id: warehouseId },
+          { transaction: t }
+        );
+      }
+      await t.commit();
+      updatedRowsOut.push({
+        row: rowNum,
+        order_number: orderNumber,
+        serial_number: serialNumber,
+        serial_id: existingByRef.id,
+        previous_product_id: existingByRef.product_id,
+        new_product_id: product.id,
+      });
+      return { ok: true, skipped: false, updated: true };
+    }
+
     const existingSerial = await StockSerial.findOne({
       where: { serial_number: serialNumber, product_id: product.id },
       transaction: t,
@@ -272,7 +314,7 @@ function escapeCsvField(val) {
   return s;
 }
 
-function writeResultCsv(errors, createdRows, skippedRows, outputDir) {
+function writeResultCsv(errors, createdRows, skippedRows, updatedRows, outputDir) {
   const dir = outputDir || __dirname;
 
   const errorsPath = path.join(dir, "used-inventory-import-errors.csv");
@@ -293,6 +335,22 @@ function writeResultCsv(errors, createdRows, skippedRows, outputDir) {
   });
   fs.writeFileSync(createdPath, createdLines.join("\n"), "utf8");
 
+  const updatedPath = path.join(dir, "used-inventory-import-updated.csv");
+  const updatedLines = ["row,order_number,serial_number,serial_id,previous_product_id,new_product_id"];
+  (updatedRows || []).forEach((r) => {
+    updatedLines.push(
+      [
+        r.row,
+        r.order_number || "",
+        r.serial_number || "",
+        r.serial_id ?? "",
+        r.previous_product_id ?? "",
+        r.new_product_id ?? "",
+      ].map(escapeCsvField).join(",")
+    );
+  });
+  fs.writeFileSync(updatedPath, updatedLines.join("\n"), "utf8");
+
   const skippedPath = path.join(dir, "used-inventory-import-skipped.csv");
   const skippedLines = ["row,order_number,serial_number,reason"];
   (skippedRows || []).forEach((r) => {
@@ -302,7 +360,7 @@ function writeResultCsv(errors, createdRows, skippedRows, outputDir) {
   });
   fs.writeFileSync(skippedPath, skippedLines.join("\n"), "utf8");
 
-  return { errorsPath, createdPath, skippedPath };
+  return { errorsPath, createdPath, updatedPath, skippedPath };
 }
 
 async function main() {
@@ -338,8 +396,10 @@ async function main() {
   const errors = [];
   const createdRows = [];
   const skippedRows = [];
+  const updatedRows = [];
   let total = 0;
   let created = 0;
+  let updated = 0;
   let skipped = 0;
   let failed = 0;
 
@@ -384,28 +444,36 @@ async function main() {
     const rowNum = i + 2;
     const normalized = normalizeRow(rows[i]);
     total++;
-    const result = await processRow(normalized, refs, dryRun, errors, createdRows, skippedRows, rowNum);
+    const result = await processRow(normalized, refs, dryRun, errors, createdRows, skippedRows, updatedRows, rowNum);
     if (result.skipped) {
       skipped++;
     } else if (result.ok) {
-      if (!result.dryRun) created++;
+      if (result.updated && !result.dryRun) updated++;
+      else if (!result.dryRun) created++;
     } else {
       failed++;
     }
     if ((i + 1) % 500 === 0 || i === rows.length - 1) {
-      console.log(`  Processed ${i + 1}/${totalRows} rows (created: ${created}, skipped: ${skipped}, failed: ${failed})`);
+      console.log(`  Processed ${i + 1}/${totalRows} rows (created: ${created}, updated: ${updated}, skipped: ${skipped}, failed: ${failed})`);
     }
   }
 
   console.log("\n--- Summary ---");
   console.log("Total rows:", total);
   console.log("Created:", created);
+  console.log("Updated (product corrected):", updated);
   console.log("Skipped (empty serial, order not found, product not found, duplicate, no warehouse):", skipped);
   console.log("Failed:", failed);
 
   const resultDir = path.join(__dirname);
-  const { errorsPath, createdPath, skippedPath } = writeResultCsv(errors, createdRows, skippedRows, resultDir);
-  console.log("Result files (CSV):", errorsPath, createdPath, skippedPath);
+  const { errorsPath, createdPath, updatedPath, skippedPath } = writeResultCsv(
+    errors,
+    createdRows,
+    skippedRows,
+    updatedRows,
+    resultDir
+  );
+  console.log("Result files (CSV):", errorsPath, createdPath, updatedPath, skippedPath);
 
   await db.sequelize.close();
   process.exit(failed > 0 ? 1 : 0);

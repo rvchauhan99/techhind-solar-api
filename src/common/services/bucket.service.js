@@ -3,6 +3,9 @@
 const AWS = require("aws-sdk");
 const path = require("path");
 const crypto = require("crypto");
+const https = require("https");
+const http = require("http");
+const { URL } = require("url");
 
 let s3Client = null;
 let bucketName = null;
@@ -137,6 +140,87 @@ async function uploadMultipleFiles(files, optionsOrPrefix) {
   if (!files || files.length === 0) return [];
   const results = await Promise.all(files.map((file) => uploadFile(file, optionsOrPrefix)));
   return results;
+}
+
+const DEFAULT_FETCH_TIMEOUT_MS = 15000;
+
+/**
+ * Fetch a file from a URL and upload it to the bucket.
+ * @param {string} url - Full HTTP or HTTPS URL to fetch
+ * @param {string|object} optionsOrPrefix - prefix (string) or options { prefix, acl, contentType, customKey }
+ * @param {{ s3: object, bucketName: string }} [client] - Optional bucket client
+ * @returns {Promise<{ path: string, filename: string, size: number, mime_type: string, uploaded_at: string }>}
+ */
+function uploadFromUrl(url, optionsOrPrefix, client) {
+  if (!url || typeof url !== "string") {
+    return Promise.reject(new Error("URL is required"));
+  }
+  const urlStr = url.trim();
+  if (!urlStr.startsWith("http://") && !urlStr.startsWith("https://")) {
+    return Promise.reject(new Error("URL must be http or https"));
+  }
+
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try {
+      parsed = new URL(urlStr);
+    } catch (e) {
+      reject(new Error(`Invalid URL: ${e.message}`));
+      return;
+    }
+
+    const protocol = parsed.protocol === "https:" ? https : http;
+    const timeoutMs = DEFAULT_FETCH_TIMEOUT_MS;
+    const requestOptions = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      timeout: timeoutMs,
+    };
+
+    const req = protocol.request(requestOptions, (res) => {
+      const status = res.statusCode || 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        const redirectUrl = res.headers.location;
+        res.destroy();
+        uploadFromUrl(redirectUrl, optionsOrPrefix, client).then(resolve).catch(reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        res.destroy();
+        reject(new Error(`HTTP ${status} for ${urlStr}`));
+        return;
+      }
+
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        const contentType = (res.headers["content-type"] || "").split(";")[0].trim() || "application/octet-stream";
+        const pathname = parsed.pathname || "/";
+        const lastSegment = pathname.replace(/\/$/, "").split("/").pop() || "payment-proof";
+        const originalname = lastSegment && lastSegment.includes(".") ? lastSegment : `payment-proof_${Date.now()}.jpg`;
+
+        const fileLike = {
+          buffer,
+          originalname,
+          mimetype: contentType,
+          size: buffer.length,
+        };
+
+        uploadFile(fileLike, optionsOrPrefix, client).then(resolve).catch(reject);
+      });
+      res.on("error", (err) => reject(err));
+    });
+
+    req.on("error", (err) => reject(err));
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error(`Request timeout after ${timeoutMs}ms`));
+    });
+    req.end();
+  });
 }
 
 /**
@@ -377,6 +461,7 @@ module.exports = {
   getObjectWithClient,
   generateFilePath,
   uploadFile,
+  uploadFromUrl,
   uploadMultipleFiles,
   deleteFile,
   deleteFileWithClient,

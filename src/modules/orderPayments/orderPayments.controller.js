@@ -64,6 +64,15 @@ const orderPaymentsController = {
             if (payment.receipt_cheque_file.startsWith("/")) {
                 return res.status(400).json({ success: false, message: "Legacy receipt; use static URL" });
             }
+            if (
+                payment.receipt_cheque_file.startsWith("http://") ||
+                payment.receipt_cheque_file.startsWith("https://")
+            ) {
+                return res.json({
+                    success: true,
+                    result: { url: payment.receipt_cheque_file, expires_in: null },
+                });
+            }
             const url = await bucketService.getSignedUrl(payment.receipt_cheque_file, 3600);
             res.json({
                 success: true,

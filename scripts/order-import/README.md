@@ -82,7 +82,7 @@ Use exactly these values:
 
 The importer infers `stages` from `current_stage_key`: earlier stages = completed, current = pending, later = locked.
 
-**Per-row closed orders:** In a single CSV (e.g. open-orders), a row with `current_stage_key` = `subsidy_disbursed` or `completed` is imported as a **closed** order (status `completed`); other rows are open (`confirmed`). So one file can mix open and closed orders without separate CSVs.
+**Per-row closed orders:** In a single CSV (e.g. open-orders), only a row with `current_stage_key` = `completed` is imported as a **closed** order (status `completed`). Rows with `subsidy_disbursed` or any other stage remain open (`confirmed`). So one file can mix open and closed orders without separate CSVs.
 
 ## Usage
 

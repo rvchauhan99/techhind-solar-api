@@ -6,9 +6,16 @@
  *
  * Imports payments from payment_proofs_from_html CSV.
  * Matches PUI to Order.order_number; creates OrderPaymentDetail rows.
+ * When "Payment Proof URL" is present, fetches the document and uploads to the bucket,
+ * storing the bucket path in receipt_cheque_file (not the raw URL).
+ *
  * Usage:
  *   node scripts/payment-import/import-payments.js --file /path/to/payment_proofs_from_html.csv
  *   node scripts/payment-import/import-payments.js --file payments.csv --dry-run
+ *   node scripts/payment-import/import-payments.js --file payment_proofs_from_html.csv --proofs-only
+ *
+ * --proofs-only: Only attach payment proofs to existing OrderPaymentDetail rows (no new rows).
+ *   Matches by PUI (order_id), Payment Date, and Amount. Requires BUCKET_* env for upload.
  */
 
 const path = require("path");
@@ -18,6 +25,7 @@ const { parse } = require("csv-parse/sync");
 require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 
 const db = require("../../src/models/index.js");
+const bucketService = require("../../src/common/services/bucket.service.js");
 const {
     Order,
     OrderPaymentDetail,
@@ -26,6 +34,8 @@ const {
     CompanyBankAccount,
     User,
 } = db;
+
+const PAYMENT_PROOF_PREFIX = "order-payments";
 
 function trim(s) {
     return typeof s === "string" ? s.trim() : (s == null ? "" : String(s));
@@ -67,6 +77,24 @@ function mapAuditStatus(auditStatus) {
     if (s === "verified") return "approved";
     if (s === "dispute" || s === "cheque bounce") return "rejected";
     return "pending_approval";
+}
+
+/**
+ * Fetch document from URL and upload to bucket. Returns bucket path or null on failure.
+ * @param {string} url - Payment Proof URL
+ * @returns {Promise<string|null>} - Bucket path (key) or null
+ */
+async function fetchAndUploadProof(url) {
+    if (!url || !url.trim().startsWith("http")) return null;
+    try {
+        const result = await bucketService.uploadFromUrl(url.trim(), {
+            prefix: PAYMENT_PROOF_PREFIX,
+            acl: "private",
+        });
+        return result ? result.path : null;
+    } catch (err) {
+        throw err;
+    }
 }
 
 async function resolveReferences() {
@@ -121,42 +149,42 @@ async function resolveReferences() {
     };
 }
 
-async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows, rowNum) {
+async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows, proofErrorsOut, rowNum) {
     const pui = trim(row.PUI);
     if (!pui) {
         errorsOut.push({ row: rowNum, pui: "", error: "PUI is required" });
-        return { ok: false, skipped: false };
+        return { ok: false, skipped: false, proofUploaded: false };
     }
 
     const orderId = refs.orderByNumber.get(pui);
     if (orderId == null) {
         errorsOut.push({ row: rowNum, pui, error: `Order not found for PUI: ${pui}` });
-        return { ok: false, skipped: true };
+        return { ok: false, skipped: true, proofUploaded: false };
     }
 
     const paymentDateStr = parseDate(row["Payment Date"]);
     const dateOfPayment = paymentDateStr ? new Date(paymentDateStr + "T12:00:00.000Z") : null;
     if (!dateOfPayment) {
         errorsOut.push({ row: rowNum, pui, error: "Invalid or missing Payment Date" });
-        return { ok: false, skipped: false };
+        return { ok: false, skipped: false, proofUploaded: false };
     }
 
     const amount = parseFloatSafe(row.Amount);
     if (amount == null || amount <= 0) {
         errorsOut.push({ row: rowNum, pui, error: "Invalid or missing Amount" });
-        return { ok: false, skipped: false };
+        return { ok: false, skipped: false, proofUploaded: false };
     }
 
     const modeStr = trim(row.Mode);
     const paymentModeId = modeStr ? refs.paymentModeByName.get(modeStr.toLowerCase()) : null;
     if (paymentModeId == null) {
         errorsOut.push({ row: rowNum, pui, error: `Payment mode not found: "${modeStr}"` });
-        return { ok: false, skipped: false };
+        return { ok: false, skipped: false, proofUploaded: false };
     }
 
     if (refs.defaultCompanyBankAccountId == null) {
         errorsOut.push({ row: rowNum, pui, error: "No company bank account configured" });
-        return { ok: false, skipped: false };
+        return { ok: false, skipped: false, proofUploaded: false };
     }
 
     const bankName = trim(row["Bank Name"]);
@@ -171,7 +199,7 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
 
     if (dryRun) {
         createdRows.push({ row: rowNum, pui, order_id: orderId, amount, payment_date: paymentDateStr });
-        return { ok: true, skipped: false, dryRun: true };
+        return { ok: true, skipped: false, dryRun: true, proofUploaded: false };
     }
 
     const t = await db.sequelize.transaction();
@@ -188,7 +216,20 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
         if (existing) {
             skippedRows.push({ row: rowNum, pui, order_id: orderId, reason: "Duplicate (order_id + date + amount)" });
             await t.commit();
-            return { ok: true, skipped: true };
+            return { ok: true, skipped: true, proofUploaded: false };
+        }
+
+        let receiptChequeFile = null;
+        if (paymentProofUrl) {
+            try {
+                const path = await fetchAndUploadProof(paymentProofUrl);
+                receiptChequeFile = path || null;
+                if (!path && paymentProofUrl) {
+                    proofErrorsOut.push({ row: rowNum, pui, error: "Proof fetch/upload returned no path" });
+                }
+            } catch (err) {
+                proofErrorsOut.push({ row: rowNum, pui, error: `Proof upload: ${err.message || String(err)}` });
+            }
         }
 
         const payload = {
@@ -201,7 +242,7 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
             transaction_cheque_number: trim(row["Cheque No"]) || null,
             bank_id: bankId,
             payment_remarks: trim(row.Remarks) || null,
-            receipt_cheque_file: paymentProofUrl,
+            receipt_cheque_file: receiptChequeFile,
             status: auditStatus,
         };
 
@@ -223,7 +264,7 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
             payment_id: created.id,
             amount: created.payment_amount,
         });
-        return { ok: true, skipped: false, paymentId: created.id };
+        return { ok: true, skipped: false, paymentId: created.id, proofUploaded: !!receiptChequeFile };
     } catch (err) {
         await t.rollback();
         errorsOut.push({
@@ -231,6 +272,85 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
             pui,
             error: err.message || String(err),
         });
+        return { ok: false, skipped: false, proofUploaded: false };
+    }
+}
+
+/**
+ * Proofs-only mode: find existing OrderPaymentDetail by (order_id, date_of_payment, payment_amount),
+ * fetch Payment Proof URL, upload to bucket, update receipt_cheque_file.
+ */
+async function processRowProofsOnly(row, refs, dryRun, errorsOut, skippedRows, proofUpdatedRows, proofErrorsOut, rowNum) {
+    const pui = trim(row.PUI);
+    const paymentProofUrl = trim(row["Payment Proof URL"]) || null;
+
+    if (!pui) {
+        skippedRows.push({ row: rowNum, pui: "", reason: "PUI is required" });
+        return { ok: true, skipped: true };
+    }
+    if (!paymentProofUrl || !paymentProofUrl.startsWith("http")) {
+        skippedRows.push({ row: rowNum, pui, reason: "No Payment Proof URL" });
+        return { ok: true, skipped: true };
+    }
+
+    const orderId = refs.orderByNumber.get(pui);
+    if (orderId == null) {
+        skippedRows.push({ row: rowNum, pui, reason: `Order not found for PUI: ${pui}` });
+        return { ok: true, skipped: true };
+    }
+
+    const paymentDateStr = parseDate(row["Payment Date"]);
+    const dateOfPayment = paymentDateStr ? new Date(paymentDateStr + "T12:00:00.000Z") : null;
+    if (!dateOfPayment) {
+        skippedRows.push({ row: rowNum, pui, reason: "Invalid or missing Payment Date" });
+        return { ok: true, skipped: true };
+    }
+
+    const amount = parseFloatSafe(row.Amount);
+    if (amount == null || amount <= 0) {
+        skippedRows.push({ row: rowNum, pui, reason: "Invalid or missing Amount" });
+        return { ok: true, skipped: true };
+    }
+
+    const existing = await OrderPaymentDetail.findOne({
+        where: {
+            order_id: orderId,
+            date_of_payment: dateOfPayment,
+            payment_amount: amount,
+            deleted_at: null,
+        },
+    });
+    if (!existing) {
+        skippedRows.push({ row: rowNum, pui, reason: "No matching payment (order_id + date + amount)" });
+        return { ok: true, skipped: true };
+    }
+
+    if (dryRun) {
+        proofUpdatedRows.push({ row: rowNum, pui, order_id: orderId, payment_id: existing.id, dryRun: true });
+        return { ok: true, skipped: false };
+    }
+
+    let bucketPath;
+    try {
+        const result = await fetchAndUploadProof(paymentProofUrl);
+        bucketPath = result;
+    } catch (err) {
+        proofErrorsOut.push({ row: rowNum, pui, error: `Proof upload: ${err.message || String(err)}` });
+        errorsOut.push({ row: rowNum, pui, error: `Proof upload: ${err.message || String(err)}` });
+        return { ok: false, skipped: false };
+    }
+
+    if (!bucketPath) {
+        proofErrorsOut.push({ row: rowNum, pui, error: "Proof fetch/upload returned no path" });
+        return { ok: false, skipped: false };
+    }
+
+    try {
+        await existing.update({ receipt_cheque_file: bucketPath });
+        proofUpdatedRows.push({ row: rowNum, pui, order_id: orderId, payment_id: existing.id });
+        return { ok: true, skipped: false };
+    } catch (err) {
+        errorsOut.push({ row: rowNum, pui, error: err.message || String(err) });
         return { ok: false, skipped: false };
     }
 }
@@ -244,7 +364,7 @@ function escapeCsv(value) {
     return s;
 }
 
-function writeResultCsv(errors, createdRows, skippedRows, outputPath) {
+function writeResultCsv(errors, createdRows, skippedRows, outputPath, proofErrors = [], proofUpdatedRows = []) {
     const headers = [
         "section",
         "row",
@@ -273,6 +393,20 @@ function writeResultCsv(errors, createdRows, skippedRows, outputPath) {
         lines.push(headers.map((h) => escapeCsv(row[h])).join(","));
     });
 
+    (proofErrors || []).forEach((e) => {
+        const row = {
+            section: "proof_error",
+            row: e.row,
+            pui: e.pui || "",
+            order_id: "",
+            payment_id: "",
+            amount: "",
+            error: e.error || "",
+            reason: "",
+        };
+        lines.push(headers.map((h) => escapeCsv(row[h])).join(","));
+    });
+
     (createdRows || []).forEach((r) => {
         const row = {
             section: "created",
@@ -281,6 +415,20 @@ function writeResultCsv(errors, createdRows, skippedRows, outputPath) {
             order_id: r.order_id ?? "",
             payment_id: r.payment_id ?? "",
             amount: r.amount ?? "",
+            error: "",
+            reason: "",
+        };
+        lines.push(headers.map((h) => escapeCsv(row[h])).join(","));
+    });
+
+    (proofUpdatedRows || []).forEach((r) => {
+        const row = {
+            section: "proof_updated",
+            row: r.row,
+            pui: r.pui || "",
+            order_id: r.order_id ?? "",
+            payment_id: r.payment_id ?? "",
+            amount: "",
             error: "",
             reason: "",
         };
@@ -308,17 +456,20 @@ async function main() {
     const args = process.argv.slice(2);
     let filePath = null;
     let dryRun = false;
+    let proofsOnly = false;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === "--file" && args[i + 1]) {
             filePath = args[++i];
         } else if (args[i] === "--dry-run") {
             dryRun = true;
+        } else if (args[i] === "--proofs-only") {
+            proofsOnly = true;
         }
     }
 
     if (!filePath) {
-        console.error("Usage: node scripts/payment-import/import-payments.js --file <path> [--dry-run]");
+        console.error("Usage: node scripts/payment-import/import-payments.js --file <path> [--dry-run] [--proofs-only]");
         process.exit(1);
     }
 
@@ -328,21 +479,36 @@ async function main() {
         process.exit(1);
     }
 
-    console.log("Payment Import");
+    console.log(proofsOnly ? "Payment Import (proofs-only)" : "Payment Import");
     if (dryRun) console.log("DRY RUN – no changes will be written.\n");
 
     const errors = [];
     const createdRows = [];
     const skippedRows = [];
+    const proofErrors = [];
+    const proofUpdatedRows = [];
     let total = 0;
     let created = 0;
     let skipped = 0;
     let failed = 0;
+    let proofsUploaded = 0;
+    let proofsAttached = 0;
 
     const refs = await resolveReferences();
-    if (refs.defaultCompanyBankAccountId == null && !dryRun) {
+    if (!proofsOnly && refs.defaultCompanyBankAccountId == null && !dryRun) {
         console.error("No company bank account found. Create at least one active company bank account.");
         process.exit(1);
+    }
+
+    if (!dryRun) {
+        try {
+            bucketService.getClient();
+        } catch (e) {
+            if (e.code === "BUCKET_CONFIG_MISSING") {
+                console.error("Bucket config missing (BUCKET_* env). Required for payment proof upload.");
+                process.exit(1);
+            }
+        }
     }
 
     console.log("Processing:", resolvedPath);
@@ -369,30 +535,72 @@ async function main() {
         process.exit(1);
     }
 
-    for (let i = 0; i < rows.length; i++) {
-        const rowNum = i + 2;
-        total++;
-        const result = await processRow(rows[i], refs, dryRun, errors, createdRows, skippedRows, rowNum);
-        if (result.skipped) {
-            skipped++;
-        } else if (result.ok) {
-            if (!result.dryRun) created++;
-        } else {
-            failed++;
+    if (proofsOnly) {
+        for (let i = 0; i < rows.length; i++) {
+            const rowNum = i + 2;
+            total++;
+            const result = await processRowProofsOnly(
+                rows[i],
+                refs,
+                dryRun,
+                errors,
+                skippedRows,
+                proofUpdatedRows,
+                proofErrors,
+                rowNum
+            );
+            if (result.skipped) {
+                skipped++;
+            } else if (result.ok) {
+                if (!result.dryRun) proofsAttached++;
+            } else {
+                failed++;
+            }
         }
+        console.log("\n--- Summary (proofs-only) ---");
+        console.log("Total rows:", total);
+        console.log("Proofs attached:", proofsAttached);
+        console.log("Skipped (no match / no URL):", skipped);
+        console.log("Failed:", failed);
+        if (proofErrors.length) console.log("Proof errors:", proofErrors.length);
+    } else {
+        for (let i = 0; i < rows.length; i++) {
+            const rowNum = i + 2;
+            total++;
+            const result = await processRow(
+                rows[i],
+                refs,
+                dryRun,
+                errors,
+                createdRows,
+                skippedRows,
+                proofErrors,
+                rowNum
+            );
+            if (result.skipped) {
+                skipped++;
+            } else if (result.ok) {
+                if (!result.dryRun) {
+                    created++;
+                    if (result.proofUploaded) proofsUploaded++;
+                }
+            } else {
+                failed++;
+            }
+        }
+        console.log("\n--- Summary ---");
+        console.log("Total rows:", total);
+        console.log("Created:", created);
+        console.log("Proofs uploaded (with created):", proofsUploaded);
+        console.log("Skipped (no order or duplicate):", skipped);
+        console.log("Failed:", failed);
+        if (proofErrors.length) console.log("Proof errors:", proofErrors.length);
     }
 
-    console.log("\n--- Summary ---");
-    console.log("Total rows:", total);
-    console.log("Created:", created);
-    console.log("Skipped (no order or duplicate):", skipped);
-    console.log("Failed:", failed);
-
-    // Write result CSV next to the input CSV file
     const inputDir = path.dirname(resolvedPath);
     const resultPath = path.join(inputDir, "payment-import-result.csv");
-    writeResultCsv(errors, createdRows, skippedRows, resultPath);
-    console.log("Result CSV file (errors, created, skipped):", resultPath);
+    writeResultCsv(errors, createdRows, skippedRows, resultPath, proofErrors, proofUpdatedRows);
+    console.log("Result CSV file (errors, created, skipped, proof_error, proof_updated):", resultPath);
 
     await db.sequelize.close();
     process.exit(failed > 0 ? 1 : 0);
