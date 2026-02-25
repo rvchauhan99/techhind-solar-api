@@ -31,7 +31,23 @@ const resolveClosedOrderVisibilityContext = async (req) => {
 };
 
 const list = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 20, q = null, sortBy = "id", sortOrder = "DESC" } = req.query;
+    const {
+        page = 1,
+        limit = 20,
+        q = null,
+        sortBy = "id",
+        sortOrder = "DESC",
+        customer_name,
+        mobile_number,
+        branch_id,
+        inquiry_source_id,
+        order_number,
+        consumer_no,
+        application_no,
+        reference_from,
+        order_date_from,
+        order_date_to,
+    } = req.query;
     const { enforcedHandledByIds } = await resolveClosedOrderVisibilityContext(req);
     const result = await orderService.listOrders({
         page: parseInt(page),
@@ -40,6 +56,16 @@ const list = asyncHandler(async (req, res) => {
         status: "completed", // Fixed filter for closed orders
         sortBy,
         sortOrder,
+        customer_name,
+        mobile_number,
+        branch_id,
+        inquiry_source_id,
+        order_number,
+        consumer_no,
+        application_no,
+        reference_from,
+        order_date_from,
+        order_date_to,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
     return responseHandler.sendSuccess(res, result, "Closed order list fetched", 200);

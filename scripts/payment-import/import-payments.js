@@ -14,7 +14,6 @@
 const path = require("path");
 const fs = require("fs");
 const { parse } = require("csv-parse/sync");
-const ExcelJS = require("exceljs");
 
 require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env") });
 
@@ -236,57 +235,73 @@ async function processRow(row, refs, dryRun, errorsOut, createdRows, skippedRows
     }
 }
 
-function writeResultExcel(errors, createdRows, skippedRows, outputPath) {
-    const workbook = new ExcelJS.Workbook();
+function escapeCsv(value) {
+    if (value == null) return "";
+    const s = String(value);
+    if (/[",\n]/.test(s)) {
+        return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+}
 
-    const errorsSheet = workbook.addWorksheet("errors", { headerRow: true });
-    errorsSheet.columns = [
-        { header: "row", key: "row", width: 8 },
-        { header: "pui", key: "pui", width: 16 },
-        { header: "error", key: "error", width: 60 },
+function writeResultCsv(errors, createdRows, skippedRows, outputPath) {
+    const headers = [
+        "section",
+        "row",
+        "pui",
+        "order_id",
+        "payment_id",
+        "amount",
+        "error",
+        "reason",
     ];
-    errorsSheet.getRow(1).font = { bold: true };
+
+    const lines = [];
+    lines.push(headers.join(","));
+
     (errors || []).forEach((e) => {
-        errorsSheet.addRow({ row: e.row, pui: e.pui || "", error: e.error || "" });
+        const row = {
+            section: "error",
+            row: e.row,
+            pui: e.pui || "",
+            order_id: "",
+            payment_id: "",
+            amount: "",
+            error: e.error || "",
+            reason: "",
+        };
+        lines.push(headers.map((h) => escapeCsv(row[h])).join(","));
     });
 
-    const createdSheet = workbook.addWorksheet("created", { headerRow: true });
-    createdSheet.columns = [
-        { header: "row", key: "row", width: 8 },
-        { header: "pui", key: "pui", width: 16 },
-        { header: "order_id", key: "order_id", width: 12 },
-        { header: "payment_id", key: "payment_id", width: 14 },
-        { header: "amount", key: "amount", width: 12 },
-    ];
-    createdSheet.getRow(1).font = { bold: true };
     (createdRows || []).forEach((r) => {
-        createdSheet.addRow({
+        const row = {
+            section: "created",
             row: r.row,
             pui: r.pui || "",
             order_id: r.order_id ?? "",
             payment_id: r.payment_id ?? "",
             amount: r.amount ?? "",
-        });
+            error: "",
+            reason: "",
+        };
+        lines.push(headers.map((h) => escapeCsv(row[h])).join(","));
     });
 
-    const skippedSheet = workbook.addWorksheet("skipped", { headerRow: true });
-    skippedSheet.columns = [
-        { header: "row", key: "row", width: 8 },
-        { header: "pui", key: "pui", width: 16 },
-        { header: "order_id", key: "order_id", width: 12 },
-        { header: "reason", key: "reason", width: 40 },
-    ];
-    skippedSheet.getRow(1).font = { bold: true };
     (skippedRows || []).forEach((r) => {
-        skippedSheet.addRow({
+        const row = {
+            section: "skipped",
             row: r.row,
             pui: r.pui || "",
             order_id: r.order_id ?? "",
+            payment_id: "",
+            amount: "",
+            error: "",
             reason: r.reason || "",
-        });
+        };
+        lines.push(headers.map((h) => escapeCsv(row[h])).join(","));
     });
 
-    return workbook.xlsx.writeFile(outputPath);
+    fs.writeFileSync(outputPath, lines.join("\n"), "utf8");
 }
 
 async function main() {
@@ -373,9 +388,11 @@ async function main() {
     console.log("Skipped (no order or duplicate):", skipped);
     console.log("Failed:", failed);
 
-    const resultPath = path.resolve(process.cwd(), "payment-import-result.xlsx");
-    await writeResultExcel(errors, createdRows, skippedRows, resultPath);
-    console.log("Result file (errors, created, skipped):", resultPath);
+    // Write result CSV next to the input CSV file
+    const inputDir = path.dirname(resolvedPath);
+    const resultPath = path.join(inputDir, "payment-import-result.csv");
+    writeResultCsv(errors, createdRows, skippedRows, resultPath);
+    console.log("Result CSV file (errors, created, skipped):", resultPath);
 
     await db.sequelize.close();
     process.exit(failed > 0 ? 1 : 0);

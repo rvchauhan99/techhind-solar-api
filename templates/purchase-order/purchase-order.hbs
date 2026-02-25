@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Purchase Order</title>
+  <style>{{{styles}}}</style>
+</head>
+<body>
+  <header class="copy-header">
+    <div class="company-block">
+      {{#if company.logo_data_url}}
+      <img class="logo" src="{{company.logo_data_url}}" alt="Company Logo" />
+      {{/if}}
+      <div>
+        <h1>{{safe company.name}}</h1>
+        <p>{{safe company.address}}</p>
+        <p>{{safe company.phone}}{{#if company.email}} | {{company.email}}{{/if}}</p>
+        {{#if company.gstin}}<p>GSTIN: {{company.gstin}}</p>{{/if}}
+      </div>
+    </div>
+    <div class="copy-meta">
+      <div class="copy-label">PURCHASE ORDER</div>
+      <div class="meta-row"><span>PO No</span><strong>{{safe poNumber}}</strong></div>
+      <div class="meta-row"><span>Date</span><strong>{{safe date}}</strong></div>
+      <div class="meta-row"><span>Due Date</span><strong>{{safe shippingDate}}</strong></div>
+    </div>
+  </header>
+
+  <div class="grid grid-3">
+    <article class="card">
+      <h3>Bill To</h3>
+      <p><strong>{{safe company.name}}</strong></p>
+      <p>{{safe company.address}}</p>
+      {{#if company.phone}}<p>{{company.phone}}</p>{{/if}}
+      {{#if company.email}}<p>{{company.email}}</p>{{/if}}
+      {{#if company.gstin}}<p>GSTIN: {{company.gstin}}</p>{{/if}}
+    </article>
+    <article class="card">
+      <h3>Vendor</h3>
+      <p><strong>{{safe vendor.name}}</strong></p>
+      <p>{{safe vendor.address}}</p>
+      {{#if vendor.phone}}<p>{{vendor.phone}}</p>{{/if}}
+      {{#if vendor.gstin}}<p>GSTIN: {{vendor.gstin}}</p>{{/if}}
+      {{#if vendor.code}}<p>Vendor Code: {{vendor.code}}</p>{{/if}}
+    </article>
+    <article class="card">
+      <h3>Ship To</h3>
+      {{#if shipTo.name}}
+        <p><strong>{{safe shipTo.name}}</strong></p>
+        <p>{{safe shipTo.address}}</p>
+        {{#if shipTo.phone}}<p>{{shipTo.phone}}</p>{{/if}}
+      {{else}}
+        <p class="muted">-</p>
+      {{/if}}
+    </article>
+  </div>
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Product / Description</th>
+        <th class="num">Qty</th>
+        <th class="num">Rate</th>
+        <th class="num">CGST</th>
+        <th class="num">SGST</th>
+        <th class="num">IGST</th>
+        <th class="num">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items}}
+      <tr>
+        <td>{{index}}</td>
+        <td class="wrap">
+          <strong>{{safe name}}</strong>
+          {{#if description}}<br/>{{safe description}}{{/if}}
+          {{#if hsn}}<br/>HSN: {{safe hsn}}{{/if}}
+        </td>
+        <td class="num">{{qty}} {{safe unit}}</td>
+        <td class="num">{{formatCurrency rate}}</td>
+        <td class="num">{{formatCurrency cgst}}</td>
+        <td class="num">{{formatCurrency sgst}}</td>
+        <td class="num">{{formatCurrency igst}}</td>
+        <td class="num">{{formatCurrency amount}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="7" class="total-label">Subtotal</td>
+        <td class="num">{{formatCurrency subtotal}}</td>
+      </tr>
+      <tr>
+        <td colspan="7" class="total-label">Total GST</td>
+        <td class="num">{{formatCurrency totalTax}}</td>
+      </tr>
+      <tr class="grand-total">
+        <td colspan="7" class="total-label">Grand Total</td>
+        <td class="num"><strong>{{formatCurrency grandTotal}}</strong></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  {{#if amountInWords}}
+  <div class="po-amount-words">Amount in words: {{safe amountInWords}} only.</div>
+  {{/if}}
+
+  <div class="notes-signatures single-sign">
+    <article class="sign">
+      <h4>Authorized Signatory</h4>
+      <p>Name: _______________________</p>
+      <p>Signature: ___________________</p>
+    </article>
+  </div>
+
+  {{#if note}}
+  <div class="po-note-section">
+    <strong>Note:</strong> {{safe note}}
+  </div>
+  {{/if}}
+</body>
+</html>
