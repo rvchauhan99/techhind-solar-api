@@ -157,6 +157,101 @@ const escapeSearchForLike = (s) => {
         .replace(/'/g, "''");
 };
 
+const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
+    const where = { deleted_at: null };
+
+    const {
+        status,
+        handled_by,
+        branch_id,
+        inquiry_source_id,
+        order_number,
+        consumer_no,
+        application_no,
+        reference_from,
+        order_date_from,
+        order_date_to,
+        customer_name,
+        mobile_number,
+    } = filters || {};
+
+    if (status) {
+        if (Array.isArray(status)) {
+            where.status = { [Op.in]: status };
+        } else {
+            where.status = status;
+        }
+    }
+
+    if (handled_by != null && String(handled_by).trim() !== "") {
+        const hid = parseInt(handled_by, 10);
+        if (!Number.isNaN(hid)) {
+            where.handled_by = hid;
+        }
+    }
+
+    if (order_number) {
+        where.order_number = { [Op.iLike]: `%${order_number}%` };
+    }
+
+    if (branch_id != null && String(branch_id).trim() !== "") {
+        const bid = parseInt(branch_id, 10);
+        if (!Number.isNaN(bid)) where.branch_id = bid;
+    }
+
+    if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
+        const sid = parseInt(inquiry_source_id, 10);
+        if (!Number.isNaN(sid)) where.inquiry_source_id = sid;
+    }
+
+    if (consumer_no) {
+        where.consumer_no = { [Op.iLike]: `%${consumer_no}%` };
+    }
+
+    if (application_no) {
+        where.application_no = { [Op.iLike]: `%${application_no}%` };
+    }
+
+    if (reference_from) {
+        where.reference_from = { [Op.iLike]: `%${reference_from}%` };
+    }
+
+    if (order_date_from || order_date_to) {
+        where.order_date = where.order_date || {};
+        if (order_date_from) where.order_date[Op.gte] = order_date_from;
+        if (order_date_to) where.order_date[Op.lte] = order_date_to;
+        if (Reflect.ownKeys(where.order_date).length === 0) delete where.order_date;
+    }
+
+    if (Array.isArray(enforcedHandledByIds)) {
+        if (enforcedHandledByIds.length === 0) {
+            where.handled_by = { [Op.in]: [-1] };
+        } else {
+            where.handled_by = { [Op.in]: enforcedHandledByIds };
+        }
+    }
+
+    const customerConditions = [];
+    if (customer_name) {
+        const pat = `%${escapeSearchForLike(customer_name)}%`;
+        customerConditions.push(`customers.customer_name ILIKE '${pat}' ESCAPE '\\\\'`);
+    }
+    if (mobile_number) {
+        const pat = `%${escapeSearchForLike(mobile_number)}%`;
+        customerConditions.push(`customers.mobile_number ILIKE '${pat}' ESCAPE '\\\\'`);
+    }
+    if (customerConditions.length > 0) {
+        const condSql = customerConditions.join(" AND ");
+        const literal = models.sequelize.literal(
+            `EXISTS (SELECT 1 FROM customers WHERE customers.id = "Order".customer_id AND ${condSql})`
+        );
+        if (!where[Op.and]) where[Op.and] = [];
+        where[Op.and].push(literal);
+    }
+
+    return where;
+};
+
 const listOrders = async ({
     page = 1,
     limit = 20,
@@ -180,6 +275,7 @@ const listOrders = async ({
     project_cost,
     project_cost_op,
     project_cost_to,
+    handled_by,
     enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
     const models = getTenantModels();
@@ -194,6 +290,13 @@ const listOrders = async ({
 
     if (status) {
         where.status = status;
+    }
+
+    if (handled_by != null && String(handled_by).trim() !== "") {
+        const hid = parseInt(handled_by, 10);
+        if (!Number.isNaN(hid)) {
+            where.handled_by = hid;
+        }
     }
 
     if (order_number) {
@@ -430,6 +533,154 @@ const listOrders = async ({
             pages: limit > 0 ? Math.ceil(count / limit) : 0,
         },
     };
+};
+
+const getOrdersDashboardKpis = async ({ filters = {}, enforced_handled_by_ids } = {}) => {
+    const models = getTenantModels();
+    const { Order } = models;
+    const where = buildDashboardWhere(filters, enforced_handled_by_ids, models);
+
+    const [totalsRow] = await Order.findAll({
+        where,
+        attributes: [
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
+                    0
+                ),
+                "total_capacity_kw",
+            ],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
+                    0
+                ),
+                "total_project_cost",
+            ],
+        ],
+        raw: true,
+    });
+
+    const byStatus = await Order.findAll({
+        where,
+        attributes: [
+            "status",
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+        ],
+        group: ["status"],
+        raw: true,
+    });
+
+    const byBranch = await Order.findAll({
+        where,
+        attributes: [
+            "branch_id",
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+        ],
+        group: ["branch_id"],
+        raw: true,
+    });
+
+    return {
+        totals: {
+            total_orders: Number(totalsRow?.total_orders || 0),
+            total_capacity_kw: Number(totalsRow?.total_capacity_kw || 0),
+            total_project_cost: Number(totalsRow?.total_project_cost || 0),
+        },
+        by_status: byStatus.map((row) => ({
+            status: row.status,
+            count: Number(row.count || 0),
+        })),
+        by_branch: byBranch.map((row) => ({
+            branch_id: row.branch_id,
+            count: Number(row.count || 0),
+        })),
+    };
+};
+
+const getOrdersDashboardPipeline = async ({ filters = {}, enforced_handled_by_ids } = {}) => {
+    const models = getTenantModels();
+    const { Order } = models;
+    const where = buildDashboardWhere(filters, enforced_handled_by_ids, models);
+
+    const byStage = await Order.findAll({
+        where,
+        attributes: [
+            "current_stage_key",
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+        ],
+        group: ["current_stage_key"],
+        raw: true,
+    });
+
+    const byDeliveryStatus = await Order.findAll({
+        where,
+        attributes: [
+            "delivery_status",
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+        ],
+        group: ["delivery_status"],
+        raw: true,
+    });
+
+    return {
+        by_stage: byStage.map((row) => ({
+            current_stage_key: row.current_stage_key,
+            count: Number(row.count || 0),
+        })),
+        by_delivery_status: byDeliveryStatus.map((row) => ({
+            delivery_status: row.delivery_status,
+            count: Number(row.count || 0),
+        })),
+    };
+};
+
+const getOrdersDashboardTrend = async ({ filters = {}, enforced_handled_by_ids } = {}) => {
+    const models = getTenantModels();
+    const { Order } = models;
+    const where = buildDashboardWhere(filters, enforced_handled_by_ids, models);
+
+    const rows = await Order.findAll({
+        where,
+        attributes: [
+            [
+                models.sequelize.fn("DATE_TRUNC", "month", models.sequelize.col("order_date")),
+                "month",
+            ],
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "order_count"],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
+                    0
+                ),
+                "total_capacity_kw",
+            ],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
+                    0
+                ),
+                "total_project_cost",
+            ],
+        ],
+        group: ["month"],
+        order: [[models.sequelize.literal("month"), "ASC"]],
+        raw: true,
+    });
+
+    const points = rows.map((row) => ({
+        month: row.month,
+        order_count: Number(row.order_count || 0),
+        total_capacity_kw: Number(row.total_capacity_kw || 0),
+        total_project_cost: Number(row.total_project_cost || 0),
+    }));
+
+    return { points };
 };
 
 const exportOrders = async (params = {}) => {
@@ -1885,4 +2136,7 @@ module.exports = {
     listPendingDeliveryOrders,
     listDeliveryExecutionOrders,
     listFabricationInstallationOrders,
+    getOrdersDashboardKpis,
+    getOrdersDashboardPipeline,
+    getOrdersDashboardTrend,
 };
