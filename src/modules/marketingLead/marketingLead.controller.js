@@ -33,6 +33,19 @@ const resolveMarketingLeadVisibilityContext = async (req) => {
   return { listingCriteria, enforcedAssignedToIds: teamUserIds };
 };
 
+const normalizeDateRangeValue = (value, options = {}) => {
+  if (!value || value === "Invalid date") return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const { endOfDay = false } = options;
+  if (endOfDay) {
+    d.setHours(23, 59, 59, 999);
+  } else {
+    d.setHours(0, 0, 0, 0);
+  }
+  return d.toISOString();
+};
+
 const list = asyncHandler(async (req, res) => {
   const {
     page = 1,
@@ -41,6 +54,7 @@ const list = asyncHandler(async (req, res) => {
     sortBy = "id",
     sortOrder = "DESC",
     status,
+    not_status,
     assigned_to,
     branch_id,
     inquiry_source_id,
@@ -54,6 +68,13 @@ const list = asyncHandler(async (req, res) => {
     next_follow_up_to,
   } = req.query;
 
+  const createdFromDate = normalizeDateRangeValue(created_from, { endOfDay: false });
+  const createdToDate = normalizeDateRangeValue(created_to, { endOfDay: true });
+  const lastCalledFromDate = normalizeDateRangeValue(last_called_from, { endOfDay: false });
+  const lastCalledToDate = normalizeDateRangeValue(last_called_to, { endOfDay: true });
+  const nextFollowUpFromDate = normalizeDateRangeValue(next_follow_up_from, { endOfDay: false });
+  const nextFollowUpToDate = normalizeDateRangeValue(next_follow_up_to, { endOfDay: true });
+
   const { enforcedAssignedToIds } = await resolveMarketingLeadVisibilityContext(req);
   const result = await marketingLeadService.listLeads({
     page: parseInt(page),
@@ -62,17 +83,18 @@ const list = asyncHandler(async (req, res) => {
     sortBy,
     sortOrder,
     status,
+    not_status,
     assigned_to,
     branch_id,
     inquiry_source_id,
     campaign_name,
     priority,
-    created_from,
-    created_to,
-    last_called_from,
-    last_called_to,
-    next_follow_up_from,
-    next_follow_up_to,
+    created_from: createdFromDate,
+    created_to: createdToDate,
+    last_called_from: lastCalledFromDate,
+    last_called_to: lastCalledToDate,
+    next_follow_up_from: nextFollowUpFromDate,
+    next_follow_up_to: nextFollowUpToDate,
     enforced_assigned_to_ids: enforcedAssignedToIds,
   });
   return responseHandler.sendSuccess(res, result, "Marketing leads fetched", 200);
@@ -150,6 +172,33 @@ const convertToInquiry = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, result, "Lead converted to inquiry", 200);
 });
 
+const downloadTemplate = asyncHandler(async (req, res) => {
+  const buffer = await marketingLeadService.generateBulkUploadTemplate();
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="marketing-leads-template.xlsx"'
+  );
+  return res.status(200).send(Buffer.from(buffer));
+});
+
+const previewUpload = asyncHandler(async (req, res) => {
+  const file = req.file;
+  if (!file || !file.buffer) {
+    return responseHandler.sendError(res, "File is required", 400);
+  }
+  const { branch_id, inquiry_source_id } = req.body || {};
+  const preview = await marketingLeadService.previewBulkUploadLeads({
+    fileBuffer: file.buffer,
+    branch_id: branch_id ? Number(branch_id) : null,
+    inquiry_source_id: inquiry_source_id ? Number(inquiry_source_id) : null,
+  });
+  return responseHandler.sendSuccess(res, preview, "Marketing leads preview generated", 200);
+});
+
 const upload = asyncHandler(async (req, res) => {
   const file = req.file;
   if (!file || !file.buffer) {
@@ -172,19 +221,38 @@ const summaryReport = asyncHandler(async (req, res) => {
     branch_id = null,
     user_ids = null,
     source_ids = null,
+    status = null,
+    not_status = null,
+    priority = null,
+    campaign_name = null,
+    lead_segment = null,
+    product_interest = null,
+    assigned_to = null,
   } = req.query;
 
   const parsedUserIds = Array.isArray(user_ids)
     ? user_ids
     : typeof user_ids === "string" && user_ids
-    ? user_ids.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
-    : [];
+      ? user_ids.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+      : [];
 
   const parsedSourceIds = Array.isArray(source_ids)
     ? source_ids
     : typeof source_ids === "string" && source_ids
-    ? source_ids.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
-    : [];
+      ? source_ids.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+      : [];
+
+  const parsedStatus = Array.isArray(status)
+    ? status
+    : typeof status === "string" && status
+      ? status.split(",").map(v => v.trim()).filter(Boolean)
+      : null;
+
+  const parsedPriority = Array.isArray(priority)
+    ? priority
+    : typeof priority === "string" && priority
+      ? priority.split(",").map(v => v.trim()).filter(Boolean)
+      : null;
 
   const report = await marketingLeadService.getLeadReports({
     from,
@@ -192,6 +260,13 @@ const summaryReport = asyncHandler(async (req, res) => {
     branch_id: branch_id ? Number(branch_id) : null,
     user_ids: parsedUserIds,
     source_ids: parsedSourceIds,
+    status: parsedStatus,
+    not_status: not_status || null,
+    priority: parsedPriority,
+    campaign_name: campaign_name || null,
+    lead_segment: lead_segment || null,
+    product_interest: product_interest || null,
+    assigned_to: assigned_to ? Number(assigned_to) : null,
   });
   return responseHandler.sendSuccess(res, report, "Marketing lead summary report", 200);
 });
@@ -206,9 +281,12 @@ const callReport = asyncHandler(async (req, res) => {
     limit = 25,
   } = req.query;
 
+  const fromDate = normalizeDateRangeValue(from, { endOfDay: false });
+  const toDate = normalizeDateRangeValue(to, { endOfDay: true });
+
   const result = await marketingLeadService.getCallReport({
-    from,
-    to,
+    from: fromDate,
+    to: toDate,
     user_id,
     outcome,
     page: parseInt(page),
@@ -236,9 +314,11 @@ module.exports = {
   addFollowUp,
   listFollowUps,
   convertToInquiry,
+  previewUpload,
   upload,
   summaryReport,
   callReport,
   assignLeads,
+  downloadTemplate,
 };
 
