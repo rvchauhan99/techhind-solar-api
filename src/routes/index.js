@@ -22,6 +22,7 @@ const billOfMaterialRoutes = require('../modules/billOfMaterial/billOfMaterial.r
 const projectPriceRoutes = require('../modules/project-price/projectPrice.routes.js');
 const quotationRoutes = require('../modules/quotation/quotation.routes.js');
 const orderRoutes = require('../modules/order/order.routes.js');
+const homeRoutes = require('../modules/home/home.routes.js');
 const supplierRoutes = require('../modules/supplier/supplier.routes.js');
 const purchaseOrderRoutes = require('../modules/purchaseOrder/purchaseOrder.routes.js');
 const poInwardRoutes = require('../modules/poInward/poInward.routes.js');
@@ -92,6 +93,7 @@ router.use("/admin", adminRoutes);
 // Mounts that use per-route requireModulePermission (no mount-level module check).
 router.use("/inquiry", inquiryRoutes);
 router.use("/order", orderRoutes);
+router.use("/home", homeRoutes);
 router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
 router.use("/marketing-leads", marketingLeadRoutes);

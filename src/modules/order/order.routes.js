@@ -14,6 +14,10 @@ const fabricationInstallation = (action) => requireModulePermission({ moduleRout
 
 router.get("/", ...requireAuthWithTenant, pendingOrders("read"), controller.list);
 router.get("/export", ...requireAuthWithTenant, pendingOrders("read"), controller.exportList);
+router.get("/dashboard-kpis", ...requireAuthWithTenant, pendingOrders("read"), controller.dashboardKpis);
+router.get("/dashboard-pipeline", ...requireAuthWithTenant, pendingOrders("read"), controller.dashboardPipeline);
+router.get("/dashboard-trend", ...requireAuthWithTenant, pendingOrders("read"), controller.dashboardTrend);
+router.get("/dashboard-orders", ...requireAuthWithTenant, pendingOrders("read"), controller.dashboardOrders);
 router.get("/pending-delivery", ...requireAuthWithTenant, pendingOrders("read"), controller.listPendingDelivery);
 router.get("/delivery-execution", ...requireAuthWithTenant, pendingOrders("read"), controller.listDeliveryExecution);
 router.get("/fabrication-installation", ...requireAuthWithTenant, fabricationInstallation("read"), controller.listFabricationInstallation);

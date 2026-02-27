@@ -14,6 +14,7 @@ const normalizeLike = (s) => {
 
 const buildLeadWhere = ({
   status,
+  not_status,
   assigned_to,
   branch_id,
   inquiry_source_id,
@@ -31,6 +32,14 @@ const buildLeadWhere = ({
 
   if (status) {
     where.status = Array.isArray(status) ? { [Op.in]: status } : status;
+  }
+  if (not_status) {
+    const notStatusList = Array.isArray(not_status) ? not_status : [not_status];
+    if (where.status) {
+      where.status = { [Op.and]: [where.status, { [Op.notIn]: notStatusList }] };
+    } else {
+      where.status = { [Op.notIn]: notStatusList };
+    }
   }
   if (assigned_to != null && String(assigned_to).trim() !== "") {
     const id = parseInt(assigned_to, 10);
@@ -82,6 +91,7 @@ const listLeads = async ({
   sortBy = "id",
   sortOrder = "DESC",
   status,
+  not_status,
   assigned_to,
   branch_id,
   inquiry_source_id,
@@ -109,6 +119,7 @@ const listLeads = async ({
   const offset = (page - 1) * limit;
   const where = buildLeadWhere({
     status,
+    not_status,
     assigned_to,
     branch_id,
     inquiry_source_id,
@@ -467,10 +478,21 @@ const addFollowUp = async ({ lead_id, payload, user, transaction } = {}) => {
     throw new AppError("Lead not found", RESPONSE_STATUS_CODES.NOT_FOUND);
   }
 
-  const contactedAt = payload.contacted_at || new Date();
+  const contactedAt = payload.contacted_at
+    ? new Date(payload.contacted_at)
+    : new Date();
   const outcome = payload.outcome;
   if (!outcome) {
     throw new AppError("outcome is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+
+  const rawNextFollowUp = payload.next_follow_up_at;
+  let normalizedNextFollowUpAt = null;
+  if (rawNextFollowUp) {
+    const parsed = new Date(rawNextFollowUp);
+    if (!Number.isNaN(parsed.getTime())) {
+      normalizedNextFollowUpAt = parsed;
+    }
   }
 
   const followUp = await MarketingLeadFollowUp.create(
@@ -482,7 +504,7 @@ const addFollowUp = async ({ lead_id, payload, user, transaction } = {}) => {
       outcome,
       outcome_sub_status: payload.outcome_sub_status || null,
       notes: payload.notes || null,
-      next_follow_up_at: payload.next_follow_up_at || null,
+      next_follow_up_at: normalizedNextFollowUpAt,
       promised_action: payload.promised_action || null,
       recording_url: payload.recording_url || null,
       created_by: user?.id || null,
@@ -508,7 +530,10 @@ const addFollowUp = async ({ lead_id, payload, user, transaction } = {}) => {
     {
       last_call_outcome: outcome,
       last_called_at: contactedAt,
-      next_follow_up_at: payload.next_follow_up_at ?? lead.next_follow_up_at,
+      next_follow_up_at:
+        rawNextFollowUp === undefined
+          ? lead.next_follow_up_at
+          : normalizedNextFollowUpAt,
       status: payload.status || derivedStatus,
       status_reason: payload.status_reason ?? lead.status_reason,
     },
@@ -653,12 +678,60 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
   };
 };
 
-const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_source_id }) => {
+const generateBulkUploadTemplate = async () => {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Marketing Leads");
+
+  const headers = [
+    "Name",
+    "Mobile",
+    "City",
+    "State",
+    "Branch",
+    "Source",
+    "Campaign",
+    "Capacity (kW)",
+    "Expected Project Cost",
+    "Priority",
+    "Remarks",
+  ];
+
+  worksheet.addRow(headers);
+  worksheet.addRow([
+    "John Doe",
+    "9876543210",
+    "Ahmedabad",
+    "Gujarat",
+    "Main Branch",
+    "Facebook Ads",
+    "Summer Campaign",
+    "10",
+    "250000",
+    "high",
+    "Interested in 10 kW rooftop system",
+  ]);
+
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.columns.forEach((column) => {
+    if (!column.eachCell) return;
+    let maxLength = 10;
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      const value = cell.value ? cell.value.toString() : "";
+      maxLength = Math.max(maxLength, value.length + 2);
+    });
+    // eslint-disable-next-line no-param-reassign
+    column.width = maxLength;
+  });
+
+  return workbook.xlsx.writeBuffer();
+};
+
+const previewBulkUploadLeads = async ({ fileBuffer, branch_id, inquiry_source_id }) => {
   if (!fileBuffer) {
     throw new AppError("File buffer is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
   const models = getTenantModels();
-  const { MarketingLead, CompanyBranch, InquirySource } = models;
+  const { MarketingLead, CompanyBranch, InquirySource, State, City } = models;
 
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(fileBuffer);
@@ -685,12 +758,20 @@ const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_sour
 
   const branchNameCol = headers["branch"] || null;
   const sourceNameCol = headers["source"] || headers["inquiry_source"] || null;
+  const cityNameCol = headers["city"] || null;
+  const stateNameCol = headers["state"] || null;
+  const capacityCol =
+    headers["capacity (kw)"] || headers["capacity"] || headers["expected_capacity_kw"] || null;
+  const projectCostCol =
+    headers["expected project cost"] || headers["project cost"] || headers["expected_project_cost"] || null;
   const campaignCol = headers["campaign"] || headers["campaign_name"] || null;
   const priorityCol = headers["priority"] || null;
   const remarksCol = headers["remarks"] || null;
 
   const branchCache = new Map();
   const sourceCache = new Map();
+  const stateCache = new Map();
+  const cityCache = new Map();
 
   const resolveBranchIdByName = async (name) => {
     if (!name) return branch_id || null;
@@ -700,7 +781,7 @@ const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_sour
     const row = await CompanyBranch.findOne({
       where: { deleted_at: null, name: { [Op.iLike]: name } },
     });
-    const id = row?.id || branch_id || null;
+    const id = row?.id || null;
     branchCache.set(key, id);
     return id;
   };
@@ -713,8 +794,299 @@ const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_sour
     const row = await InquirySource.findOne({
       where: { deleted_at: null, source_name: { [Op.iLike]: name } },
     });
-    const id = row?.id || inquiry_source_id || null;
+    const id = row?.id || null;
     sourceCache.set(key, id);
+    return id;
+  };
+
+  const resolveStateIdByName = async (name) => {
+    if (!name) return null;
+    const key = String(name).trim().toLowerCase();
+    if (!key) return null;
+    if (stateCache.has(key)) return stateCache.get(key);
+    const row = await State.findOne({
+      where: { deleted_at: null, name: { [Op.iLike]: name } },
+    });
+    const id = row?.id || null;
+    stateCache.set(key, id);
+    return id;
+  };
+
+  const resolveCityIdByName = async (name, stateId = null) => {
+    if (!name) return null;
+    const key = `${String(name).trim().toLowerCase()}::${stateId != null ? String(stateId) : ""
+      }`;
+    if (!name.trim()) return null;
+    if (cityCache.has(key)) return cityCache.get(key);
+    const where = {
+      deleted_at: null,
+      name: { [Op.iLike]: name },
+    };
+    if (stateId != null) {
+      where.state_id = stateId;
+    }
+    const row = await City.findOne({ where });
+    const id = row?.id || null;
+    cityCache.set(key, id);
+    return id;
+  };
+
+  let totalRows = 0;
+  let validRows = 0;
+  let duplicateRows = 0;
+  let errorRows = 0;
+  const previewRows = [];
+
+  const startRow = 2;
+  const lastRow = worksheet.actualRowCount;
+
+  for (let rowNumber = startRow; rowNumber <= lastRow; rowNumber++) {
+    const row = worksheet.getRow(rowNumber);
+    if (!row || row.number !== rowNumber) continue;
+    totalRows += 1;
+
+    const name = row.getCell(nameCol).value?.toString().trim();
+    const mobile = row.getCell(mobileCol).value?.toString().trim();
+
+    if (!name || !mobile) {
+      errorRows += 1;
+      previewRows.push({
+        row: rowNumber,
+        customer_name: name || "",
+        mobile_number: mobile || "",
+        status: "error",
+        message: "Missing Name or Mobile",
+      });
+      continue;
+    }
+
+    try {
+      const existing = await MarketingLead.findOne({
+        where: { mobile_number: mobile, deleted_at: null },
+      });
+      if (existing) {
+        duplicateRows += 1;
+        previewRows.push({
+          row: rowNumber,
+          customer_name: name,
+          mobile_number: mobile,
+          status: "duplicate",
+          message: `Duplicate mobile; existing lead #${existing.lead_number || existing.id}`,
+        });
+        continue;
+      }
+
+      const branchName = branchNameCol
+        ? row.getCell(branchNameCol).value?.toString().trim()
+        : null;
+      const sourceName = sourceNameCol
+        ? row.getCell(sourceNameCol).value?.toString().trim()
+        : null;
+      const cityName = cityNameCol
+        ? row.getCell(cityNameCol).value?.toString().trim()
+        : null;
+      const stateName = stateNameCol
+        ? row.getCell(stateNameCol).value?.toString().trim()
+        : null;
+      const campaignName = campaignCol
+        ? row.getCell(campaignCol).value?.toString().trim()
+        : null;
+      const priorityRaw = priorityCol
+        ? row.getCell(priorityCol).value?.toString().trim().toLowerCase()
+        : null;
+      const remarks = remarksCol
+        ? row.getCell(remarksCol).value?.toString().trim()
+        : null;
+
+      const capacityRaw = capacityCol
+        ? row.getCell(capacityCol).value?.toString().trim()
+        : null;
+      const projectCostRaw = projectCostCol
+        ? row.getCell(projectCostCol).value?.toString().trim()
+        : null;
+
+      const resolvedBranchId = await resolveBranchIdByName(branchName);
+      const resolvedSourceId = await resolveSourceIdByName(sourceName);
+      const resolvedStateId = await resolveStateIdByName(stateName);
+      const resolvedCityId = await resolveCityIdByName(cityName, resolvedStateId);
+
+      if (branchName && !resolvedBranchId) {
+        errorRows += 1;
+        previewRows.push({
+          row: rowNumber,
+          customer_name: name,
+          mobile_number: mobile,
+          branch_name: branchName,
+          inquiry_source_name: sourceName || null,
+          status: "error",
+          message: `Branch '${branchName}' not found in master`,
+        });
+        continue;
+      }
+
+      if (sourceName && !resolvedSourceId) {
+        errorRows += 1;
+        previewRows.push({
+          row: rowNumber,
+          customer_name: name,
+          mobile_number: mobile,
+          branch_name: branchName || null,
+          inquiry_source_name: sourceName,
+          status: "error",
+          message: `Source '${sourceName}' not found in master`,
+        });
+        continue;
+      }
+
+      validRows += 1;
+      previewRows.push({
+        row: rowNumber,
+        customer_name: name,
+        mobile_number: mobile,
+        city_name: cityName || null,
+        state_name: stateName || null,
+        branch_name: branchName || null,
+        inquiry_source_name: sourceName || null,
+        campaign_name: campaignName || null,
+        priority: priorityRaw || "medium",
+        remarks: remarks || null,
+        resolved_branch_id: resolvedBranchId,
+        resolved_inquiry_source_id: resolvedSourceId,
+        resolved_state_id: resolvedStateId,
+        resolved_city_id: resolvedCityId,
+        expected_capacity_kw: capacityRaw && !Number.isNaN(Number(capacityRaw))
+          ? Number(capacityRaw)
+          : null,
+        expected_project_cost:
+          projectCostRaw && !Number.isNaN(Number(projectCostRaw))
+            ? Number(projectCostRaw)
+            : null,
+        status: "valid",
+        message: "",
+      });
+    } catch (err) {
+      errorRows += 1;
+      previewRows.push({
+        row: rowNumber,
+        customer_name: name,
+        mobile_number: mobile,
+        status: "error",
+        message: err?.message || "Unknown error",
+      });
+    }
+  }
+
+  return {
+    total_rows: totalRows,
+    valid_rows: validRows,
+    error_rows: errorRows,
+    duplicate_rows: duplicateRows,
+    rows: previewRows.slice(0, 200),
+  };
+};
+
+const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_source_id }) => {
+  if (!fileBuffer) {
+    throw new AppError("File buffer is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+  const models = getTenantModels();
+  const { MarketingLead, CompanyBranch, InquirySource, State, City } = models;
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(fileBuffer);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
+    throw new AppError("No worksheet found in file", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+
+  const headerRow = worksheet.getRow(1);
+  const headers = {};
+  headerRow.eachCell((cell, colNumber) => {
+    const key = String(cell.value || "").toLowerCase().trim();
+    if (key) headers[key] = colNumber;
+  });
+
+  const nameCol = headers["name"] ?? headers["customer_name"];
+  const mobileCol = headers["mobile"] ?? headers["mobile_number"];
+  if (!nameCol || !mobileCol) {
+    throw new AppError(
+      "Template must include at least 'Name' and 'Mobile' columns",
+      RESPONSE_STATUS_CODES.BAD_REQUEST
+    );
+  }
+
+  const branchNameCol = headers["branch"] || null;
+  const sourceNameCol = headers["source"] || headers["inquiry_source"] || null;
+  const cityNameCol = headers["city"] || null;
+  const stateNameCol = headers["state"] || null;
+  const campaignCol = headers["campaign"] || headers["campaign_name"] || null;
+  const priorityCol = headers["priority"] || null;
+  const remarksCol = headers["remarks"] || null;
+  const capacityCol =
+    headers["capacity (kw)"] || headers["capacity"] || headers["expected_capacity_kw"] || null;
+  const projectCostCol =
+    headers["expected project cost"] || headers["project cost"] || headers["expected_project_cost"] || null;
+
+  const branchCache = new Map();
+  const sourceCache = new Map();
+  const stateCache = new Map();
+  const cityCache = new Map();
+
+  const resolveBranchIdByName = async (name) => {
+    if (!name) return branch_id || null;
+    const key = String(name).trim().toLowerCase();
+    if (!key) return branch_id || null;
+    if (branchCache.has(key)) return branchCache.get(key);
+    const row = await CompanyBranch.findOne({
+      where: { deleted_at: null, name: { [Op.iLike]: name } },
+    });
+    const id = row?.id || null;
+    branchCache.set(key, id);
+    return id;
+  };
+
+  const resolveSourceIdByName = async (name) => {
+    if (!name) return inquiry_source_id || null;
+    const key = String(name).trim().toLowerCase();
+    if (!key) return inquiry_source_id || null;
+    if (sourceCache.has(key)) return sourceCache.get(key);
+    const row = await InquirySource.findOne({
+      where: { deleted_at: null, source_name: { [Op.iLike]: name } },
+    });
+    const id = row?.id || null;
+    sourceCache.set(key, id);
+    return id;
+  };
+
+  const resolveStateIdByName = async (name) => {
+    if (!name) return null;
+    const key = String(name).trim().toLowerCase();
+    if (!key) return null;
+    if (stateCache.has(key)) return stateCache.get(key);
+    const row = await State.findOne({
+      where: { deleted_at: null, name: { [Op.iLike]: name } },
+    });
+    const id = row?.id || null;
+    stateCache.set(key, id);
+    return id;
+  };
+
+  const resolveCityIdByName = async (name, stateId = null) => {
+    if (!name) return null;
+    const key = `${String(name).trim().toLowerCase()}::${stateId != null ? String(stateId) : ""
+      }`;
+    if (!name.trim()) return null;
+    if (cityCache.has(key)) return cityCache.get(key);
+    const where = {
+      deleted_at: null,
+      name: { [Op.iLike]: name },
+    };
+    if (stateId != null) {
+      where.state_id = stateId;
+    }
+    const row = await City.findOne({ where });
+    const id = row?.id || null;
+    cityCache.set(key, id);
     return id;
   };
 
@@ -753,22 +1125,64 @@ const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_sour
         continue;
       }
 
-      const branchName = branchNameCol ? row.getCell(branchNameCol).value?.toString().trim() : null;
-      const sourceName = sourceNameCol ? row.getCell(sourceNameCol).value?.toString().trim() : null;
+      const branchName = branchNameCol
+        ? row.getCell(branchNameCol).value?.toString().trim()
+        : null;
+      const sourceName = sourceNameCol
+        ? row.getCell(sourceNameCol).value?.toString().trim()
+        : null;
+      const cityName = cityNameCol
+        ? row.getCell(cityNameCol).value?.toString().trim()
+        : null;
+      const stateName = stateNameCol
+        ? row.getCell(stateNameCol).value?.toString().trim()
+        : null;
       const campaignName = campaignCol ? row.getCell(campaignCol).value?.toString().trim() : null;
       const priorityRaw = priorityCol ? row.getCell(priorityCol).value?.toString().trim().toLowerCase() : null;
       const remarks = remarksCol ? row.getCell(remarksCol).value?.toString().trim() : null;
+      const capacityRaw = capacityCol ? row.getCell(capacityCol).value?.toString().trim() : null;
+      const projectCostRaw = projectCostCol ? row.getCell(projectCostCol).value?.toString().trim() : null;
 
       const resolvedBranchId = await resolveBranchIdByName(branchName);
       const resolvedSourceId = await resolveSourceIdByName(sourceName);
+      const resolvedStateId = await resolveStateIdByName(stateName);
+      const resolvedCityId = await resolveCityIdByName(cityName, resolvedStateId);
+
+      if (branchName && !resolvedBranchId) {
+        failed += 1;
+        errors.push({
+          row: rowNumber,
+          message: `Branch '${branchName}' not found in master`,
+        });
+        continue;
+      }
+
+      if (sourceName && !resolvedSourceId) {
+        failed += 1;
+        errors.push({
+          row: rowNumber,
+          message: `Source '${sourceName}' not found in master`,
+        });
+        continue;
+      }
 
       await MarketingLead.create({
         customer_name: name,
         mobile_number: mobile,
         branch_id: resolvedBranchId,
         inquiry_source_id: resolvedSourceId,
+        state_id: resolvedStateId,
+        city_id: resolvedCityId,
         campaign_name: campaignName || null,
         priority: priorityRaw || "medium",
+        expected_capacity_kw:
+          capacityRaw && !Number.isNaN(Number(capacityRaw))
+            ? Number(capacityRaw)
+            : null,
+        expected_project_cost:
+          projectCostRaw && !Number.isNaN(Number(projectCostRaw))
+            ? Number(projectCostRaw)
+            : null,
         remarks: remarks || null,
         assigned_to: created_by || null,
       });
@@ -792,9 +1206,22 @@ const bulkUploadLeads = async ({ fileBuffer, created_by, branch_id, inquiry_sour
   };
 };
 
-const getLeadReports = async ({ from, to, branch_id, user_ids, source_ids } = {}) => {
+const getLeadReports = async ({
+  from,
+  to,
+  branch_id,
+  user_ids,
+  source_ids,
+  status,
+  not_status,
+  priority,
+  campaign_name,
+  lead_segment,
+  product_interest,
+  assigned_to,
+} = {}) => {
   const models = getTenantModels();
-  const { MarketingLead, MarketingLeadFollowUp } = models;
+  const { MarketingLead, MarketingLeadFollowUp, User } = models;
 
   const baseWhere = { deleted_at: null };
   if (from || to) {
@@ -808,10 +1235,66 @@ const getLeadReports = async ({ from, to, branch_id, user_ids, source_ids } = {}
   if (Array.isArray(source_ids) && source_ids.length) {
     baseWhere.inquiry_source_id = { [Op.in]: source_ids };
   }
+  if (assigned_to) {
+    baseWhere.assigned_to = assigned_to;
+  }
+  if (status) {
+    baseWhere.status = Array.isArray(status) ? { [Op.in]: status } : status;
+  }
+  if (not_status) {
+    const notStatusList = Array.isArray(not_status) ? not_status : [not_status];
+    if (baseWhere.status) {
+      baseWhere.status = { [Op.and]: [baseWhere.status, { [Op.notIn]: notStatusList }] };
+    } else {
+      baseWhere.status = { [Op.notIn]: notStatusList };
+    }
+  }
+  if (priority) {
+    baseWhere.priority = Array.isArray(priority) ? { [Op.in]: priority } : priority;
+  }
+  if (campaign_name) {
+    baseWhere.campaign_name = { [Op.iLike]: `%${campaign_name}%` };
+  }
+  if (lead_segment) {
+    baseWhere.lead_segment = lead_segment;
+  }
+  if (product_interest) {
+    baseWhere.product_interest = product_interest;
+  }
 
-  const funnelRows = await MarketingLead.findAll({
-    attributes: ["status", [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"]],
+  const funnelWhere = { ...baseWhere };
+  // the user specifically requested converted inquiries not be in the pipeline as they are converted
+  if (funnelWhere.status) {
+    funnelWhere.status = { [Op.and]: [funnelWhere.status, { [Op.notIn]: ["converted"] }] };
+  } else {
+    funnelWhere.status = { [Op.notIn]: ["converted"] };
+  }
+
+  // All-leads status breakdown (including converted) for global metrics
+  const statusRows = await MarketingLead.findAll({
+    attributes: [
+      "status",
+      [models.sequelize.fn("COUNT", models.sequelize.col("MarketingLead.id")), "count"],
+    ],
     where: baseWhere,
+    group: ["status"],
+    raw: true,
+  });
+
+  const totalLeadsAll = statusRows.reduce(
+    (sum, row) => sum + Number(row.count || 0),
+    0
+  );
+  const convertedCount =
+    statusRows.find((row) => row.status === "converted")?.count || 0;
+
+  // Pipeline funnel should continue to exclude converted leads
+  const funnelRows = await MarketingLead.findAll({
+    attributes: [
+      "status",
+      [models.sequelize.fn("COUNT", models.sequelize.col("MarketingLead.id")), "count"],
+    ],
+    where: funnelWhere,
     group: ["status"],
     raw: true,
   });
@@ -826,15 +1309,29 @@ const getLeadReports = async ({ from, to, branch_id, user_ids, source_ids } = {}
     agentWhere.created_by = { [Op.in]: user_ids };
   }
 
-  const agentRows = await MarketingLeadFollowUp.findAll({
+  const agentRowsRaw = await MarketingLeadFollowUp.findAll({
     attributes: [
       "created_by",
-      [models.sequelize.fn("COUNT", models.sequelize.col("id")), "follow_up_count"],
+      [models.sequelize.fn("COUNT", models.sequelize.col("MarketingLeadFollowUp.id")), "follow_up_count"],
     ],
     where: agentWhere,
-    group: ["created_by"],
+    include: [
+      {
+        model: User,
+        as: "createdBy",
+        attributes: ["name"],
+        required: false,
+      },
+    ],
+    group: ["MarketingLeadFollowUp.created_by", "createdBy.id", "createdBy.name"],
     raw: true,
   });
+
+  const agentRows = agentRowsRaw.map((row) => ({
+    created_by: row.created_by,
+    follow_up_count: row.follow_up_count,
+    name: row["createdBy.name"] || `User #${row.created_by}`,
+  }));
 
   const sourceBranchRows = await MarketingLead.findAll({
     attributes: [
@@ -857,7 +1354,7 @@ const getLeadReports = async ({ from, to, branch_id, user_ids, source_ids } = {}
   const now = new Date();
   const leads = await MarketingLead.findAll({
     attributes: ["id", "created_at", "next_follow_up_at"],
-    where: baseWhere,
+    where: funnelWhere,
     raw: true,
   });
 
@@ -889,6 +1386,14 @@ const getLeadReports = async ({ from, to, branch_id, user_ids, source_ids } = {}
   });
 
   return {
+    // All-leads status view (including converted) for compact dashboard KPIs
+    status_breakdown_all: statusRows,
+    total_leads_all: totalLeadsAll,
+    converted_count: Number(convertedCount || 0),
+    conversion_rate:
+      totalLeadsAll > 0 ? (Number(convertedCount || 0) / totalLeadsAll) * 100 : 0,
+
+    // Existing sections
     funnel: funnelRows,
     agent_performance: agentRows,
     source_branch: sourceBranchRows,
@@ -1043,6 +1548,8 @@ module.exports = {
   addFollowUp,
   listFollowUps,
   convertLeadToInquiry,
+  generateBulkUploadTemplate,
+  previewBulkUploadLeads,
   bulkUploadLeads,
   getLeadReports,
   getCallReport,

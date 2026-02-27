@@ -23,6 +23,19 @@ router.post(
   upload.single("file"),
   controller.upload
 );
+router.get(
+  "/bulk/template",
+  ...requireAuthWithTenant,
+  modulePerm("read"),
+  controller.downloadTemplate
+);
+router.post(
+  "/bulk/preview",
+  ...requireAuthWithTenant,
+  modulePerm("create"),
+  upload.single("file"),
+  controller.previewUpload
+);
 router.post("/", ...requireAuthWithTenant, modulePerm("create"), controller.create);
 router.get("/:id", ...requireAuthWithTenant, modulePerm("read"), controller.getById);
 router.put("/:id", ...requireAuthWithTenant, modulePerm("update"), controller.update);
