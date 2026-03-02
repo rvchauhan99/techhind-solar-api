@@ -584,6 +584,26 @@ const getOrdersDashboardKpis = async ({ filters = {}, enforced_handled_by_ids } 
         raw: true,
     });
 
+    const byStage = await Order.findAll({
+        where,
+        attributes: [
+            "current_stage_key",
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+        ],
+        group: ["current_stage_key"],
+        raw: true,
+    });
+
+    const byDeliveryStatus = await Order.findAll({
+        where,
+        attributes: [
+            "delivery_status",
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+        ],
+        group: ["delivery_status"],
+        raw: true,
+    });
+
     return {
         totals: {
             total_orders: Number(totalsRow?.total_orders || 0),
@@ -596,6 +616,14 @@ const getOrdersDashboardKpis = async ({ filters = {}, enforced_handled_by_ids } 
         })),
         by_branch: byBranch.map((row) => ({
             branch_id: row.branch_id,
+            count: Number(row.count || 0),
+        })),
+        by_stage: byStage.map((row) => ({
+            current_stage_key: row.current_stage_key,
+            count: Number(row.count || 0),
+        })),
+        by_delivery_status: byDeliveryStatus.map((row) => ({
+            delivery_status: row.delivery_status,
             count: Number(row.count || 0),
         })),
     };
