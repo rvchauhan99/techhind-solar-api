@@ -6,6 +6,7 @@ const { Op } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const notificationService = require("../notification/notification.service.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -1188,7 +1189,22 @@ const createOrder = async ({ payload, transaction } = {}) => {
             await t.commit();
         }
 
-        return created.toJSON();
+        const orderJson = created.toJSON();
+        if (orderJson.handled_by) {
+            const refNum = orderJson.order_number || `#${orderJson.id}`;
+            notificationService.createAndEmit({
+                user_id: orderJson.handled_by,
+                type: "order_created",
+                module: "order",
+                title: "Order created",
+                message: `Order ${refNum} has been created.`,
+                reference_id: orderJson.id,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/order/view?id=${orderJson.id}`,
+                action_label: "Open Order",
+            }).catch((err) => console.warn("[order] notification failed:", err?.message));
+        }
+        return orderJson;
     } catch (err) {
         if (committedHere) {
             await t.rollback();
@@ -1215,6 +1231,18 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
         });
 
         if (!order) throw new Error("Order not found");
+
+        const previousStatus = order.status;
+        const previousPlannedWarehouseId = order.planned_warehouse_id;
+        const previousFabricatorId = order.fabricator_id;
+        const previousInstallerId = order.installer_id;
+        const previousFabricatorInstallerId = order.fabricator_installer_id;
+        const previousFabricationCompletedAt = order.fabrication_completed_at;
+        const previousInstallationCompletedAt = order.installation_completed_at;
+        const previousNetmeterApplyCompletedAt = order.netmeter_apply_completed_at;
+        const previousNetmeterInstalledCompletedAt = order.netmeter_installed_completed_at;
+        const previousSubsidyClaimCompletedAt = order.subsidy_claim_completed_at;
+        const previousSubsidyDisbursedCompletedAt = order.subsidy_disbursed_completed_at;
 
         // Planner activity log: when bom_snapshot is updated, compute diff and append entries
         let plannerActivityLogUpdate = undefined;
@@ -1408,7 +1436,173 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             await t.commit();
         }
 
-        return order.toJSON();
+        const orderJson = order.toJSON();
+        const orderRef = orderJson.order_number || `#${orderJson.id}`;
+        const orderId = order.id;
+        const handledBy = orderJson.handled_by;
+        const emit = (opts) => notificationService.createAndEmit(opts).catch((err) => console.warn("[order] notification failed:", err?.message));
+
+        if (effectiveStatus === "confirmed" && previousStatus !== "confirmed" && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_confirmed",
+                module: "order",
+                title: "Order confirmed",
+                message: `Order ${orderRef} has been confirmed.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        const newPlannedWarehouseId = payload.planned_warehouse_id ?? previousPlannedWarehouseId;
+        if (newPlannedWarehouseId != null && newPlannedWarehouseId !== previousPlannedWarehouseId) {
+            CompanyWarehouse.findByPk(newPlannedWarehouseId, {
+                include: [{ model: User, as: "managers", attributes: ["id"], required: false }],
+            }).then((wh) => {
+                const managerIds = (wh?.managers || []).map((m) => m.id).filter(Boolean);
+                managerIds.forEach((uid) => {
+                    emit({
+                        user_id: uid,
+                        type: "order_planned",
+                        module: "order",
+                        title: "Order assigned to your warehouse",
+                        message: `Order ${orderRef} has been planned to your warehouse.`,
+                        reference_id: orderId,
+                        reference_number: orderJson.order_number || null,
+                        redirect_url: `/confirm-orders/view?id=${orderId}`,
+                        action_label: "Open Order",
+                    });
+                });
+            }).catch(() => {});
+        }
+        const newFabricatorId = fabricatorId ?? previousFabricatorId;
+        const newInstallerId = installerId ?? previousInstallerId;
+        if (newFabricatorId != null && newFabricatorId !== previousFabricatorId && newFabricatorId !== previousFabricatorInstallerId) {
+            emit({
+                user_id: newFabricatorId,
+                type: "order_fab_assigned",
+                module: "order",
+                title: "Fabricator assigned",
+                message: `You have been assigned as fabricator for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        if (newInstallerId != null && newInstallerId !== previousInstallerId && newInstallerId !== previousFabricatorInstallerId) {
+            emit({
+                user_id: newInstallerId,
+                type: "order_install_assigned",
+                module: "order",
+                title: "Installer assigned",
+                message: `You have been assigned as installer for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        const newFabricationCompletedAt = payload.fabrication_completed_at ?? order.fabrication_completed_at;
+        if (newFabricationCompletedAt != null && newFabricationCompletedAt !== previousFabricationCompletedAt && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_stage_fab_done",
+                module: "order",
+                title: "Fabrication completed",
+                message: `Fabrication completed for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+            if (newInstallerId && newInstallerId !== handledBy) {
+                emit({
+                    user_id: newInstallerId,
+                    type: "order_stage_fab_done",
+                    module: "order",
+                    title: "Fabrication completed",
+                    message: `Fabrication completed for order ${orderRef}. Ready for installation.`,
+                    reference_id: orderId,
+                    reference_number: orderJson.order_number || null,
+                    redirect_url: `/confirm-orders/view?id=${orderId}`,
+                    action_label: "Open Order",
+                });
+            }
+        }
+        const newInstallationCompletedAt = payload.installation_completed_at ?? order.installation_completed_at;
+        if (newInstallationCompletedAt != null && newInstallationCompletedAt !== previousInstallationCompletedAt && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_stage_install_done",
+                module: "order",
+                title: "Installation completed",
+                message: `Installation completed for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        const newNetmeterApplyCompletedAt = payload.netmeter_apply_completed_at ?? order.netmeter_apply_completed_at;
+        if (newNetmeterApplyCompletedAt != null && newNetmeterApplyCompletedAt !== previousNetmeterApplyCompletedAt && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_stage_netmeter_apply",
+                module: "order",
+                title: "Netmeter apply done",
+                message: `Netmeter apply completed for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        const newNetmeterInstalledCompletedAt = payload.netmeter_installed_completed_at ?? order.netmeter_installed_completed_at;
+        if (newNetmeterInstalledCompletedAt != null && newNetmeterInstalledCompletedAt !== previousNetmeterInstalledCompletedAt && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_stage_netmeter_done",
+                module: "order",
+                title: "Netmeter installed",
+                message: `Netmeter installed for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        const newSubsidyClaimCompletedAt = payload.subsidy_claim_completed_at ?? order.subsidy_claim_completed_at;
+        if (newSubsidyClaimCompletedAt != null && newSubsidyClaimCompletedAt !== previousSubsidyClaimCompletedAt && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_stage_subsidy_claim",
+                module: "order",
+                title: "Subsidy claim submitted",
+                message: `Subsidy claim submitted for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+        const newSubsidyDisbursedCompletedAt = payload.subsidy_disbursed_completed_at ?? order.subsidy_disbursed_completed_at;
+        if (newSubsidyDisbursedCompletedAt != null && newSubsidyDisbursedCompletedAt !== previousSubsidyDisbursedCompletedAt && handledBy) {
+            emit({
+                user_id: handledBy,
+                type: "order_stage_subsidy_disbursed",
+                module: "order",
+                title: "Subsidy disbursed",
+                message: `Subsidy disbursed for order ${orderRef}.`,
+                reference_id: orderId,
+                reference_number: orderJson.order_number || null,
+                redirect_url: `/confirm-orders/view?id=${orderId}`,
+                action_label: "Open Order",
+            });
+        }
+
+        return orderJson;
     } catch (err) {
         if (committedHere) {
             await t.rollback();

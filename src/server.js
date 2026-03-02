@@ -1,4 +1,6 @@
 const express = require("express");
+const http = require("http");
+const { Server: SocketIOServer } = require("socket.io");
 const dotenv = require("dotenv");
 const passport = require("passport");
 const db = require("./models/index.js");
@@ -19,6 +21,7 @@ const {
 } = require("./config/registryDb.js");
 const { closeAllPools } = require("./modules/tenant/dbPoolManager.js");
 const { requestContextMiddleware } = require("./common/utils/requestContext.js");
+const { setIO } = require("./config/socketInstance.js");
 
 dotenv.config();
 
@@ -66,6 +69,55 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
+// ─── HTTP Server + Socket.IO ────────────────────────────────────────────────
+const httpServer = http.createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  transports: ["websocket", "polling"],
+});
+
+// Register the io singleton so services can emit without importing httpServer
+setIO(io);
+
+// JWT auth middleware for Socket.IO connections
+const jwt = require("jsonwebtoken");
+io.use((socket, next) => {
+  try {
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.query?.token;
+    if (!token) return next(new Error("Socket: no auth token"));
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.id || decoded.userId || decoded.sub;
+    return next();
+  } catch (err) {
+    return next(new Error("Socket: invalid token"));
+  }
+});
+
+io.on("connection", (socket) => {
+  const userId = socket.userId;
+  if (userId) {
+    // Each user gets their own private room keyed by user-{id}
+    socket.join(`user-${userId}`);
+    if (NODE_ENV === "development") {
+      console.log(`🔌 Socket connected: user-${userId} (socketId=${socket.id})`);
+    }
+  }
+
+  socket.on("disconnect", () => {
+    if (NODE_ENV === "development") {
+      console.log(`🔌 Socket disconnected: user-${userId} (socketId=${socket.id})`);
+    }
+  });
+});
+
+// ─── Graceful Shutdown ───────────────────────────────────────────────────────
 let server = null;
 
 /** Graceful shutdown: close HTTP server and all DB connections so nodemon/restart doesn't leak connection slots.
@@ -150,11 +202,11 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
       tenantLogLines.push(`   Tenant   : \x1b[36mdedicated\x1b[0m${dedicatedId ? ` (id: ${dedicatedId})` : ""}`);
     }
 
-    const tenantBlock = tenantMode.startsWith("shared")
-      ? tenantLogLines.join("\n")
-      : tenantLogLines.join("\n");
+    const tenantBlock = tenantLogLines.join("\n");
+    const socketCorsOrigin = process.env.FRONTEND_URL || "*";
+    const socketTransports = "websocket, polling";
 
-    server = app.listen(PORT, () => {
+    server = httpServer.listen(PORT, () => {
       if (NODE_ENV === "development" || NODE_ENV === "test") {
         console.log(`
 ============================================
@@ -167,6 +219,14 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 📦 Environment : \x1b[33m${NODE_ENV}\x1b[0m
 🌐 Port        : \x1b[36m${PORT}\x1b[0m
 🏷️  Mode       : \x1b[36m${tenantMode}\x1b[0m
+────────────────────────────────────────────
+🔔 \x1b[1mSocket.IO status\x1b[0m
+   Status   : \x1b[32mattached to HTTP server\x1b[0m
+   Transports: \x1b[36m${socketTransports}\x1b[0m
+   CORS     : \x1b[36m${socketCorsOrigin}\x1b[0m
+   Auth     : JWT (handshake auth.token)
+   Rooms    : user-{userId} (per-user notifications)
+────────────────────────────────────────────
 ${tenantBlock}
 ============================================
 `);
@@ -183,6 +243,9 @@ ${tenantBlock}
 🌐 Port        : \x1b[36m${PORT}\x1b[0m
 🕒 Started At  : \x1b[90m${new Date().toLocaleString()}\x1b[0m
 🏷️  Mode       : \x1b[36m${tenantMode}\x1b[0m
+────────────────────────────────────────────
+🔔 Socket.IO status: attached, transports: ${socketTransports}, CORS: ${socketCorsOrigin}
+────────────────────────────────────────────
 ${tenantBlock}
 ============================================
 `);
