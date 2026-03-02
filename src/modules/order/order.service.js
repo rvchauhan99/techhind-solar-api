@@ -173,6 +173,7 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         order_date_to,
         customer_name,
         mobile_number,
+        current_stage_key,
     } = filters || {};
 
     if (status) {
@@ -214,6 +215,10 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
 
     if (reference_from) {
         where.reference_from = { [Op.iLike]: `%${reference_from}%` };
+    }
+
+    if (current_stage_key != null && String(current_stage_key).trim() !== "") {
+        where.current_stage_key = String(current_stage_key).trim();
     }
 
     if (order_date_from || order_date_to) {
@@ -269,6 +274,7 @@ const listOrders = async ({
     consumer_no,
     application_no,
     reference_from,
+    current_stage_key,
     capacity,
     capacity_op,
     capacity_to,
@@ -323,6 +329,10 @@ const listOrders = async ({
 
     if (reference_from) {
         where.reference_from = { [Op.iLike]: `%${reference_from}%` };
+    }
+
+    if (current_stage_key != null && String(current_stage_key).trim() !== "") {
+        where.current_stage_key = String(current_stage_key).trim();
     }
 
     if (order_date_from || order_date_to) {
