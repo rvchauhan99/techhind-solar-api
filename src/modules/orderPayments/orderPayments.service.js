@@ -1,12 +1,34 @@
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const notificationService = require("../notification/notification.service.js");
 
 const orderPaymentService = {
     // Create a new payment
     async createPayment(payload, transaction) {
         const models = getTenantModels();
-        const { OrderPaymentDetail } = models;
+        const { OrderPaymentDetail, Order } = models;
         const payment = await OrderPaymentDetail.create(payload, { transaction });
+        const orderId = payload.order_id;
+        if (orderId) {
+            Order.findByPk(orderId, { attributes: ["id", "order_number", "handled_by"] })
+                .then((order) => {
+                    if (!order || !order.handled_by) return;
+                    const refNum = order.order_number || `#${order.id}`;
+                    const amount = payment.payment_amount != null ? String(payment.payment_amount) : "";
+                    notificationService.createAndEmit({
+                        user_id: order.handled_by,
+                        type: "order_payment_received",
+                        module: "order",
+                        title: "Payment received",
+                        message: amount ? `Payment of ${amount} received for order ${refNum}.` : `Payment received for order ${refNum}.`,
+                        reference_id: orderId,
+                        reference_number: order.order_number || null,
+                        redirect_url: `/order/${orderId}`,
+                        action_label: "Open Order",
+                    }).catch((err) => console.warn("[orderPayments] notification failed:", err?.message));
+                })
+                .catch(() => {});
+        }
         return payment;
     },
 

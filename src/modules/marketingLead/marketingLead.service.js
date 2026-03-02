@@ -5,6 +5,7 @@ const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
+const notificationService = require("../notification/notification.service.js");
 
 const normalizeLike = (s) => {
   if (s == null) return null;
@@ -444,8 +445,41 @@ const updateLead = async ({ id, payload, transaction } = {}) => {
       payload.is_primary_in_duplicate_group ?? lead.is_primary_in_duplicate_group,
   };
 
+  const previousAssignedTo = lead.assigned_to;
+  const previousStatus = lead.status;
+  const leadNumber = lead.lead_number || `#${lead.id}`;
+
   await lead.update(updates, { transaction });
-  return lead.toJSON();
+  const updatedLead = lead.toJSON();
+
+  if (updates.assigned_to != null && updates.assigned_to !== previousAssignedTo && updates.assigned_to) {
+    notificationService.createAndEmit({
+      user_id: updates.assigned_to,
+      type: "lead_reassigned",
+      module: "lead",
+      title: "Lead reassigned to you",
+      message: `Lead ${leadNumber} has been reassigned to you.`,
+      reference_id: lead.id,
+      reference_number: lead.lead_number || null,
+      redirect_url: `/marketing-leads/view?id=${lead.id}`,
+      action_label: "Open Lead",
+    }).catch((err) => console.warn("[marketingLead] notification failed:", err?.message));
+  }
+  if (updates.status != null && updates.status !== previousStatus && updatedLead.assigned_to) {
+    notificationService.createAndEmit({
+      user_id: updatedLead.assigned_to,
+      type: "lead_status_changed",
+      module: "lead",
+      title: "Lead status updated",
+      message: `Lead ${leadNumber} status changed to ${updates.status}.`,
+      reference_id: lead.id,
+      reference_number: lead.lead_number || null,
+      redirect_url: `/marketing-leads/view?id=${lead.id}`,
+      action_label: "Open Lead",
+    }).catch((err) => console.warn("[marketingLead] notification failed:", err?.message));
+  }
+
+  return updatedLead;
 };
 
 const deleteLead = async ({ id, transaction } = {}) => {
@@ -671,6 +705,35 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
     },
     { transaction }
   );
+
+  const inquiryNumber = inquiry.inquiry_number || `#${inquiry.id}`;
+  if (lead.assigned_to) {
+    notificationService.createAndEmit({
+      user_id: lead.assigned_to,
+      type: "lead_converted",
+      module: "lead",
+      title: "Lead converted to inquiry",
+      message: `Lead was converted to inquiry ${inquiryNumber}.`,
+      reference_id: inquiry.id,
+      reference_number: inquiry.inquiry_number || null,
+      redirect_url: `/inquiry/${inquiry.id}`,
+      action_label: "Open Inquiry",
+    }).catch((err) => console.warn("[marketingLead] notification failed:", err?.message));
+  }
+  const handledBy = inquiryPayload.handled_by || lead.assigned_to;
+  if (handledBy && handledBy !== lead.assigned_to) {
+    notificationService.createAndEmit({
+      user_id: handledBy,
+      type: "lead_converted",
+      module: "inquiry",
+      title: "New inquiry from lead conversion",
+      message: `Inquiry ${inquiryNumber} was created from a converted lead.`,
+      reference_id: inquiry.id,
+      reference_number: inquiry.inquiry_number || null,
+      redirect_url: `/inquiry/${inquiry.id}`,
+      action_label: "Open Inquiry",
+    }).catch((err) => console.warn("[marketingLead] notification failed:", err?.message));
+  }
 
   return {
     lead_id: lead.id,
@@ -1535,6 +1598,28 @@ const assignLeads = async ({ lead_ids, assigned_to, transaction } = {}) => {
       transaction,
     }
   );
+
+  if (updatedCount > 0) {
+    const leads = await MarketingLead.findAll({
+      where: { id: { [Op.in]: lead_ids }, deleted_at: null },
+      attributes: ["id", "lead_number"],
+      transaction,
+    });
+    const notifications = leads.map((lead) => ({
+      user_id: assigned_to,
+      type: "lead_assigned",
+      module: "lead",
+      title: "Lead assigned to you",
+      message: lead.lead_number ? `Lead ${lead.lead_number} has been assigned to you.` : `Lead #${lead.id} has been assigned to you.`,
+      reference_id: lead.id,
+      reference_number: lead.lead_number || null,
+      redirect_url: `/marketing-leads/view?id=${lead.id}`,
+      action_label: "Open Lead",
+    }));
+    notificationService.createAndEmitMany(notifications).catch((err) => {
+      console.warn("[marketingLead] assignLeads notifications failed:", err?.message);
+    });
+  }
 
   return { updated: updatedCount };
 };

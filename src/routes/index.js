@@ -44,6 +44,7 @@ const deliveryReportRoutes = require('../modules/reports/deliveryReport/delivery
 const paymentsReportRoutes = require('../modules/reports/payments/paymentsReport.routes.js');
 const billingRoutes = require('../modules/billing/billing.routes.js');
 const adminRoutes = require('../modules/admin/admin.routes.js');
+const notificationRoutes = require('../modules/notification/notification.routes.js');
 const router = Router();
 
 // health check API – verifies main DB connectivity (works for both single-tenant and multi-tenant)
@@ -88,6 +89,7 @@ router.use("/reports/serialized-inventory", requireAuthWithTenant, requireModule
 router.use("/reports/deliveries", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/deliveries" }), deliveryReportRoutes);
 router.use("/billing", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/billing" }), billingRoutes);
 router.use("/admin", adminRoutes);
+router.use("/notifications", requireAuthWithTenant, notificationRoutes);
 
 // Child API mounts use parent page module: order-documents/inquiry-documents use /order and /inquiry above; order-payments uses any of order-related pages.
 // Mounts that use per-route requireModulePermission (no mount-level module check).

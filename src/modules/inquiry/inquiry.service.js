@@ -4,6 +4,7 @@ const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const { INQUIRY_STATUS } = require("../../common/utils/constants.js");
+const notificationService = require("../notification/notification.service.js");
 
 const listInquiries = async ({
   search,
@@ -557,6 +558,21 @@ const createInquiry = async ({ payload, transaction } = {}) => {
 
     const created = await Inquiry.create(data, { transaction: t });
 
+    if (data.handled_by) {
+      const refNum = created.inquiry_number || `#${created.id}`;
+      notificationService.createAndEmit({
+        user_id: data.handled_by,
+        type: "inquiry_created",
+        module: "inquiry",
+        title: "New inquiry assigned to you",
+        message: `Inquiry ${refNum} has been assigned to you.`,
+        reference_id: created.id,
+        reference_number: created.inquiry_number || null,
+        redirect_url: `/inquiry/${created.id}`,
+        action_label: "Open Inquiry",
+      }).catch((err) => console.warn("[inquiry] notification failed:", err?.message));
+    }
+
     if (committedHere) {
       await t.commit();
     }
@@ -584,6 +600,9 @@ const updateInquiry = async ({ id, payload, transaction } = {}) => {
       transaction: t,
     });
     if (!inquiry) throw new Error("Inquiry not found");
+
+    const previousHandledBy = inquiry.handled_by;
+    const previousStatus = inquiry.status;
 
     // Update linked customer if present
     if (inquiry.customer_id) {
@@ -645,6 +664,36 @@ const updateInquiry = async ({ id, payload, transaction } = {}) => {
       },
       { transaction: t }
     );
+
+    const updatedHandledBy = payload.handled_by ?? inquiry.handled_by;
+    const updatedStatus = payload.status ?? inquiry.status;
+    const refNum = inquiry.inquiry_number || `#${inquiry.id}`;
+    if (updatedHandledBy != null && updatedHandledBy !== previousHandledBy && updatedHandledBy) {
+      notificationService.createAndEmit({
+        user_id: updatedHandledBy,
+        type: "inquiry_reassigned",
+        module: "inquiry",
+        title: "Inquiry reassigned to you",
+        message: `Inquiry ${refNum} has been reassigned to you.`,
+        reference_id: inquiry.id,
+        reference_number: inquiry.inquiry_number || null,
+        redirect_url: `/inquiry/${inquiry.id}`,
+        action_label: "Open Inquiry",
+      }).catch((err) => console.warn("[inquiry] notification failed:", err?.message));
+    }
+    if (updatedStatus != null && updatedStatus !== previousStatus && inquiry.handled_by) {
+      notificationService.createAndEmit({
+        user_id: inquiry.handled_by,
+        type: "inquiry_status_changed",
+        module: "inquiry",
+        title: "Inquiry status updated",
+        message: `Inquiry ${refNum} status changed to ${updatedStatus}.`,
+        reference_id: inquiry.id,
+        reference_number: inquiry.inquiry_number || null,
+        redirect_url: `/inquiry/${inquiry.id}`,
+        action_label: "Open Inquiry",
+      }).catch((err) => console.warn("[inquiry] notification failed:", err?.message));
+    }
 
     if (committedHere) {
       await t.commit();
