@@ -49,6 +49,7 @@ const list = asyncHandler(async (req, res) => {
         reference_from,
         order_date_from,
         order_date_to,
+        current_stage_key,
     } = req.query;
     const { enforcedHandledByIds } = await resolveConfirmOrderVisibilityContext(req);
     const result = await orderService.listOrders({
@@ -69,6 +70,7 @@ const list = asyncHandler(async (req, res) => {
         reference_from,
         order_date_from,
         order_date_to,
+        current_stage_key,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
     return responseHandler.sendSuccess(res, result, "Confirmed order list fetched", 200);
