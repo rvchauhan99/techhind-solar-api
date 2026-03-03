@@ -198,6 +198,7 @@ const createBankAccount = async (payload, transaction = null) => {
     bank_account_number: payload.bank_account_number,
     bank_account_ifsc: payload.bank_account_ifsc || null,
     bank_account_branch: payload.bank_account_branch || null,
+    upi_id: payload.upi_id || null,
     is_active: isActive,
     is_default: isDefault,
   };
@@ -251,6 +252,7 @@ const updateBankAccount = async (id, payload, transaction = null) => {
     bank_account_number: payload.bank_account_number !== undefined ? payload.bank_account_number : bankAccount.bank_account_number,
     bank_account_ifsc: payload.bank_account_ifsc !== undefined ? payload.bank_account_ifsc : bankAccount.bank_account_ifsc,
     bank_account_branch: payload.bank_account_branch !== undefined ? payload.bank_account_branch : bankAccount.bank_account_branch,
+    upi_id: payload.upi_id !== undefined ? payload.upi_id || null : bankAccount.upi_id,
     is_active: isActive,
     is_default: isDefault,
   };

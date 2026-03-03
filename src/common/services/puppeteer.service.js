@@ -80,7 +80,49 @@ function getLaunchOptions(overrides = {}) {
     return { ...base, ...overrides };
 }
 
+let _browserInstance = null;
+let _browserLaunchPromise = null;
+
+/**
+ * Get or create a persistent browser instance (avoids cold-start on every PDF).
+ * Callers should use newPage() on the returned browser and close the page when done.
+ * The browser itself stays alive for reuse.
+ */
+async function getBrowser() {
+    if (_browserInstance && _browserInstance.isConnected()) {
+        return _browserInstance;
+    }
+    if (_browserLaunchPromise) return _browserLaunchPromise;
+
+    _browserLaunchPromise = (async () => {
+        _browserInstance = await puppeteer.launch(getLaunchOptions());
+        _browserInstance.on("disconnected", () => {
+            _browserInstance = null;
+            _browserLaunchPromise = null;
+        });
+        _browserLaunchPromise = null;
+        return _browserInstance;
+    })();
+    return _browserLaunchPromise;
+}
+
+/**
+ * Gracefully close the persistent browser (call on process shutdown).
+ */
+async function closeBrowser() {
+    if (_browserInstance) {
+        await _browserInstance.close().catch(() => {});
+        _browserInstance = null;
+        _browserLaunchPromise = null;
+    }
+}
+
+process.on("SIGTERM", closeBrowser);
+process.on("SIGINT", closeBrowser);
+
 module.exports = {
     findChromePath,
     getLaunchOptions,
+    getBrowser,
+    closeBrowser,
 };
