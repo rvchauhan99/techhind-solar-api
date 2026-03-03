@@ -1347,7 +1347,7 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
 
                 // Pipeline fields
                 stages: payload.stages ?? order.stages,
-                current_stage_key: payload.current_stage_key ?? order.current_stage_key,
+                current_stage_key: shouldAutoComplete ? "order_completed" : (payload.current_stage_key ?? order.current_stage_key),
 
                 // Stage 1: Estimate Generated
                 estimate_quotation_serial_no: payload.estimate_quotation_serial_no ?? order.estimate_quotation_serial_no,

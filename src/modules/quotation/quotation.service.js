@@ -328,7 +328,7 @@ const getQuotationById = async ({ id }) => {
         where: { id, deleted_at: null },
         include: [
             { model: User, as: "user", attributes: ["id", "name", "mobile_number", "email"] },
-            { model: CompanyBranch, as: "branch", attributes: ["id", "name"] },
+            { model: CompanyBranch, as: "branch", attributes: ["id", "name", "quotation_template_id"] },
             { model: Customer, as: "customer", attributes: ["id", "customer_name", "mobile_number", "email_id", "company_name"] },
             { model: State, as: "state", attributes: ["id", "name"] },
             { model: OrderType, as: "orderType", attributes: ["id", "name"] },

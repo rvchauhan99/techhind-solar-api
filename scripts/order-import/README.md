@@ -79,10 +79,11 @@ Use exactly these values:
 - `netmeter_installed`
 - `subsidy_claim`
 - `subsidy_disbursed`
+- `order_completed` (used internally for closed orders; do not use in CSV for in-progress stages)
 
 The importer infers `stages` from `current_stage_key`: earlier stages = completed, current = pending, later = locked.
 
-**Per-row closed orders:** In a single CSV (e.g. open-orders), only a row with `current_stage_key` = `completed` is imported as a **closed** order (status `completed`). Rows with `subsidy_disbursed` or any other stage remain open (`confirmed`). So one file can mix open and closed orders without separate CSVs.
+**Per-row closed orders:** Rows imported as **closed** (status `completed`) get `current_stage_key` set to `order_completed`. A row is treated as closed if the file status is `completed`, or CSV `current_stage_key` = `completed`, or a column like `status`/`order_status` = `completed`. So one file can mix open and closed orders without separate CSVs; closed rows are stored with `current_stage_key = order_completed`.
 
 ## Usage
 

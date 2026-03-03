@@ -45,6 +45,13 @@ const CompanyBranch = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    quotation_template_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "quotation_templates", key: "id" },
+      onUpdate: "CASCADE",
+      onDelete: "SET NULL",
+    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
