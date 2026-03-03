@@ -1,9 +1,10 @@
-<!-- Page 2: Welcome Page -->
+<!-- Page 2: Welcome Page - split layout: left image sidebar, right white content -->
 <div class="page welcome-page">
-    <!-- Left Sidebar with Background Image -->
+    <!-- Full-page background layer (behind both columns for reliable PDF painting) -->
+    <div class="welcome-page-bg" style="background-image: url('{{backgroundImage}}');"></div>
+    <!-- Left sidebar - configured image -->
     <div class="welcome-sidebar" style="background-image: url('{{backgroundImage}}');"></div>
-
-    <!-- Right Content -->
+    <!-- Right content panel -->
     <div class="welcome-content">
         <h1 class="welcome-title">
             WELCOME TO THE
@@ -33,4 +34,5 @@
             <p class="company">{{company.name}}</p>
         </div>
     </div>
+    {{> templateFooter defaultFooterImageUrl=defaultFooterImageUrl}}
 </div>
