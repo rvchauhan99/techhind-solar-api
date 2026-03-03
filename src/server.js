@@ -92,7 +92,7 @@ io.use((socket, next) => {
       socket.handshake.auth?.token ||
       socket.handshake.query?.token;
     if (!token) return next(new Error("Socket: no auth token"));
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET_ACCESS_TOKEN);
     socket.userId = decoded.id || decoded.userId || decoded.sub;
     return next();
   } catch (err) {
