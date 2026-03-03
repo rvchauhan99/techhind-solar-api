@@ -402,20 +402,17 @@ const generatePDF = asyncHandler(async (req, res) => {
         }
         : {};
 
-    const company = await Company.findOne({ where: { deleted_at: null } });
-
-    const bankAccount = await CompanyBankAccount.findOne({
-        where: { deleted_at: null },
-        order: [
-            ["is_default", "DESC"],
-            ["created_at", "ASC"]
-        ]
-    });
-
-    const productMakes = await ProductMake.findAll({
-        where: { deleted_at: null },
-        attributes: ["id", "name", "logo"]
-    });
+    const [company, bankAccount, productMakes] = await Promise.all([
+        Company.findOne({ where: { deleted_at: null } }),
+        CompanyBankAccount.findOne({
+            where: { deleted_at: null },
+            order: [["is_default", "DESC"], ["created_at", "ASC"]],
+        }),
+        ProductMake.findAll({
+            where: { deleted_at: null },
+            attributes: ["id", "name", "logo"],
+        }),
+    ]);
     const productMakesMap = new Map(
         productMakes.map(pm => [pm.id, { name: pm.name, logo: pm.logo }])
     );

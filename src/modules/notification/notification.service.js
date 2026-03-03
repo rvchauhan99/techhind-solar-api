@@ -1,13 +1,26 @@
 "use strict";
 
-const { Op } = require("sequelize");
-const Notification = require("../../models/notification.model.js");
+const defaultNotification = require("../../models/notification.model.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
 const { getIO } = require("../../config/socketInstance.js");
 
 /**
+ * Resolve Notification model for the request context (tenant DB in shared mode, main DB in dedicated).
+ * When req is omitted, uses tenant from AsyncLocalStorage (e.g. when called from other services).
+ * @param {import("express").Request} [req] - Request with req.tenant.sequelize
+ * @returns {import("sequelize").Model}
+ */
+function getNotificationModel(req) {
+    const models = req ? getTenantModels(req) : getTenantModels();
+    return models?.Notification ?? defaultNotification;
+}
+
+/**
  * Create a notification record and emit it via Socket.IO to the target user.
+ * Uses tenant DB when req is provided (from API or from other services passing context).
  *
  * @param {object} params
+ * @param {import("express").Request} [params.req] - Request for tenant context (use tenant DB)
  * @param {number}  params.user_id         - Recipient user ID
  * @param {string}  params.type            - Event type key, e.g. 'lead_assigned'
  * @param {string}  params.module          - 'lead' | 'inquiry' | 'order'
@@ -21,6 +34,7 @@ const { getIO } = require("../../config/socketInstance.js");
  * @returns {Promise<object>} Created notification plain object
  */
 async function createAndEmit({
+    req = null,
     user_id,
     type,
     module,
@@ -34,6 +48,7 @@ async function createAndEmit({
 }) {
     if (!user_id) return null;
 
+    const Notification = getNotificationModel(req);
     try {
         const notification = await Notification.create(
             {
@@ -72,19 +87,25 @@ async function createAndEmit({
 }
 
 /**
- * Emit to multiple users (bulk assign etc.)
+ * Emit to multiple users (bulk assign etc.).
+ * @param {Array<object>} notifications - Array of notification params (each may include req)
+ * @param {object} [transaction] - Optional Sequelize transaction
+ * @param {import("express").Request} [req] - Request for tenant context
  */
-async function createAndEmitMany(notifications, transaction = null) {
+async function createAndEmitMany(notifications, transaction = null, req = null) {
     const results = await Promise.allSettled(
-        (notifications || []).map((n) => createAndEmit({ ...n, transaction }))
+        (notifications || []).map((n) => createAndEmit({ ...n, req: n.req ?? req, transaction }))
     );
     return results.filter((r) => r.status === "fulfilled").map((r) => r.value);
 }
 
 /**
  * Paginated list of notifications for a user.
+ * @param {object} opts
+ * @param {import("express").Request} opts.req - Request for tenant context
  */
-async function listNotifications({ user_id, module: mod, is_read, page = 1, limit = 20 }) {
+async function listNotifications({ req, user_id, module: mod, is_read, page = 1, limit = 20 }) {
+    const Notification = getNotificationModel(req);
     const where = { user_id, deleted_at: null };
     if (mod) where.module = mod;
     if (is_read !== undefined && is_read !== null && is_read !== "") {
@@ -110,8 +131,11 @@ async function listNotifications({ user_id, module: mod, is_read, page = 1, limi
 
 /**
  * Count of unread notifications for a user.
+ * @param {object} opts
+ * @param {import("express").Request} opts.req - Request for tenant context
  */
-async function getUnreadCount({ user_id }) {
+async function getUnreadCount({ req, user_id }) {
+    const Notification = getNotificationModel(req);
     const count = await Notification.count({
         where: { user_id, is_read: false, deleted_at: null },
     });
@@ -120,8 +144,11 @@ async function getUnreadCount({ user_id }) {
 
 /**
  * Mark a single notification as read.
+ * @param {object} opts
+ * @param {import("express").Request} opts.req - Request for tenant context
  */
-async function markRead({ id, user_id }) {
+async function markRead({ req, id, user_id }) {
+    const Notification = getNotificationModel(req);
     const notification = await Notification.findOne({
         where: { id, user_id, deleted_at: null },
     });
@@ -133,8 +160,11 @@ async function markRead({ id, user_id }) {
 
 /**
  * Mark all notifications as read for a user.
+ * @param {object} opts
+ * @param {import("express").Request} opts.req - Request for tenant context
  */
-async function markAllRead({ user_id }) {
+async function markAllRead({ req, user_id }) {
+    const Notification = getNotificationModel(req);
     const [count] = await Notification.update(
         { is_read: true },
         { where: { user_id, is_read: false, deleted_at: null } }
@@ -144,8 +174,11 @@ async function markAllRead({ user_id }) {
 
 /**
  * Soft-delete a notification.
+ * @param {object} opts
+ * @param {import("express").Request} opts.req - Request for tenant context
  */
-async function deleteNotification({ id, user_id }) {
+async function deleteNotification({ req, id, user_id }) {
+    const Notification = getNotificationModel(req);
     const notification = await Notification.findOne({
         where: { id, user_id, deleted_at: null },
     });

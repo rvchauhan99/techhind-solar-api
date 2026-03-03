@@ -12,6 +12,7 @@ const list = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
     const { module: mod, is_read, page = 1, limit = 20 } = req.query;
     const result = await notificationService.listNotifications({
+        req,
         user_id,
         module: mod || null,
         is_read: is_read !== undefined ? is_read : null,
@@ -26,7 +27,7 @@ const list = asyncHandler(async (req, res) => {
  */
 const unreadCount = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
-    const count = await notificationService.getUnreadCount({ user_id });
+    const count = await notificationService.getUnreadCount({ req, user_id });
     return responseHandler.sendSuccess(res, { count }, "Unread count fetched", 200);
 });
 
@@ -35,7 +36,7 @@ const unreadCount = asyncHandler(async (req, res) => {
  */
 const markAllRead = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
-    const result = await notificationService.markAllRead({ user_id });
+    const result = await notificationService.markAllRead({ req, user_id });
     return responseHandler.sendSuccess(res, result, "All notifications marked as read", 200);
 });
 
@@ -45,7 +46,7 @@ const markAllRead = asyncHandler(async (req, res) => {
 const markRead = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
     const { id } = req.params;
-    const notification = await notificationService.markRead({ id, user_id });
+    const notification = await notificationService.markRead({ req, id, user_id });
     if (!notification) {
         return responseHandler.sendError(res, "Notification not found", 404);
     }
@@ -58,7 +59,7 @@ const markRead = asyncHandler(async (req, res) => {
 const remove = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
     const { id } = req.params;
-    const deleted = await notificationService.deleteNotification({ id, user_id });
+    const deleted = await notificationService.deleteNotification({ req, id, user_id });
     if (!deleted) {
         return responseHandler.sendError(res, "Notification not found", 404);
     }

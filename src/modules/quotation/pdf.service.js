@@ -197,6 +197,13 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     const templateConfig = options.templateConfig || {};
     const templateDir = getTemplateDir(templateKey);
 
+    // Register footer partial before compiling page templates
+    const footerPartialPath = path.join(templateDir, "partials/template-footer.hbs");
+    if (fs.existsSync(footerPartialPath)) {
+        const footerPartialContent = fs.readFileSync(footerPartialPath, "utf-8");
+        handlebars.registerPartial("templateFooter", footerPartialContent);
+    }
+
     // Load CSS
     const cssPath = path.join(templateDir, "styles/quotation.css");
     const styles = fs.readFileSync(cssPath, "utf-8");
@@ -216,30 +223,64 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     const fallbackBackgroundPath = path.join(PUBLIC_DIR, "solar-background.jpg");
     const fallbackBackgroundImage = fileToDataUrl(fallbackBackgroundPath, "image/jpeg");
 
-    const getBackgroundUrl = (key) => {
+    // Resolve template image key to data URL (tenant bucket); cache by key to avoid duplicate fetches
+    const mimeFromKey = (key) => {
+        if (!key) return "image/jpeg";
+        const ext = path.extname(key).toLowerCase();
+        return ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
+    };
+    const resolvedTemplateImages = {};
+    const resolveTemplateImage = async (key) => {
         if (!key) return "";
-        if (key.startsWith("http://") || key.startsWith("https://")) return key;
-        try {
-            return bucketService.getPublicUrl(key);
-        } catch (e) {
-            return "";
+        if (key.startsWith("http://") || key.startsWith("https://")) {
+            try {
+                return await pathToDataUrl(key, mimeFromKey(key), bucketClient);
+            } catch (_) {
+                return "";
+            }
         }
+        if (resolvedTemplateImages[key] !== undefined) return resolvedTemplateImages[key];
+        const mime = mimeFromKey(key);
+        const dataUrl = await pathToDataUrl(key, mime, bucketClient);
+        resolvedTemplateImages[key] = dataUrl || "";
+        return resolvedTemplateImages[key];
     };
 
-    const pageBackgrounds = {};
+    // Collect all unique S3 keys for template images, then resolve in parallel
+    const allTemplateKeys = new Set();
+    if (templateConfig.default_background_image_path) allTemplateKeys.add(templateConfig.default_background_image_path);
+    if (templateConfig.default_footer_image_path) allTemplateKeys.add(templateConfig.default_footer_image_path);
+    for (let n = 1; n <= 9; n++) {
+        const key = templateConfig.page_backgrounds && templateConfig.page_backgrounds[String(n)];
+        if (key) allTemplateKeys.add(key);
+    }
+
+    await Promise.all([...allTemplateKeys].map(k => resolveTemplateImage(k)));
+
     const defaultConfigBg = templateConfig.default_background_image_path
-        ? getBackgroundUrl(templateConfig.default_background_image_path)
+        ? resolvedTemplateImages[templateConfig.default_background_image_path] || ""
         : "";
+    const defaultFooterImageUrl = templateConfig.default_footer_image_path
+        ? resolvedTemplateImages[templateConfig.default_footer_image_path] || ""
+        : "";
+
+    if (templateConfig.default_footer_image_path && !defaultFooterImageUrl) {
+        console.warn("[PDF] default_footer_image_path is set but footer image resolution failed:", templateConfig.default_footer_image_path);
+    }
+
+
+    const pageBackgrounds = {};
     for (let n = 1; n <= 9; n++) {
         const pageKey = String(n);
         const key = (templateConfig.page_backgrounds && templateConfig.page_backgrounds[pageKey])
             || templateConfig.default_background_image_path;
-        pageBackgrounds[n] = key ? getBackgroundUrl(key) : (defaultConfigBg || fallbackBackgroundImage);
+        if (key) {
+            pageBackgrounds[n] = resolvedTemplateImages[key] || defaultConfigBg || fallbackBackgroundImage;
+        } else {
+            pageBackgrounds[n] = defaultConfigBg || fallbackBackgroundImage;
+        }
     }
 
-    const defaultFooterImageUrl = templateConfig.default_footer_image_path
-        ? getBackgroundUrl(templateConfig.default_footer_image_path)
-        : "";
     const backgroundImage = pageBackgrounds[1] || fallbackBackgroundImage;
 
     // Helper to resolve branding image from path (bucket key or legacy path)
@@ -260,17 +301,17 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
         return "";
     };
 
-    // Logo - company profile, then bundled defaults
+    // Resolve branding images in parallel
     const defaultLogoPaths = [
         path.join(PUBLIC_DIR, "logo.png"),
         path.join(PUBLIC_DIR, "solar-earth-logo.png"),
     ];
-    const logoImage = await resolveBrandingImage(data.companyLogoPath, defaultLogoPaths);
-
-    // Header, footer, stamp - company profile only (no fallbacks)
-    const headerImage = await resolveBrandingImage(data.companyHeaderPath, []);
-    const footerImage = await resolveBrandingImage(data.companyFooterPath, []);
-    const stampImage = await resolveBrandingImage(data.companyStampPath, []);
+    const [logoImage, headerImage, footerImage, stampImage] = await Promise.all([
+        resolveBrandingImage(data.companyLogoPath, defaultLogoPaths),
+        resolveBrandingImage(data.companyHeaderPath, []),
+        resolveBrandingImage(data.companyFooterPath, []),
+        resolveBrandingImage(data.companyStampPath, []),
+    ]);
 
     // Generate QR code for UPI payment
     const upiString = data.bank
@@ -355,7 +396,7 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
  */
 const generateQuotationPDF = async (quotationData, options = {}) => {
     const { bucketClient, templateKey, templateConfig } = options;
-    let browser = null;
+    let page = null;
 
     try {
         const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig });
@@ -367,31 +408,21 @@ const generateQuotationPDF = async (quotationData, options = {}) => {
             fs.mkdirSync(pdfsDir, { recursive: true });
         }
         fs.writeFileSync(debugHtmlPath, html);
-        console.log("Debug HTML saved to:", debugHtmlPath);
 
-        // Launch Puppeteer (Chrome/Chromium path resolved via common service)
-        browser = await puppeteer.launch(puppeteerService.getLaunchOptions());
+        const browser = await puppeteerService.getBrowser();
+        page = await browser.newPage();
 
-        const page = await browser.newPage();
-
-        // Set content - only wait for domcontentloaded since we use base64 embedded images
         await page.setContent(html, {
             waitUntil: "domcontentloaded",
-            timeout: 60000, // 60 seconds timeout
+            timeout: 60000,
         });
 
-        // Generate PDF
         const pdfBuffer = await page.pdf({
             format: "A4",
             printBackground: true,
             preferCSSPageSize: true,
-            margin: {
-                top: "0",
-                right: "0",
-                bottom: "0",
-                left: "0",
-            },
-            timeout: 60000, // 60 seconds timeout for PDF generation
+            margin: { top: "0", right: "0", bottom: "0", left: "0" },
+            timeout: 60000,
         });
 
         return pdfBuffer;
@@ -399,8 +430,8 @@ const generateQuotationPDF = async (quotationData, options = {}) => {
         console.error("Error generating PDF:", error);
         throw error;
     } finally {
-        if (browser) {
-            await browser.close();
+        if (page) {
+            await page.close().catch(() => {});
         }
     }
 };
@@ -435,22 +466,19 @@ const getMakeLogos = async (makeIds, productMakesMap, bucketClient) => {
     if (!makeIds || !Array.isArray(makeIds) || makeIds.length === 0) {
         return [];
     }
-    const logos = [];
-    for (const id of makeIds) {
-        const make = productMakesMap.get(parseInt(id));
-        if (make && make.logo) {
+    const entries = makeIds
+        .map(id => ({ id, make: productMakesMap.get(parseInt(id)) }))
+        .filter(e => e.make && e.make.logo);
+
+    const results = await Promise.all(
+        entries.map(async ({ make }) => {
             const ext = path.extname(make.logo).toLowerCase();
             const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
             const logoDataUrl = await pathToDataUrl(make.logo, mimeType, bucketClient);
-            if (logoDataUrl) {
-                logos.push({
-                    name: make.name,
-                    logo: logoDataUrl
-                });
-            }
-        }
-    }
-    return logos;
+            return logoDataUrl ? { name: make.name, logo: logoDataUrl } : null;
+        })
+    );
+    return results.filter(Boolean);
 };
 
 const normType = (s) => (s || "").toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
@@ -645,6 +673,13 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const paybackPeriod = annualSavings > 0 ? +(finalCost / annualSavings).toFixed(1) : 0;
 
     // Build BOM section data from quotation flat fields
+    const [panelLogos, inverterLogos, hybridInverterLogos, batteryLogos] = await Promise.all([
+        getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient),
+        getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient),
+        getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient),
+        getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient),
+    ]);
+
     let panel = {
         watt_peak: quotation.panel_size || 0,
         quantity: quotation.panel_quantity || 0,
@@ -652,21 +687,21 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         make: getMakeNames(quotation.panel_make_ids, productMakesMap),
         warranty: quotation.panel_warranty || 0,
         performance_warranty: quotation.panel_performance_warranty || 0,
-        make_logos: await getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient),
+        make_logos: panelLogos,
     };
     let inverter = {
         size: quotation.inverter_size || 0,
         quantity: quotation.inverter_quantity || 0,
         make: getMakeNames(quotation.inverter_make_ids, productMakesMap),
         warranty: quotation.inverter_warranty || 0,
-        make_logos: await getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient),
+        make_logos: inverterLogos,
     };
     let hybrid_inverter = {
         size: quotation.hybrid_inverter_size || 0,
         quantity: quotation.hybrid_inverter_quantity || 0,
         make: getMakeNames(quotation.hybrid_inverter_make_ids, productMakesMap),
         warranty: quotation.hybrid_inverter_warranty || "",
-        make_logos: await getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient),
+        make_logos: hybridInverterLogos,
     };
     let battery = {
         size: quotation.battery_size || 0,
@@ -674,7 +709,7 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         type: quotation.battery_type || "",
         make: getMakeNames(quotation.battery_make_ids, productMakesMap),
         warranty: quotation.battery_warranty || "",
-        make_logos: await getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient),
+        make_logos: batteryLogos,
     };
     let cables = {
         ac_cable_make: getMakeNames(quotation.cable_ac_make_ids, productMakesMap),
@@ -830,7 +865,7 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
                 account_number: bankAccount.bank_account_number || "",
                 ifsc: bankAccount.bank_account_ifsc || "",
                 branch: bankAccount.bank_account_branch || "",
-                upi_id: bankAccount.upi_id || "harsh7984@axl",
+                upi_id: bankAccount.upi_id || "",
             }
             : null,
 

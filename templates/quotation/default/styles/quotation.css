@@ -55,6 +55,35 @@ body {
   page-break-after: auto;
 }
 
+/* Shared full-page background for template pages */
+.page-bg {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Common footer strip driven by template footer image (pages 2-9 only).
+   The uploaded image is a full A4 page (2481×3508 at 300dpi); we anchor
+   its bottom to the container bottom and let overflow clip the rest. */
+.template-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38mm;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.template-footer-img {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 /* ============================================
    PAGE 1: Cover Page
    ============================================ */
@@ -208,30 +237,48 @@ body {
 }
 
 /* ============================================
-   PAGE 2: Welcome Page
+   PAGE 2: Welcome Page (split layout)
    ============================================ */
 
 .welcome-page {
   display: flex;
+  flex-direction: row;
   height: 100%;
   min-height: 297mm;
-}
-
-.welcome-sidebar {
-  width: 40%;
-  height: 100%;
-  min-height: 297mm;
-  background-size: cover;
-  background-position: center;
   position: relative;
 }
 
+/* Full-page background layer - behind both columns for reliable PDF painting */
+.welcome-page-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: var(--light-gray);
+}
+
+/* Left sidebar - configured image strip; left center so left content is visible */
+.welcome-sidebar {
+  width: 40%;
+  min-height: 297mm;
+  background-size: cover;
+  background-position: left center;
+  position: relative;
+  z-index: 1;
+}
+
+/* Right content panel - original position and look */
 .welcome-content {
   width: 60%;
   padding: 80px 50px;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  background: var(--white);
+  position: relative;
+  z-index: 1;
 }
 
 .welcome-title {
@@ -1243,7 +1290,6 @@ body {
 .thankyou-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
 }
 
 .thankyou-logo-header {
@@ -1301,7 +1347,7 @@ body {
 
 .thankyou-contact {
   background: var(--white);
-  padding: 30px 50px;
+  padding: 30px 50px 40mm;
   text-align: center;
 }
 
