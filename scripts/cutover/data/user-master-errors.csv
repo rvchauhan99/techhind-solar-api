@@ -1,0 +1,5 @@
+row,email,error
+20,"patan hemal@gujpaatsolpa.com","Validation error: Validation isEmail on email failed"
+21,"pilvay -58@gujpiatsolpi.com","Validation error: Validation isEmail on email failed"
+20,"patan hemal@gujpaatsolpa.com","user not found for manager assignment"
+21,"pilvay -58@gujpiatsolpi.com","user not found for manager assignment"

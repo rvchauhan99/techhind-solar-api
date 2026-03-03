@@ -39,6 +39,8 @@ module.exports = (db) => {
     InquiryDocument,
     ProjectPrice,
     Quotation,
+    QuotationTemplate,
+    QuotationTemplateConfig,
     Supplier,
     PurchaseOrder,
     PurchaseOrderItem,
@@ -199,6 +201,30 @@ module.exports = (db) => {
   if (Company && CompanyBranch) {
     Company.hasMany(CompanyBranch, { foreignKey: "company_id", as: "branches" });
     CompanyBranch.belongsTo(Company, { foreignKey: "company_id", as: "company" });
+  }
+
+  // QuotationTemplate ↔ QuotationTemplateConfig (One-to-One)
+  if (QuotationTemplate && QuotationTemplateConfig) {
+    QuotationTemplate.hasOne(QuotationTemplateConfig, {
+      foreignKey: "quotation_template_id",
+      as: "config",
+    });
+    QuotationTemplateConfig.belongsTo(QuotationTemplate, {
+      foreignKey: "quotation_template_id",
+      as: "template",
+    });
+  }
+
+  // CompanyBranch ↔ QuotationTemplate (Many-to-One)
+  if (CompanyBranch && QuotationTemplate) {
+    CompanyBranch.belongsTo(QuotationTemplate, {
+      foreignKey: "quotation_template_id",
+      as: "quotationTemplate",
+    });
+    QuotationTemplate.hasMany(CompanyBranch, {
+      foreignKey: "quotation_template_id",
+      as: "branches",
+    });
   }
 
   // Company ↔ CompanyWarehouse (One-to-Many)
