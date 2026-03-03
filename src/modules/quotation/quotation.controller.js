@@ -3,6 +3,7 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const quotationService = require("./quotation.service.js");
+const quotationTemplateService = require("./quotationTemplate.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
@@ -300,12 +301,76 @@ const getQuotationCountByInquiry = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, { count }, "Quotation count fetched", 200);
 });
 
+const listTemplates = asyncHandler(async (req, res) => {
+    const items = await quotationTemplateService.listTemplates(req);
+    return responseHandler.sendSuccess(res, items, "Quotation templates fetched", 200);
+});
+
+const getTemplateById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const item = await quotationTemplateService.getTemplateById(id, req);
+    if (!item) {
+        return responseHandler.sendError(res, "Quotation template not found", 404);
+    }
+    return responseHandler.sendSuccess(res, item, "Quotation template fetched", 200);
+});
+
+const createTemplate = asyncHandler(async (req, res) => {
+    const payload = { ...req.body };
+    if (!payload.name || !payload.template_key) {
+        return responseHandler.sendError(res, "name and template_key are required", 400);
+    }
+    try {
+        const created = await quotationTemplateService.createTemplate(payload, req);
+        return responseHandler.sendSuccess(res, created, "Quotation template created", 201);
+    } catch (err) {
+        if (err.code === "TEMPLATE_FOLDER_NOT_FOUND") {
+            return responseHandler.sendError(res, err.message, 400);
+        }
+        throw err;
+    }
+});
+
+const updateTemplate = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await quotationTemplateService.getTemplateById(id, req);
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation template not found", 404);
+    }
+    const payload = { ...req.body };
+    const updated = await quotationTemplateService.updateTemplate(id, payload, req);
+    return responseHandler.sendSuccess(res, updated, "Quotation template updated", 200);
+});
+
+const updateTemplateConfig = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await quotationTemplateService.getTemplateById(id, req);
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation template not found", 404);
+    }
+    const payload = { ...req.body };
+    const updated = await quotationTemplateService.updateTemplateConfig(id, payload, req);
+    return responseHandler.sendSuccess(res, updated, "Quotation template config updated", 200);
+});
+
+const uploadTemplateConfigImage = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const fieldName = req.body.fieldName || req.body.field_name || (req.file && req.file.fieldname) || "default_background";
+    const file = req.file;
+    if (!file) {
+        return responseHandler.sendError(res, "No file uploaded", 400);
+    }
+    const existing = await quotationTemplateService.getTemplateById(id, req);
+    if (!existing) {
+        return responseHandler.sendError(res, "Quotation template not found", 404);
+    }
+    const result = await quotationTemplateService.uploadTemplateConfigImage(id, fieldName, file, req);
+    return responseHandler.sendSuccess(res, result, "Image uploaded and config updated", 200);
+});
+
 const generatePDF = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const fs = require("fs");
-    const path = require("path");
 
-    // Get quotation data
     const quotation = await quotationService.getQuotationById({ id });
     if (!quotation) {
         return responseHandler.sendError(res, "Quotation not found", 404);
@@ -313,10 +378,32 @@ const generatePDF = asyncHandler(async (req, res) => {
     const context = await resolveQuotationVisibilityContext(req);
     assertRecordVisibleByListingCriteria(quotation, context, { handledByField: "user_id" });
 
-    const { Company, CompanyBankAccount, ProductMake } = getTenantModels();
+    const { Company, CompanyBankAccount, ProductMake, QuotationTemplate, QuotationTemplateConfig } = getTenantModels(req);
+
+    let template = null;
+    if (quotation.branch && quotation.branch.quotation_template_id) {
+        template = await QuotationTemplate.findByPk(quotation.branch.quotation_template_id, {
+            where: { deleted_at: null },
+            include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
+        });
+    }
+    if (!template) {
+        template = await QuotationTemplate.findOne({
+            where: { is_default: true, deleted_at: null },
+            include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
+        });
+    }
+    const templateKey = template ? template.template_key : "default";
+    const templateConfig = template && template.config
+        ? {
+            default_background_image_path: template.config.default_background_image_path || null,
+            default_footer_image_path: template.config.default_footer_image_path || null,
+            page_backgrounds: template.config.page_backgrounds || null,
+        }
+        : {};
+
     const company = await Company.findOne({ where: { deleted_at: null } });
 
-    // Get primary bank account: default first, then by creation date
     const bankAccount = await CompanyBankAccount.findOne({
         where: { deleted_at: null },
         order: [
@@ -325,7 +412,6 @@ const generatePDF = asyncHandler(async (req, res) => {
         ]
     });
 
-    // Get all product makes and create a Map (id -> {name, logo})
     const productMakes = await ProductMake.findAll({
         where: { deleted_at: null },
         attributes: ["id", "name", "logo"]
@@ -335,7 +421,6 @@ const generatePDF = asyncHandler(async (req, res) => {
     );
 
     const bucketClient = bucketService.getBucketForRequest(req);
-    // Prepare data for PDF
     const pdfData = await pdfService.prepareQuotationData(
         quotation,
         company ? company.toJSON() : null,
@@ -344,8 +429,11 @@ const generatePDF = asyncHandler(async (req, res) => {
         bucketClient
     );
 
-    // Generate PDF buffer
-    const pdfBuffer = await pdfService.generateQuotationPDF(pdfData, { bucketClient });
+    const pdfBuffer = await pdfService.generateQuotationPDF(pdfData, {
+        bucketClient,
+        templateKey,
+        templateConfig,
+    });
 
     const filename = `quotation-${quotation.quotation_number || id}.pdf`;
 
@@ -377,6 +465,12 @@ module.exports = {
     getNextQuotationNumber,
     getQuotationCountByInquiry,
     getAllProducts,
+    listTemplates,
+    getTemplateById,
+    createTemplate,
+    updateTemplate,
+    updateTemplateConfig,
+    uploadTemplateConfigImage,
     generatePDF
 };
 

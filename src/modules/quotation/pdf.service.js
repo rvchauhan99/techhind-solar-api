@@ -9,9 +9,16 @@ const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.js");
 
-// Template directory paths
-const TEMPLATE_DIR = path.join(__dirname, "../../../templates/quotation");
+// Template base path; per-template dir is TEMPLATE_BASE / templateKey (e.g. "default")
+const TEMPLATE_BASE = path.join(__dirname, "../../../templates/quotation");
 const PUBLIC_DIR = path.join(__dirname, "../../../public");
+
+/**
+ * Get template directory for a template key
+ * @param {string} templateKey - e.g. "default"
+ * @returns {string} Absolute path to template folder
+ */
+const getTemplateDir = (templateKey) => path.join(TEMPLATE_BASE, templateKey || "default");
 
 /**
  * Register Handlebars helpers
@@ -58,11 +65,12 @@ handlebars.registerHelper("formatYears", function (value) {
 
 /**
  * Load and compile a template file
- * @param {string} templatePath - Relative path from template directory
+ * @param {string} templateDir - Absolute path to template directory
+ * @param {string} templatePath - Relative path from template directory (e.g. "partials/page1-cover.hbs")
  * @returns {Function} Compiled Handlebars template
  */
-const loadTemplate = (templatePath) => {
-    const fullPath = path.join(TEMPLATE_DIR, templatePath);
+const loadTemplate = (templateDir, templatePath) => {
+    const fullPath = path.join(templateDir, templatePath);
     const templateContent = fs.readFileSync(fullPath, "utf-8");
     return handlebars.compile(templateContent);
 };
@@ -181,28 +189,58 @@ const generateQRCode = async (data) => {
  * Build the complete HTML document from templates
  * @param {Object} data - Quotation data
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
+ * @param {{ templateKey?: string, templateConfig?: { default_background_image_path?: string, default_footer_image_path?: string, page_backgrounds?: Record<string, string> } }} [options] - Template key and config for backgrounds/footer
  * @returns {Promise<string>} Complete HTML string
  */
-const buildHtmlDocument = async (data, bucketClient) => {
+const buildHtmlDocument = async (data, bucketClient, options = {}) => {
+    const templateKey = options.templateKey || "default";
+    const templateConfig = options.templateConfig || {};
+    const templateDir = getTemplateDir(templateKey);
+
     // Load CSS
-    const cssPath = path.join(TEMPLATE_DIR, "styles/quotation.css");
+    const cssPath = path.join(templateDir, "styles/quotation.css");
     const styles = fs.readFileSync(cssPath, "utf-8");
 
     // Load partial templates
-    const page1Template = loadTemplate("partials/page1-cover.hbs");
-    const page2Template = loadTemplate("partials/page2-welcome.hbs");
-    const page3Template = loadTemplate("partials/page3-about.hbs");
-    const page4Template = loadTemplate("partials/page4-offer.hbs");
-    const page5Template = loadTemplate("partials/page5-bom.hbs");
-    const page6Template = loadTemplate("partials/page6-savings.hbs");
-    const page7Template = loadTemplate("partials/page7-timeline.hbs");
-    const page8Template = loadTemplate("partials/page8-terms.hbs");
-    const page9Template = loadTemplate("partials/page9-thankyou.hbs");
-    const mainTemplate = loadTemplate("quotation.hbs");
+    const page1Template = loadTemplate(templateDir, "partials/page1-cover.hbs");
+    const page2Template = loadTemplate(templateDir, "partials/page2-welcome.hbs");
+    const page3Template = loadTemplate(templateDir, "partials/page3-about.hbs");
+    const page4Template = loadTemplate(templateDir, "partials/page4-offer.hbs");
+    const page5Template = loadTemplate(templateDir, "partials/page5-bom.hbs");
+    const page6Template = loadTemplate(templateDir, "partials/page6-savings.hbs");
+    const page7Template = loadTemplate(templateDir, "partials/page7-timeline.hbs");
+    const page8Template = loadTemplate(templateDir, "partials/page8-terms.hbs");
+    const page9Template = loadTemplate(templateDir, "partials/page9-thankyou.hbs");
+    const mainTemplate = loadTemplate(templateDir, "quotation.hbs");
 
-    // Prepare image data URLs
-    const backgroundImagePath = path.join(PUBLIC_DIR, "solar-background.jpg");
-    const backgroundImage = fileToDataUrl(backgroundImagePath, "image/jpeg");
+    const fallbackBackgroundPath = path.join(PUBLIC_DIR, "solar-background.jpg");
+    const fallbackBackgroundImage = fileToDataUrl(fallbackBackgroundPath, "image/jpeg");
+
+    const getBackgroundUrl = (key) => {
+        if (!key) return "";
+        if (key.startsWith("http://") || key.startsWith("https://")) return key;
+        try {
+            return bucketService.getPublicUrl(key);
+        } catch (e) {
+            return "";
+        }
+    };
+
+    const pageBackgrounds = {};
+    const defaultConfigBg = templateConfig.default_background_image_path
+        ? getBackgroundUrl(templateConfig.default_background_image_path)
+        : "";
+    for (let n = 1; n <= 9; n++) {
+        const pageKey = String(n);
+        const key = (templateConfig.page_backgrounds && templateConfig.page_backgrounds[pageKey])
+            || templateConfig.default_background_image_path;
+        pageBackgrounds[n] = key ? getBackgroundUrl(key) : (defaultConfigBg || fallbackBackgroundImage);
+    }
+
+    const defaultFooterImageUrl = templateConfig.default_footer_image_path
+        ? getBackgroundUrl(templateConfig.default_footer_image_path)
+        : "";
+    const backgroundImage = pageBackgrounds[1] || fallbackBackgroundImage;
 
     // Helper to resolve branding image from path (bucket key or legacy path)
     const resolveBrandingImage = async (pathOrKey, fallbackPaths = []) => {
@@ -241,7 +279,7 @@ const buildHtmlDocument = async (data, bucketClient) => {
     const qrCodeImage = await generateQRCode(upiString);
 
     // Payment logos - load from templates/quotation/assets folder (tracked by git)
-    const paymentLogosDir = path.join(TEMPLATE_DIR, "assets", "payment-logos");
+    const paymentLogosDir = path.join(templateDir, "assets", "payment-logos");
     const gpayLogo = fs.existsSync(path.join(paymentLogosDir, "gpay.png"))
         ? fileToDataUrl(path.join(paymentLogosDir, "gpay.png"), "image/png")
         : "";
@@ -264,6 +302,8 @@ const buildHtmlDocument = async (data, bucketClient) => {
     const templateData = {
         ...data,
         backgroundImage,
+        pageBackgrounds,
+        defaultFooterImageUrl,
         logoImage,
         branding: {
             logoImage,
@@ -279,16 +319,15 @@ const buildHtmlDocument = async (data, bucketClient) => {
         upiLogoImage,
     };
 
-    // Render each page partial
-    const page1 = page1Template(templateData);
-    const page2 = page2Template(templateData);
-    const page3 = page3Template(templateData);
-    const page4 = page4Template(templateData);
-    const page5 = page5Template(templateData);
-    const page6 = page6Template(templateData);
-    const page7 = page7Template(templateData);
-    const page8 = page8Template(templateData);
-    const page9 = page9Template(templateData);
+    const page1 = page1Template({ ...templateData, backgroundImage: pageBackgrounds[1] || backgroundImage });
+    const page2 = page2Template({ ...templateData, backgroundImage: pageBackgrounds[2] || backgroundImage });
+    const page3 = page3Template({ ...templateData, backgroundImage: pageBackgrounds[3] || backgroundImage });
+    const page4 = page4Template({ ...templateData, backgroundImage: pageBackgrounds[4] || backgroundImage });
+    const page5 = page5Template({ ...templateData, backgroundImage: pageBackgrounds[5] || backgroundImage });
+    const page6 = page6Template({ ...templateData, backgroundImage: pageBackgrounds[6] || backgroundImage });
+    const page7 = page7Template({ ...templateData, backgroundImage: pageBackgrounds[7] || backgroundImage });
+    const page8 = page8Template({ ...templateData, backgroundImage: pageBackgrounds[8] || backgroundImage });
+    const page9 = page9Template({ ...templateData, backgroundImage: pageBackgrounds[9] || backgroundImage });
 
     // Render main template with all pages
     const html = mainTemplate({
@@ -311,16 +350,15 @@ const buildHtmlDocument = async (data, bucketClient) => {
 /**
  * Generate PDF from quotation data
  * @param {Object} quotationData - Complete quotation data object
- * @param {{ bucketClient?: { s3: object, bucketName: string } }} [options] - Optional tenant bucket client
+ * @param {{ bucketClient?: { s3: object, bucketName: string }, templateKey?: string, templateConfig?: object }} [options] - Optional tenant bucket client, template key and config
  * @returns {Promise<Buffer>} PDF file as buffer
  */
 const generateQuotationPDF = async (quotationData, options = {}) => {
-    const { bucketClient } = options;
+    const { bucketClient, templateKey, templateConfig } = options;
     let browser = null;
 
     try {
-        // Build HTML document
-        const html = await buildHtmlDocument(quotationData, bucketClient);
+        const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig });
 
         // Debug: Save HTML to file for inspection
         const debugHtmlPath = path.join(PUBLIC_DIR, "pdfs", "debug-quotation.html");

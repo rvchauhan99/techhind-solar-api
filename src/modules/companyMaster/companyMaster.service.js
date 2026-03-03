@@ -373,6 +373,7 @@ const createBranch = async (payload, transaction = null) => {
     gst_number: payload.gst_number,
     is_active: isActive,
     is_default: isDefault,
+    ...(payload.quotation_template_id !== undefined && { quotation_template_id: payload.quotation_template_id || null }),
   };
 
   const branch = await CompanyBranch.create(createPayload, { transaction });
@@ -457,6 +458,7 @@ const updateBranch = async (id, payload, transaction = null) => {
     gst_number: payload.gst_number !== undefined ? payload.gst_number : branch.gst_number,
     is_active: isActive,
     is_default: isDefault,
+    ...(payload.quotation_template_id !== undefined && { quotation_template_id: payload.quotation_template_id || null }),
   };
 
   await branch.update(updatePayload, { transaction });
@@ -503,8 +505,7 @@ const deleteBranch = async (id, transaction = null) => {
 
 const listBranches = async (transaction = null) => {
   const models = getTenantModels();
-  const { Company, CompanyBranch } = models;
-  // Get company
+  const { Company, CompanyBranch, QuotationTemplate } = models;
   const company = await Company.findOne({
     where: { deleted_at: null },
     order: [["created_at", "DESC"]],
@@ -517,20 +518,29 @@ const listBranches = async (transaction = null) => {
 
   const branches = await CompanyBranch.findAll({
     where: { company_id: company.id, deleted_at: null, is_active: true },
+    include: [
+      { model: QuotationTemplate, as: "quotationTemplate", attributes: ["id", "name", "template_key"], required: false },
+    ],
     order: [
-      ["is_default", "DESC"], // Default branches first
+      ["is_default", "DESC"],
       ["created_at", "DESC"],
     ],
     transaction,
   });
 
-  return branches.map((branch) => branch.toJSON());
+  return branches.map((branch) => {
+    const j = branch.toJSON();
+    if (j.quotationTemplate) {
+      j.quotation_template = j.quotationTemplate;
+      delete j.quotationTemplate;
+    }
+    return j;
+  });
 };
 
 const getDefaultBranch = async (transaction = null) => {
   const models = getTenantModels();
-  const { Company, CompanyBranch } = models;
-  // Get company
+  const { Company, CompanyBranch, QuotationTemplate } = models;
   const company = await Company.findOne({
     where: { deleted_at: null },
     order: [["created_at", "DESC"]],
@@ -543,10 +553,19 @@ const getDefaultBranch = async (transaction = null) => {
 
   const defaultBranch = await CompanyBranch.findOne({
     where: { company_id: company.id, deleted_at: null, is_default: true, is_active: true },
+    include: [
+      { model: QuotationTemplate, as: "quotationTemplate", attributes: ["id", "name", "template_key"], required: false },
+    ],
     transaction,
   });
 
-  return defaultBranch ? defaultBranch.toJSON() : null;
+  if (!defaultBranch) return null;
+  const j = defaultBranch.toJSON();
+  if (j.quotationTemplate) {
+    j.quotation_template = j.quotationTemplate;
+    delete j.quotationTemplate;
+  }
+  return j;
 };
 
 // Warehouse Methods

@@ -174,7 +174,7 @@ fs.readdirSync(__dirname)
   .forEach((file) => {
     const model = require(path.join(__dirname, file));
     // Notification table has no created_by/updated_by; skip global audit columns
-    if (model.name !== "Notification") {
+    if (model.name !== "Notification" && model.name !== "QuotationTemplate" && model.name !== "QuotationTemplateConfig") {
       ensureAuditColumns(model);
     }
     applyAuditHooks(model);
