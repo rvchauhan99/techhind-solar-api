@@ -23,6 +23,7 @@
     "test:db-permissions": "node scripts/test-db-permissions.js",
     "test:smoke-rbac": "node scripts/smoke-rbac.js",
     "order-import": "node scripts/order-import/import-orders.js",
+    "settle-completed-payments": "node scripts/settle-completed-orders-payments/settle-completed-orders-payments.js",
     "cutover:users": "node scripts/cutover/load-user-master.js",
     "cutover:inventory": "node scripts/cutover/load-inventory.js"
   },
