@@ -21,11 +21,6 @@ const normalizeDashboardFilters = (query = {}) => {
         current_stage_key = null,
     } = query;
 
-    let effectiveStatus = status;
-    if (!effectiveStatus) {
-        effectiveStatus = "confirmed";
-    }
-
     let from = order_date_from;
     let to = order_date_to;
     if (!from && !to) {
@@ -49,7 +44,7 @@ const normalizeDashboardFilters = (query = {}) => {
         order_number,
         order_date_from: from,
         order_date_to: to,
-        status: effectiveStatus,
+        status,
         current_stage_key,
     };
 };
