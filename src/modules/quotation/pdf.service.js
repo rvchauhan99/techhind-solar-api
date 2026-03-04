@@ -76,6 +76,51 @@ function shouldLogMissingBucketKey(key) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Module-level compiled template cache: compile Handlebars templates + CSS
+// exactly once per templateKey. Eliminates repeated fs.readFileSync + compile
+// on every PDF request (biggest latency win for cold-path requests).
+// ---------------------------------------------------------------------------
+const compiledTemplateCache = new Map(); // templateKey -> compiled bundle
+
+function getCompiledTemplates(templateKey) {
+    if (compiledTemplateCache.has(templateKey)) {
+        return compiledTemplateCache.get(templateKey);
+    }
+    const templateDir = getTemplateDir(templateKey);
+
+    // Register footer partial once per template key
+    const footerPartialPath = path.join(templateDir, "partials/template-footer.hbs");
+    if (fs.existsSync(footerPartialPath)) {
+        const footerPartialContent = fs.readFileSync(footerPartialPath, "utf-8");
+        handlebars.registerPartial("templateFooter", footerPartialContent);
+    }
+
+    const styles = fs.readFileSync(path.join(templateDir, "styles/quotation.css"), "utf-8");
+    const bundle = {
+        styles,
+        page1Template: loadTemplate(templateDir, "partials/page1-cover.hbs"),
+        page2Template: loadTemplate(templateDir, "partials/page2-welcome.hbs"),
+        page3Template: loadTemplate(templateDir, "partials/page3-about.hbs"),
+        page4Template: loadTemplate(templateDir, "partials/page4-offer.hbs"),
+        page5Template: loadTemplate(templateDir, "partials/page5-bom.hbs"),
+        page6Template: loadTemplate(templateDir, "partials/page6-savings.hbs"),
+        page7Template: loadTemplate(templateDir, "partials/page7-timeline.hbs"),
+        page8Template: loadTemplate(templateDir, "partials/page8-terms.hbs"),
+        page9Template: loadTemplate(templateDir, "partials/page9-thankyou.hbs"),
+        mainTemplate: loadTemplate(templateDir, "quotation.hbs"),
+    };
+    compiledTemplateCache.set(templateKey, bundle);
+    console.info(`[PDF] Compiled templates cached for key: "${templateKey}"`);
+    return bundle;
+}
+
+// ---------------------------------------------------------------------------
+// QR code cache: same UPI string → same QR code. Avoids regenerating on every
+// request when the company's UPI ID hasn't changed.
+// ---------------------------------------------------------------------------
+const qrCodeCache = new Map(); // upiString -> dataUrl
+
 /**
  * Get template directory for a template key
  * @param {string} templateKey - e.g. "default"
@@ -195,8 +240,8 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
                         const ct = res.headers["content-type"] || "";
                         const contentType = /image\/png/i.test(ct) ? "image/png"
                             : /image\/svg/i.test(ct) ? "image/svg+xml"
-                            : (buf[0] === 0x89 && buf[1] === 0x50) ? "image/png"
-                            : mimeType;
+                                : (buf[0] === 0x89 && buf[1] === 0x50) ? "image/png"
+                                    : mimeType;
                         resolve({ buf, contentType });
                     });
                     res.on("error", reject);
@@ -265,14 +310,15 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
 };
 
 /**
- * Generate QR code as data URL
+ * Generate QR code as data URL (cached by UPI string to avoid repeated computation).
  * @param {string} data - Data to encode in QR code
  * @returns {Promise<string>} Base64 data URL of QR code
  */
 const generateQRCode = async (data) => {
     try {
         if (!data) return "";
-        return await QRCode.toDataURL(data, {
+        if (qrCodeCache.has(data)) return qrCodeCache.get(data);
+        const dataUrl = await QRCode.toDataURL(data, {
             width: 150,
             margin: 1,
             color: {
@@ -280,6 +326,8 @@ const generateQRCode = async (data) => {
                 light: "#ffffff",
             },
         });
+        qrCodeCache.set(data, dataUrl);
+        return dataUrl;
     } catch (error) {
         console.error("Error generating QR code:", error);
         return "";
@@ -296,30 +344,22 @@ const generateQRCode = async (data) => {
 const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     const templateKey = options.templateKey || "default";
     const templateConfig = options.templateConfig || {};
-    const templateDir = getTemplateDir(templateKey);
 
-    // Register footer partial before compiling page templates
-    const footerPartialPath = path.join(templateDir, "partials/template-footer.hbs");
-    if (fs.existsSync(footerPartialPath)) {
-        const footerPartialContent = fs.readFileSync(footerPartialPath, "utf-8");
-        handlebars.registerPartial("templateFooter", footerPartialContent);
-    }
-
-    // Load CSS
-    const cssPath = path.join(templateDir, "styles/quotation.css");
-    const styles = fs.readFileSync(cssPath, "utf-8");
-
-    // Load partial templates
-    const page1Template = loadTemplate(templateDir, "partials/page1-cover.hbs");
-    const page2Template = loadTemplate(templateDir, "partials/page2-welcome.hbs");
-    const page3Template = loadTemplate(templateDir, "partials/page3-about.hbs");
-    const page4Template = loadTemplate(templateDir, "partials/page4-offer.hbs");
-    const page5Template = loadTemplate(templateDir, "partials/page5-bom.hbs");
-    const page6Template = loadTemplate(templateDir, "partials/page6-savings.hbs");
-    const page7Template = loadTemplate(templateDir, "partials/page7-timeline.hbs");
-    const page8Template = loadTemplate(templateDir, "partials/page8-terms.hbs");
-    const page9Template = loadTemplate(templateDir, "partials/page9-thankyou.hbs");
-    const mainTemplate = loadTemplate(templateDir, "quotation.hbs");
+    // Use module-level compiled template cache — avoids disk reads + Handlebars
+    // compilation on every request (compiled once per templateKey per process lifetime).
+    const {
+        styles,
+        page1Template,
+        page2Template,
+        page3Template,
+        page4Template,
+        page5Template,
+        page6Template,
+        page7Template,
+        page8Template,
+        page9Template,
+        mainTemplate,
+    } = getCompiledTemplates(templateKey);
 
     const fallbackBackgroundPath = path.join(PUBLIC_DIR, "solar-background.jpg");
     const fallbackBackgroundImage = fs.existsSync(fallbackBackgroundPath)
@@ -423,6 +463,7 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     const qrCodeImage = await generateQRCode(upiString);
 
     // Payment logos - load from templates/quotation/assets folder (tracked by git)
+    const templateDir = getTemplateDir(templateKey);
     const paymentLogosDir = path.join(templateDir, "assets", "payment-logos");
     const gpayLogo = fs.existsSync(path.join(paymentLogosDir, "gpay.png"))
         ? fileToDataUrl(path.join(paymentLogosDir, "gpay.png"), "image/png")
@@ -491,9 +532,12 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     return html;
 };
 
-// PDF cache + singleflight controls (env-driven)
-const PDF_CACHE_ENABLED = process.env.PDF_CACHE_ENABLED === "true";
-const PDF_SINGLEFLIGHT_ENABLED = process.env.PDF_SINGLEFLIGHT_ENABLED === "true";
+// PDF cache + singleflight controls (env-driven).
+// PDF_CACHE_ENABLED defaults to TRUE — set PDF_CACHE_ENABLED=false to disable.
+// Cache is invalidated automatically via the version key (quotation/template/company updated_at),
+// so enabling it is safe and dramatically speeds up repeated views of the same quotation.
+const PDF_CACHE_ENABLED = process.env.PDF_CACHE_ENABLED !== "false";
+const PDF_SINGLEFLIGHT_ENABLED = process.env.PDF_SINGLEFLIGHT_ENABLED !== "false";
 const PDF_CACHE_MAX = parseInt(process.env.PDF_CACHE_MAX || "50", 10);
 const PDF_METRICS_ENABLED = process.env.PDF_METRICS_ENABLED === "true";
 
@@ -578,7 +622,7 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
         throw error;
     } finally {
         if (page) {
-            await page.close().catch(() => {});
+            await page.close().catch(() => { });
         }
     }
 };
