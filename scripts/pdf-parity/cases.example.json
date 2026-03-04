@@ -1,0 +1,18 @@
+{
+  "baselineBaseUrl": "https://baseline-api.example.com",
+  "candidateBaseUrl": "https://candidate-api.example.com",
+  "token": "",
+  "maxSizeDeltaPct": 15,
+  "maxPageDelta": 0,
+  "cases": [
+    {
+      "name": "Quotation small assets",
+      "path": "/api/quotation/91/pdf"
+    },
+    {
+      "name": "Quotation large assets",
+      "path": "/api/quotation/106/pdf"
+    }
+  ]
+}
+
