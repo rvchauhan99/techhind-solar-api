@@ -101,11 +101,14 @@ async function warmupTemplateAssetCache() {
                 for (const template of templates) {
                     if (!template || !template.config) continue;
                     const configObj = template.config.toJSON ? template.config.toJSON() : template.config;
-                    if (isBucketResolvablePath(configObj.default_background_image_path)) keys.add(configObj.default_background_image_path);
-                    if (isBucketResolvablePath(configObj.default_footer_image_path)) keys.add(configObj.default_footer_image_path);
+                    const hasInlineBg = configObj.default_background_image_data && String(configObj.default_background_image_data).trim().length > 0;
+                    const hasInlineFooter = configObj.default_footer_image_data && String(configObj.default_footer_image_data).trim().length > 0;
+                    const pageBackgroundsData = configObj.page_backgrounds_data && typeof configObj.page_backgrounds_data === "object" ? configObj.page_backgrounds_data : {};
+                    if (!hasInlineBg && isBucketResolvablePath(configObj.default_background_image_path)) keys.add(configObj.default_background_image_path);
+                    if (!hasInlineFooter && isBucketResolvablePath(configObj.default_footer_image_path)) keys.add(configObj.default_footer_image_path);
                     if (configObj.page_backgrounds && typeof configObj.page_backgrounds === "object") {
-                        Object.values(configObj.page_backgrounds).forEach((k) => {
-                            if (isBucketResolvablePath(k)) keys.add(k);
+                        Object.entries(configObj.page_backgrounds).forEach(([pageNum, k]) => {
+                            if (!pageBackgroundsData[pageNum] && isBucketResolvablePath(k)) keys.add(k);
                         });
                     }
                 }

@@ -30,6 +30,18 @@ const QuotationTemplateConfig = sequelize.define(
             type: DataTypes.JSON,
             allowNull: true,
         },
+        default_background_image_data: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+        default_footer_image_data: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+        page_backgrounds_data: {
+            type: DataTypes.JSON,
+            allowNull: true,
+        },
         created_at: {
             type: DataTypes.DATE,
             defaultValue: DataTypes.NOW,
