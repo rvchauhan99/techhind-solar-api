@@ -7,6 +7,7 @@ const { getModelsForSequelize } = require("../tenant/tenantModels.js");
 const bucketClientFactory = require("../tenant/bucketClientFactory.js");
 const bucketService = require("../../common/services/bucket.service.js");
 const pdfService = require("./pdf.service.js");
+const { getImageCacheStats } = require("./pdfImageCache.service.js");
 const path = require("path");
 
 const PDF_WARMUP_ENABLED = process.env.PDF_WARMUP_ENABLED === "true";
@@ -18,20 +19,60 @@ const mimeFromKey = (key) => {
     return ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
 };
 
+const isBucketResolvablePath = (value) => {
+    if (value == null) return false;
+    const key = String(value).trim();
+    if (!key) return false;
+    if (key.startsWith("http://") || key.startsWith("https://")) return false;
+    if (key.startsWith("/uploads/")) return true;
+    return !key.startsWith("/");
+};
+
+const toBucketKey = (value) => {
+    const key = String(value).trim();
+    return key.startsWith("/uploads/") ? key.slice(1) : key;
+};
+
+async function fetchObjectDataUrl(bucketKey, mimeType, bucketClient) {
+    const tryFetch = async (client) => {
+        try {
+            const result = client
+                ? await bucketService.getObjectWithClient(client, bucketKey)
+                : await bucketService.getObject(bucketKey);
+            const body = result.body;
+            const contentType = result.contentType || mimeType;
+            const base64 = Buffer.isBuffer(body)
+                ? body.toString("base64")
+                : Buffer.from(body).toString("base64");
+            return `data:${contentType};base64,${base64}`;
+        } catch (_) {
+            return null;
+        }
+    };
+
+    let dataUrl = await tryFetch(bucketClient);
+    if (!dataUrl && bucketClient) {
+        dataUrl = await tryFetch(null);
+    }
+    return dataUrl;
+}
+
 /**
- * Prefetch default template config images (background/footer/page) for active tenants into PDF template-asset cache.
+ * Prefetch quotation template and company branding images for active tenants into in-memory PDF image cache.
  * Run once after server start to reduce first-PDF latency and bucket load. Bounded by PDF_WARMUP_MAX_TENANTS.
  * Set PDF_WARMUP_ENABLED=true to enable.
- * @returns {Promise<{ warmed: number, errors: number }>}
+ * @returns {Promise<{ warmed: number, errors: number, skipped: number, scanned: number }>}
  */
 async function warmupTemplateAssetCache() {
-    if (!PDF_WARMUP_ENABLED) return { warmed: 0, errors: 0 };
+    if (!PDF_WARMUP_ENABLED) return { warmed: 0, errors: 0, skipped: 0, scanned: 0 };
 
     const sequelize = getRegistrySequelize();
-    if (!sequelize) return { warmed: 0, errors: 0 };
+    if (!sequelize) return { warmed: 0, errors: 0, skipped: 0, scanned: 0 };
 
     let warmed = 0;
     let errors = 0;
+    let skipped = 0;
+    let scanned = 0;
 
     try {
         const { QueryTypes } = require("sequelize");
@@ -48,36 +89,54 @@ async function warmupTemplateAssetCache() {
 
                 const tenantSequelize = await dbPoolManager.getPool(tenantId, config);
                 const models = getModelsForSequelize(tenantSequelize);
-                if (!models || !models.QuotationTemplate || !models.QuotationTemplateConfig) continue;
+                if (!models || !models.QuotationTemplate || !models.QuotationTemplateConfig || !models.Company) continue;
 
-                const { QuotationTemplate, QuotationTemplateConfig } = models;
-                const template = await QuotationTemplate.findOne({
-                    where: { is_default: true, deleted_at: null },
+                const { QuotationTemplate, QuotationTemplateConfig, Company } = models;
+                const templates = await QuotationTemplate.findAll({
+                    where: { deleted_at: null },
                     include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
                 });
-                if (!template || !template.config) continue;
 
-                const configObj = template.config.toJSON ? template.config.toJSON() : template.config;
                 const keys = new Set();
-                if (configObj.default_background_image_path) keys.add(configObj.default_background_image_path);
-                if (configObj.default_footer_image_path) keys.add(configObj.default_footer_image_path);
-                if (configObj.page_backgrounds && typeof configObj.page_backgrounds === "object") {
-                    Object.values(configObj.page_backgrounds).forEach((k) => k && keys.add(k));
+                for (const template of templates) {
+                    if (!template || !template.config) continue;
+                    const configObj = template.config.toJSON ? template.config.toJSON() : template.config;
+                    if (isBucketResolvablePath(configObj.default_background_image_path)) keys.add(configObj.default_background_image_path);
+                    if (isBucketResolvablePath(configObj.default_footer_image_path)) keys.add(configObj.default_footer_image_path);
+                    if (configObj.page_backgrounds && typeof configObj.page_backgrounds === "object") {
+                        Object.values(configObj.page_backgrounds).forEach((k) => {
+                            if (isBucketResolvablePath(k)) keys.add(k);
+                        });
+                    }
                 }
-                if (keys.size === 0) continue;
+
+                const company = await Company.findOne({
+                    where: { deleted_at: null },
+                    order: [["created_at", "ASC"]],
+                });
+                if (company) {
+                    const companyObj = company.toJSON ? company.toJSON() : company;
+                    ["logo", "header", "footer", "stamp"].forEach((field) => {
+                        if (isBucketResolvablePath(companyObj[field])) {
+                            keys.add(companyObj[field]);
+                        }
+                    });
+                }
 
                 const bucketClient = await bucketClientFactory.getBucketClient(tenantId, config);
-                for (const key of keys) {
+                for (const rawKey of keys) {
+                    scanned += 1;
+                    const bucketKey = toBucketKey(rawKey);
                     try {
-                        const result = await bucketService.getObjectWithClient(bucketClient, key);
-                        const body = result.body;
-                        const contentType = result.contentType || mimeFromKey(key);
-                        const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
-                        const dataUrl = `data:${contentType};base64,${base64}`;
-                        pdfService.setTemplateAssetDataUrl(tenantId, key, dataUrl);
+                        const dataUrl = await fetchObjectDataUrl(bucketKey, mimeFromKey(bucketKey), bucketClient);
+                        if (!dataUrl) {
+                            skipped += 1;
+                            continue;
+                        }
+                        pdfService.setTemplateAssetDataUrl(tenantId, rawKey, dataUrl);
                         warmed += 1;
-                    } catch (e) {
-                        errors += 1;
+                    } catch (_) {
+                        skipped += 1;
                     }
                 }
             } catch (e) {
@@ -85,14 +144,17 @@ async function warmupTemplateAssetCache() {
             }
         }
 
-        if (warmed > 0 || errors > 0) {
-            console.info(`[PDF] Warmup: ${warmed} template assets cached, ${errors} errors`);
+        if (warmed > 0 || errors > 0 || skipped > 0) {
+            const stats = getImageCacheStats();
+            console.info(
+                `[PDF] Warmup: scanned=${scanned}, cached=${warmed}, skipped=${skipped}, errors=${errors}, cacheEntries=${stats.entries}, cacheBytes=${stats.totalBytes}`
+            );
         }
     } catch (e) {
         console.warn("[PDF] Warmup failed:", e.message);
     }
 
-    return { warmed, errors };
+    return { warmed, errors, skipped, scanned };
 }
 
 module.exports = { warmupTemplateAssetCache };

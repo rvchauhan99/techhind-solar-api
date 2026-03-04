@@ -7,9 +7,12 @@ const quotationTemplateService = require("./quotationTemplate.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
-const pdfService = require("./pdf.service.js");
 const bucketService = require("../../common/services/bucket.service.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const pdfJobService = require("./pdfJob.service.js");
+const pdfRunnerService = require("./pdfRunner.service.js");
+const { buildArtifactKey } = require("./pdfArtifactKey.service.js");
+const { resolvePdfMetadataForQuotation } = require("./quotationPdfArtifact.service.js");
 
 const FILE_UNAVAILABLE_MESSAGE =
     "We couldn't save your documents right now. Please try again in a few minutes.";
@@ -369,145 +372,181 @@ const uploadTemplateConfigImage = asyncHandler(async (req, res) => {
 });
 
 const getPdfStatus = asyncHandler(async (req, res) => {
-    const pdfQueue = require("./pdfQueue.service.js");
-    const depth = pdfQueue.getQueueDepth();
+    const runner = pdfRunnerService.getRunnerStatus();
     return responseHandler.sendSuccess(
         res,
         {
-            queueEnabled: pdfQueue.isQueueEnabled(),
-            redisBackend: pdfQueue.isRedisBackend(),
-            queueBackend: pdfQueue.getQueueBackend(),
-            pending: depth.pending,
-            active: depth.active,
+            asyncMode: process.env.PDF_ASYNC_MODE !== "false",
+            runner,
         },
         null,
         200
     );
 });
 
-const generatePDF = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+const getTenantSequelizeForReq = (req) => {
+    if (req?.tenant?.sequelize) return req.tenant.sequelize;
+    return require("../../models/index.js").sequelize;
+};
 
-    const quotation = await quotationService.getQuotationForPdf({ id });
-    if (!quotation) {
-        return responseHandler.sendError(res, "Quotation not found", 404);
+const sendArtifactResponse = async ({ req, res, artifactKey, filename }) => {
+    const bucketClient = bucketService.getBucketForRequest(req);
+    const mode = (process.env.PDF_ARTIFACT_MODE || "buffer").toLowerCase();
+    const signedTtlSec = Math.max(60, parseInt(process.env.PDF_ARTIFACT_SIGNED_URL_TTL_SEC || "300", 10));
+    if (mode === "signed_url") {
+        const signedUrl = await bucketService.getSignedUrl(artifactKey, signedTtlSec, bucketClient);
+        return res.redirect(302, signedUrl);
     }
+    const object = await bucketService.getObjectWithClient(bucketClient, artifactKey);
+    const pdfBuffer = Buffer.isBuffer(object.body) ? object.body : Buffer.from(object.body);
+    res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdfBuffer.length,
+        "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+    });
+    return res.end(pdfBuffer);
+};
+
+const ensurePdfJobForQuotation = async (req, quotation) => {
+    const tenantId = req.tenant?.id || "default";
+    const tenantSequelize = getTenantSequelizeForReq(req);
+    const metadata = await resolvePdfMetadataForQuotation({ tenantSequelize, quotation });
+
+    const artifactKey = buildArtifactKey({
+        tenantId,
+        quotationId: quotation.id,
+        versionKey: metadata.versionKey,
+    });
+
+    const bucketClient = bucketService.getBucketForRequest(req);
+    const artifactExists = await bucketService.fileExistsWithClient(bucketClient, artifactKey).catch(() => false);
+    if (artifactExists) {
+        return {
+            quotation,
+            versionKey: metadata.versionKey,
+            artifactKey,
+            status: "completed",
+            job: null,
+        };
+    }
+
+    const job = await pdfJobService.createOrGetJob(req, {
+        tenantId,
+        quotationId: quotation.id,
+        versionKey: metadata.versionKey,
+        artifactKey,
+        payload: { quotation_id: quotation.id },
+    });
+    return {
+        quotation,
+        versionKey: metadata.versionKey,
+        artifactKey,
+        status: job.status,
+        job,
+    };
+};
+
+const createPdfJob = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const quotation = await quotationService.getQuotationForPdf({ id });
+    if (!quotation) return responseHandler.sendError(res, "Quotation not found", 404);
+
     const context = await resolveQuotationVisibilityContext(req);
     assertRecordVisibleByListingCriteria(quotation, context, { handledByField: "user_id" });
 
-    const { Company, CompanyBankAccount, QuotationTemplate, QuotationTemplateConfig } = getTenantModels(req);
+    const jobState = await ensurePdfJobForQuotation(req, quotation);
+    if (!jobState) return responseHandler.sendError(res, "Unable to prepare PDF job", 500);
 
-    let template = null;
-    if (quotation.branch && quotation.branch.quotation_template_id) {
-        template = await QuotationTemplate.findByPk(quotation.branch.quotation_template_id, {
-            where: { deleted_at: null },
-            include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
-        });
-    }
-    if (!template) {
-        template = await QuotationTemplate.findOne({
-            where: { is_default: true, deleted_at: null },
-            include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
-        });
-    }
-    const templateKey = template ? template.template_key : "default";
-    const templateConfig = template && template.config
-        ? {
-            default_background_image_path: template.config.default_background_image_path || null,
-            default_footer_image_path: template.config.default_footer_image_path || null,
-            page_backgrounds: template.config.page_backgrounds || null,
-        }
-        : {};
+    const payload = {
+        status: jobState.status,
+        job_id: jobState.job ? jobState.job.id : null,
+        artifact_key: jobState.artifactKey,
+        version_key: jobState.versionKey,
+    };
+    return responseHandler.sendSuccess(res, payload, "PDF job prepared", jobState.status === "completed" ? 200 : 202);
+});
 
-    const tFetchStart = Date.now();
-    const [company, bankAccount, productMakesMap] = await Promise.all([
-        Company.findOne({ where: { deleted_at: null } }),
-        CompanyBankAccount.findOne({
-            where: { deleted_at: null },
-            order: [["is_default", "DESC"], ["created_at", "ASC"]],
-        }),
-        quotationService.getProductMakesMapForPdf({ tenantId: req.tenant?.id }),
-    ]);
-
-    const bucketClient = bucketService.getBucketForRequest(req);
-    const pdfData = await pdfService.prepareQuotationData(
-        quotation,
-        company ? company.toJSON() : null,
-        bankAccount ? bankAccount.toJSON() : null,
-        productMakesMap,
-        bucketClient
+const getPdfJobStatus = asyncHandler(async (req, res) => {
+    const { jobId } = req.params;
+    const job = await pdfJobService.getJobById(req, jobId);
+    if (!job) return responseHandler.sendError(res, "PDF job not found", 404);
+    return responseHandler.sendSuccess(
+        res,
+        {
+            id: job.id,
+            status: job.status,
+            attempts: job.attempts,
+            max_attempts: job.max_attempts,
+            error: job.last_error || null,
+            artifact_key: job.artifact_key,
+            can_download: job.status === "completed",
+            download_path: `/api/quotation/pdf/jobs/${job.id}/download`,
+        },
+        "PDF job status fetched",
+        200
     );
+});
 
-    // Build a version key so cached PDFs are invalidated when underlying data changes (incl. template config images).
-    const configUpdatedAt = template && template.config && template.config.updated_at
-        ? new Date(template.config.updated_at).toISOString() : "";
-    const versionParts = [
-        quotation.updated_at ? new Date(quotation.updated_at).toISOString() : "",
-        template && template.updated_at ? new Date(template.updated_at).toISOString() : "",
-        configUpdatedAt,
-        company && company.updated_at ? new Date(company.updated_at).toISOString() : "",
-        bankAccount && bankAccount.updated_at ? new Date(bankAccount.updated_at).toISOString() : "",
-    ];
-    const versionKey = versionParts.join("|");
-    const metricsContext = {
-        fetchDataMs: Date.now() - tFetchStart,
-        resolveAssetsMs: null,
-        htmlBuildMs: null,
-        pdfRenderMs: null,
-        totalMs: null,
-    };
+const downloadPdfJobArtifact = asyncHandler(async (req, res) => {
+    const { jobId } = req.params;
+    const job = await pdfJobService.getJobById(req, jobId);
+    if (!job) return responseHandler.sendError(res, "PDF job not found", 404);
+    if (job.status !== pdfJobService.JOB_STATUS.COMPLETED) {
+        return responseHandler.sendError(res, "PDF job is not completed yet", 409);
+    }
+    const quotation = await quotationService.getQuotationForPdf({ id: job.quotation_id });
+    const filename = `quotation-${quotation?.quotation_number || job.quotation_id}.pdf`;
+    return sendArtifactResponse({ req, res, artifactKey: job.artifact_key, filename });
+});
 
-    const tenantId = req.tenant?.id || "default";
-    const pdfArtifactMode = (process.env.PDF_ARTIFACT_MODE || "buffer").toLowerCase();
-    const pdfArtifactSignedUrlTtlSec = Math.max(60, parseInt(process.env.PDF_ARTIFACT_SIGNED_URL_TTL_SEC || "300", 10));
+const generatePDF = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const quotation = await quotationService.getQuotationForPdf({ id });
+    if (!quotation) return responseHandler.sendError(res, "Quotation not found", 404);
 
-    const pdfQueue = require("./pdfQueue.service.js");
-    const artifactKey = pdfQueue.buildArtifactKey({
-        tenantId,
-        quotationId: quotation.id,
-        versionKey,
-    });
-    const sendPdfArtifactResponse = async () => {
-        if (pdfArtifactMode === "signed_url") {
-            const signedUrl = await bucketService.getSignedUrl(artifactKey, pdfArtifactSignedUrlTtlSec, bucketClient);
-            return res.redirect(302, signedUrl);
+    const context = await resolveQuotationVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(quotation, context, { handledByField: "user_id" });
+
+    const jobState = await ensurePdfJobForQuotation(req, quotation);
+    if (!jobState) return responseHandler.sendError(res, "Unable to prepare PDF", 500);
+
+    if (jobState.status === "completed") {
+        const filename = `quotation-${quotation?.quotation_number || id}.pdf`;
+        if (req.tenant?.id) {
+            const usageService = require("../billing/usage.service.js");
+            usageService.incrementPdfGenerated(req.tenant.id).catch(() => { });
         }
-        const artifactObject = await bucketService.getObjectWithClient(bucketClient, artifactKey);
-        const pdfBuffer = Buffer.isBuffer(artifactObject.body) ? artifactObject.body : Buffer.from(artifactObject.body);
-        const filename = `quotation-${quotation.quotation_number || id}.pdf`;
-        res.writeHead(200, {
-            "Content-Type": "application/pdf",
-            "Content-Length": pdfBuffer.length,
-            "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
-        });
-        return res.end(pdfBuffer);
-    };
+        return sendArtifactResponse({ req, res, artifactKey: jobState.artifactKey, filename });
+    }
 
-    const artifactExists = await bucketService.fileExistsWithClient(bucketClient, artifactKey).catch(() => false);
-    if (!artifactExists) {
-        const depth = pdfQueue.getQueueDepth();
-        metricsContext.queuePending = depth.pending;
-        metricsContext.queueActive = depth.active;
-        await pdfQueue.enqueuePdfJob({
-            quotationData: pdfData,
-            renderOptions: {
-                templateKey,
-                templateConfig,
-                tenantId,
-                quotationId: quotation.id,
-                versionKey,
-                _metricsContext: metricsContext,
+    const asyncMode = process.env.PDF_ASYNC_MODE !== "false";
+    if (asyncMode) {
+        return responseHandler.sendSuccess(
+            res,
+            {
+                status: "processing",
+                job_id: jobState.job?.id || null,
+                artifact_key: jobState.artifactKey,
+                poll_path: jobState.job ? `/api/quotation/pdf/jobs/${jobState.job.id}` : null,
+                download_path: jobState.job ? `/api/quotation/pdf/jobs/${jobState.job.id}/download` : null,
             },
-            artifactKey,
-            tenantId,
-        });
+            "PDF generation started",
+            202
+        );
     }
 
-    if (req.tenant?.id) {
-        const usageService = require("../billing/usage.service.js");
-        usageService.incrementPdfGenerated(req.tenant.id).catch(() => {});
-    }
-    return sendPdfArtifactResponse();
+    // Sync fallback when async mode is disabled: generate directly for this request.
+    const tenantId = req.tenant?.id || "default";
+    const tenantSequelize = getTenantSequelizeForReq(req);
+    const { generateAndStoreArtifact } = require("./quotationPdfArtifact.service.js");
+    await generateAndStoreArtifact({
+        tenantId,
+        tenantSequelize,
+        quotationId: quotation.id,
+        artifactKey: jobState.artifactKey,
+    });
+    const filename = `quotation-${quotation?.quotation_number || id}.pdf`;
+    return sendArtifactResponse({ req, res, artifactKey: jobState.artifactKey, filename });
 });
 
 module.exports = {
@@ -532,6 +571,9 @@ module.exports = {
     updateTemplateConfig,
     uploadTemplateConfigImage,
     getPdfStatus,
+    createPdfJob,
+    getPdfJobStatus,
+    downloadPdfJobArtifact,
     generatePDF
 };
 

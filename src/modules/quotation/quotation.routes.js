@@ -24,6 +24,9 @@ router.put("/templates/:id/config", controller.updateTemplateConfig);
 router.post("/templates/:id/config/upload", uploadMemory.single("file"), controller.uploadTemplateConfigImage);
 
 router.get("/pdf/status", controller.getPdfStatus);
+router.post("/:id/pdf/jobs", controller.createPdfJob);
+router.get("/pdf/jobs/:jobId", controller.getPdfJobStatus);
+router.get("/pdf/jobs/:jobId/download", controller.downloadPdfJobArtifact);
 router.get("/:id/pdf", controller.generatePDF);
 router.get("/:id", controller.getById);
 router.put("/:id/approve", controller.approve);
