@@ -8,6 +8,10 @@ const QRCode = require("qrcode");
 const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.js");
+const {
+    getImageDataUrl,
+    setImageDataUrl,
+} = require("./pdfImageCache.service.js");
 
 // Template base path; per-template dir is TEMPLATE_BASE / templateKey (e.g. "default")
 const TEMPLATE_BASE = path.join(__dirname, "../../../templates/quotation");
@@ -87,47 +91,6 @@ function setCachedFileDataUrl(key, dataUrl) {
         if (firstKey !== undefined) fileDataUrlCache.delete(firstKey);
     }
     fileDataUrlCache.set(key, { dataUrl, ts: Date.now() });
-}
-
-// Bounded in-memory cache for template config images (background/footer/page) prefetched at startup.
-// Key: "tenantId:bucketKey". Reduces bucket fetches on first PDF per tenant.
-const TEMPLATE_ASSET_CACHE_MAX_ENTRIES = parseInt(process.env.PDF_TEMPLATE_ASSET_CACHE_MAX_ENTRIES || "100", 10);
-const TEMPLATE_ASSET_CACHE_MAX_BYTES = parseInt(process.env.PDF_TEMPLATE_ASSET_CACHE_MAX_BYTES || "0", 10) || 15 * 1024 * 1024; // 15MB default
-const templateAssetCache = new Map(); // "tenantId:key" -> { dataUrl, ts, bytes }
-let templateAssetCacheTotalBytes = 0;
-
-function getTemplateAssetDataUrl(tenantId, key) {
-    if (tenantId == null || !key) return null;
-    const cacheKey = `${tenantId}:${key}`;
-    const entry = templateAssetCache.get(cacheKey);
-    return entry ? entry.dataUrl : null;
-}
-
-function setTemplateAssetDataUrl(tenantId, key, dataUrl) {
-    if (tenantId == null || !key || !dataUrl) return;
-    const bytes = Buffer.byteLength(dataUrl, "utf8");
-    while (
-        templateAssetCache.size >= TEMPLATE_ASSET_CACHE_MAX_ENTRIES ||
-        (TEMPLATE_ASSET_CACHE_MAX_BYTES > 0 && templateAssetCacheTotalBytes + bytes > TEMPLATE_ASSET_CACHE_MAX_BYTES)
-    ) {
-        if (templateAssetCache.size === 0) break;
-        let oldestKey = null;
-        let oldestTs = Infinity;
-        for (const [k, v] of templateAssetCache) {
-            if (v.ts < oldestTs) {
-                oldestTs = v.ts;
-                oldestKey = k;
-            }
-        }
-        if (oldestKey != null) {
-            const e = templateAssetCache.get(oldestKey);
-            if (e && e.bytes) templateAssetCacheTotalBytes -= e.bytes;
-            templateAssetCache.delete(oldestKey);
-        }
-    }
-    const cacheKey = `${tenantId}:${key}`;
-    templateAssetCache.set(cacheKey, { dataUrl, ts: Date.now(), bytes });
-    templateAssetCacheTotalBytes += bytes;
 }
 
 // Soft dedupe for missing bucket keys: avoid logging the same missing key repeatedly in a short window.
@@ -370,6 +333,10 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
             return "";
         }
     }
+    if (options.tenantId != null) {
+        const cached = getImageDataUrl(options.tenantId, pathOrKey);
+        if (cached) return cached;
+    }
     // Legacy /uploads/ path: resolve from bucket (tenant or default), not local filesystem
     if (pathOrKey.startsWith("/uploads/")) {
         const bucketKey = pathOrKey.slice(1); // "uploads/..."
@@ -388,6 +355,9 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
         };
         let dataUrl = await tryFetch(bucketClient);
         if (!dataUrl && bucketClient) dataUrl = await tryFetch(null);
+        if (dataUrl && options.tenantId != null) {
+            setImageDataUrl(options.tenantId, pathOrKey, dataUrl);
+        }
         return dataUrl || "";
     }
     // Other paths starting with /: try local only (e.g. /public/solar-background.jpg in config)
@@ -395,11 +365,7 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
         const absolutePath = path.join(PUBLIC_DIR, pathOrKey);
         return fileToDataUrl(absolutePath, mimeType, false);
     }
-    // Bucket key: check warm cache first (startup-prefetched template assets)
-    if (options.tenantId != null) {
-        const warm = getTemplateAssetDataUrl(options.tenantId, pathOrKey);
-        if (warm) return warm;
-    }
+    // Bucket key
     const tryFetch = async (client) => {
         try {
             const result = client
@@ -424,6 +390,9 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
             console.warn(`Error reading from bucket: ${pathOrKey}`);
         }
         return "";
+    }
+    if (options.tenantId != null) {
+        setImageDataUrl(options.tenantId, pathOrKey, dataUrl);
     }
     return dataUrl;
 };
@@ -680,6 +649,11 @@ const PDF_CACHE_MAX = parseInt(process.env.PDF_CACHE_MAX || "50", 10);
 const PDF_CACHE_TTL_MS = parseInt(process.env.PDF_CACHE_TTL_MS || "0", 10) || 15 * 60 * 1000; // 15 min, 0 = no TTL
 const PDF_CACHE_MAX_BYTES = parseInt(process.env.PDF_CACHE_MAX_BYTES || "0", 10); // 0 = no byte limit
 const PDF_METRICS_ENABLED = process.env.PDF_METRICS_ENABLED === "true";
+const PDF_LIGHTWEIGHT_RENDERER_ENABLED = process.env.PDF_LIGHTWEIGHT_RENDERER_ENABLED === "true";
+const PDF_LIGHTWEIGHT_RENDERER_TEMPLATE_KEYS = (process.env.PDF_LIGHTWEIGHT_RENDERER_TEMPLATE_KEYS || "default")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 // In-memory versioned PDF cache and singleflight map
 const pdfCache = new Map(); // cacheKey -> { buffer, ts, bytes }
@@ -770,6 +744,16 @@ function recordPdfMetrics(stageTimings, cacheInfo, metricsContext = {}) {
 const renderQuotationPDF = async (quotationData, options = {}) => {
     const { bucketClient, templateKey, templateConfig } = options;
 
+    // Optional low-memory renderer path for standard templates.
+    // This intentionally trades visual parity for lower server memory usage.
+    if (PDF_LIGHTWEIGHT_RENDERER_ENABLED) {
+        const allowAll = PDF_LIGHTWEIGHT_RENDERER_TEMPLATE_KEYS.length === 0;
+        const enabledForTemplate = allowAll || PDF_LIGHTWEIGHT_RENDERER_TEMPLATE_KEYS.includes(templateKey || "default");
+        if (enabledForTemplate) {
+            return renderQuotationPDFLightweight(quotationData);
+        }
+    }
+
     await acquirePdfRenderSlot();
     const doRenderAttempt = async () => {
         let page = null;
@@ -838,6 +822,60 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
     } finally {
         releasePdfRenderSlot();
     }
+};
+
+/**
+ * Lightweight non-Chromium renderer (pdfkit) for low-memory mode.
+ * Best for cost-optimized deployments where minor visual variance is acceptable.
+ * @param {Object} quotationData
+ * @returns {Promise<Buffer>}
+ */
+const renderQuotationPDFLightweight = async (quotationData) => {
+    const PDFDocument = require("pdfkit");
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ size: "A4", margin: 36 });
+        const chunks = [];
+        doc.on("data", (c) => chunks.push(c));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+
+        const money = (n) => {
+            const v = Number(n || 0);
+            return `INR ${v.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+        };
+
+        doc.fontSize(16).text("Quotation", { align: "left" });
+        doc.moveDown(0.5);
+        doc.fontSize(10).text(`Quotation No: ${quotationData.quotation_number || "-"}`);
+        doc.text(`Date: ${quotationData.quotation_date || "-"}`);
+        doc.text(`Valid Till: ${quotationData.valid_till || "-"}`);
+        doc.moveDown();
+
+        doc.fontSize(12).text("Customer", { underline: true });
+        doc.fontSize(10).text(`Name: ${quotationData.customer_name || "-"}`);
+        doc.text(`Mobile: ${quotationData.mobile_number || "-"}`);
+        doc.moveDown();
+
+        doc.fontSize(12).text("Project", { underline: true });
+        doc.fontSize(10).text(`Capacity (kW): ${quotationData.project_capacity || "-"}`);
+        doc.text(`System Cost: ${money(quotationData.system_cost)}`);
+        doc.text(`GST: ${money(quotationData.gst_amount)}`);
+        doc.text(`Grand Total: ${money(quotationData.grand_total)}`);
+        doc.text(`Final Cost: ${money(quotationData.final_cost)}`);
+        doc.moveDown();
+
+        doc.fontSize(12).text("Prepared By", { underline: true });
+        doc.fontSize(10).text(`Name: ${quotationData.prepared_by?.name || "-"}`);
+        doc.text(`Phone: ${quotationData.prepared_by?.phone || "-"}`);
+        doc.text(`Email: ${quotationData.prepared_by?.email || "-"}`);
+        doc.moveDown();
+
+        doc.fontSize(8).fillColor("#666").text(
+            "Note: This PDF is generated in lightweight mode for optimized memory usage. " +
+            "Visual layout may differ from the Chromium template output."
+        );
+        doc.end();
+    });
 };
 
 /**
@@ -1383,6 +1421,10 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         monthly_generation: monthlyGeneration,
     };
 };
+
+function setTemplateAssetDataUrl(tenantId, keyOrPath, dataUrl) {
+    setImageDataUrl(tenantId, keyOrPath, dataUrl);
+}
 
 module.exports = {
     generateQuotationPDF,
