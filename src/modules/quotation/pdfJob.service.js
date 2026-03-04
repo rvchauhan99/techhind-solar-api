@@ -12,6 +12,14 @@ const JOB_STATUS = {
 };
 
 const DEFAULT_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.PDF_JOB_MAX_ATTEMPTS || "3", 10));
+const PROCESSING_STALE_MS = Math.max(
+  30_000,
+  parseInt(process.env.PDF_JOB_PROCESSING_STALE_MS || "180000", 10)
+);
+const STALE_RECOVERY_BATCH = Math.max(
+  1,
+  parseInt(process.env.PDF_JOB_STALE_RECOVERY_BATCH || "20", 10)
+);
 
 function sanitizeJob(job) {
   if (!job) return null;
@@ -29,6 +37,7 @@ function sanitizeJob(job) {
     completed_at: j.completed_at,
     next_retry_at: j.next_retry_at,
     last_error: j.last_error,
+    runner_id: j.runner_id,
     created_at: j.created_at,
     updated_at: j.updated_at,
   };
@@ -55,7 +64,9 @@ async function createOrGetJobForModels(models, input) {
   const { tenantId, quotationId, versionKey, artifactKey, payload } = input;
 
   const existing = await findReusableJob(QuotationPdfJob, { quotationId, versionKey });
-  if (existing) return sanitizeJob(existing);
+  if (existing) {
+    return { ...sanitizeJob(existing), _reused: true };
+  }
 
   const created = await QuotationPdfJob.create({
     tenant_id: tenantId != null ? String(tenantId) : null,
@@ -67,7 +78,7 @@ async function createOrGetJobForModels(models, input) {
     max_attempts: DEFAULT_MAX_ATTEMPTS,
     payload: payload || null,
   });
-  return sanitizeJob(created);
+  return { ...sanitizeJob(created), _reused: false };
 }
 
 async function getJobById(req, jobId) {
@@ -139,8 +150,52 @@ async function markJobFailedForModels(models, { jobId, errorMessage }) {
     status: exhausted ? JOB_STATUS.FAILED : JOB_STATUS.PENDING,
     last_error: errorMessage ? String(errorMessage).slice(0, 4000) : null,
     next_retry_at: nextRetryAt,
+    started_at: null,
+    runner_id: null,
   });
   return sanitizeJob(job);
+}
+
+async function recoverStuckProcessingJobsForModels(models, { runnerId } = {}) {
+  const { QuotationPdfJob } = models;
+  const cutoff = new Date(Date.now() - PROCESSING_STALE_MS);
+  const stuckJobs = await QuotationPdfJob.findAll({
+    where: {
+      status: JOB_STATUS.PROCESSING,
+      started_at: { [Op.lte]: cutoff },
+    },
+    order: [["started_at", "ASC"]],
+    limit: STALE_RECOVERY_BATCH,
+  });
+
+  let requeued = 0;
+  let failed = 0;
+  for (const job of stuckJobs) {
+    const attempts = job.attempts || 0;
+    const maxAttempts = job.max_attempts || DEFAULT_MAX_ATTEMPTS;
+    const exhausted = attempts >= maxAttempts;
+    const fallbackError = `Job exceeded processing window (${PROCESSING_STALE_MS}ms)`;
+    const errorText = job.last_error
+      ? `${String(job.last_error).slice(0, 3600)} | ${fallbackError}`
+      : fallbackError;
+    const nextRetryAt = exhausted ? null : new Date();
+    await job.update({
+      status: exhausted ? JOB_STATUS.FAILED : JOB_STATUS.PENDING,
+      last_error: errorText.slice(0, 4000),
+      next_retry_at: nextRetryAt,
+      started_at: null,
+      runner_id: runnerId || null,
+    });
+    if (exhausted) failed += 1;
+    else requeued += 1;
+  }
+
+  return {
+    scanned: stuckJobs.length,
+    requeued,
+    failed,
+    processingStaleMs: PROCESSING_STALE_MS,
+  };
 }
 
 function getModelsForTenantSequelize(sequelize) {
@@ -156,6 +211,7 @@ module.exports = {
   claimNextPendingJobForModels,
   markJobCompletedForModels,
   markJobFailedForModels,
+  recoverStuckProcessingJobsForModels,
   getModelsForTenantSequelize,
   sanitizeJob,
 };
