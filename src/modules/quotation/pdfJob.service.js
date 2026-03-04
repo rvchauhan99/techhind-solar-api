@@ -11,7 +11,19 @@ const JOB_STATUS = {
   FAILED: "failed",
 };
 
-const DEFAULT_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.PDF_JOB_MAX_ATTEMPTS || "3", 10));
+const DEFAULT_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.PDF_JOB_MAX_ATTEMPTS || "2", 10));
+const ATTEMPT_TIMEOUT_MS = Math.max(
+  15_000,
+  parseInt(process.env.PDF_CHILD_TIMEOUT_MS || "120000", 10)
+);
+const RUNNER_POLL_MS = Math.max(
+  500,
+  parseInt(process.env.PDF_JOB_RUNNER_POLL_MS || "1000", 10)
+);
+const POLL_WINDOW_BUFFER_MS = Math.max(
+  RUNNER_POLL_MS * 2,
+  parseInt(process.env.PDF_POLL_WINDOW_BUFFER_MS || "5000", 10)
+);
 const PROCESSING_STALE_MS = Math.max(
   30_000,
   parseInt(process.env.PDF_JOB_PROCESSING_STALE_MS || "180000", 10)
@@ -43,6 +55,26 @@ function sanitizeJob(job) {
   };
 }
 
+function getRetryDelayMs(attempts) {
+  return Math.min(60_000, 1000 * Math.pow(2, attempts));
+}
+
+function getJobTimingPolicy(maxAttempts = DEFAULT_MAX_ATTEMPTS) {
+  const normalizedMaxAttempts = Math.max(1, Number(maxAttempts) || DEFAULT_MAX_ATTEMPTS);
+  // Retry delay accumulates between failed attempts only.
+  let retryBudgetMs = 0;
+  for (let attempt = 1; attempt < normalizedMaxAttempts; attempt += 1) {
+    retryBudgetMs += getRetryDelayMs(attempt);
+  }
+  return {
+    attempt_timeout_ms: ATTEMPT_TIMEOUT_MS,
+    retry_budget_ms: retryBudgetMs,
+    max_attempts: normalizedMaxAttempts,
+    recommended_poll_timeout_ms:
+      ATTEMPT_TIMEOUT_MS * normalizedMaxAttempts + retryBudgetMs + POLL_WINDOW_BUFFER_MS,
+  };
+}
+
 async function findReusableJob(QuotationPdfJob, { quotationId, versionKey }) {
   return QuotationPdfJob.findOne({
     where: {
@@ -60,25 +92,35 @@ async function createOrGetJob(req, input) {
 }
 
 async function createOrGetJobForModels(models, input) {
-  const { QuotationPdfJob } = models;
+  const { QuotationPdfJob, sequelize } = models;
   const { tenantId, quotationId, versionKey, artifactKey, payload } = input;
+  return sequelize.transaction(async (transaction) => {
+    const existing = await QuotationPdfJob.findOne({
+      where: {
+        quotation_id: quotationId,
+        version_key: versionKey,
+        status: { [Op.in]: [JOB_STATUS.PENDING, JOB_STATUS.PROCESSING, JOB_STATUS.COMPLETED] },
+      },
+      order: [["id", "DESC"]],
+      lock: true,
+      transaction,
+    });
+    if (existing) {
+      return { ...sanitizeJob(existing), _reused: true };
+    }
 
-  const existing = await findReusableJob(QuotationPdfJob, { quotationId, versionKey });
-  if (existing) {
-    return { ...sanitizeJob(existing), _reused: true };
-  }
-
-  const created = await QuotationPdfJob.create({
-    tenant_id: tenantId != null ? String(tenantId) : null,
-    quotation_id: quotationId,
-    version_key: versionKey,
-    artifact_key: artifactKey,
-    status: JOB_STATUS.PENDING,
-    attempts: 0,
-    max_attempts: DEFAULT_MAX_ATTEMPTS,
-    payload: payload || null,
+    const created = await QuotationPdfJob.create({
+      tenant_id: tenantId != null ? String(tenantId) : null,
+      quotation_id: quotationId,
+      version_key: versionKey,
+      artifact_key: artifactKey,
+      status: JOB_STATUS.PENDING,
+      attempts: 0,
+      max_attempts: DEFAULT_MAX_ATTEMPTS,
+      payload: payload || null,
+    }, { transaction });
+    return { ...sanitizeJob(created), _reused: false };
   });
-  return { ...sanitizeJob(created), _reused: false };
 }
 
 async function getJobById(req, jobId) {
@@ -97,6 +139,31 @@ async function getJobByIdForModels(models, jobId) {
 async function claimNextPendingJobForModels(models, { runnerId }) {
   const { QuotationPdfJob, sequelize } = models;
   const now = new Date();
+  // #region agent log
+  let pendingCount = 0;
+  try {
+    pendingCount = await QuotationPdfJob.count({
+      where: {
+        status: JOB_STATUS.PENDING,
+        [Op.or]: [{ next_retry_at: null }, { next_retry_at: { [Op.lte]: now } }],
+      },
+    });
+  } catch (_) {
+    pendingCount = -1;
+  }
+  fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "883c30" },
+    body: JSON.stringify({
+      sessionId: "883c30",
+      hypothesisId: "H2",
+      location: "pdfJob.service.js:claimNextPendingJobForModels",
+      message: "pending count before claim",
+      data: { pendingCount, dbName: sequelize?.config?.database },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   return sequelize.transaction(async (transaction) => {
     const job = await QuotationPdfJob.findOne({
       where: {
@@ -144,7 +211,7 @@ async function markJobFailedForModels(models, { jobId, errorMessage }) {
   const attempts = job.attempts || 0;
   const maxAttempts = job.max_attempts || DEFAULT_MAX_ATTEMPTS;
   const exhausted = attempts >= maxAttempts;
-  const nextRetryAt = exhausted ? null : new Date(Date.now() + Math.min(60_000, 1000 * Math.pow(2, attempts)));
+  const nextRetryAt = exhausted ? null : new Date(Date.now() + getRetryDelayMs(attempts));
 
   await job.update({
     status: exhausted ? JOB_STATUS.FAILED : JOB_STATUS.PENDING,
@@ -198,6 +265,46 @@ async function recoverStuckProcessingJobsForModels(models, { runnerId } = {}) {
   };
 }
 
+async function cleanupOldJobsForModels(models) {
+  const { QuotationPdfJob } = models;
+  const failedRetentionHours = Math.max(1, parseInt(process.env.PDF_JOB_FAILED_RETENTION_HOURS || "72", 10));
+  const completedRetentionHours = Math.max(1, parseInt(process.env.PDF_JOB_COMPLETED_RETENTION_HOURS || "168", 10));
+  const failedCutoff = new Date(Date.now() - failedRetentionHours * 60 * 60 * 1000);
+  const completedCutoff = new Date(Date.now() - completedRetentionHours * 60 * 60 * 1000);
+  const [failedDeleted, completedDeleted] = await Promise.all([
+    QuotationPdfJob.destroy({
+      where: {
+        status: JOB_STATUS.FAILED,
+        updated_at: { [Op.lte]: failedCutoff },
+      },
+    }),
+    QuotationPdfJob.destroy({
+      where: {
+        status: JOB_STATUS.COMPLETED,
+        updated_at: { [Op.lte]: completedCutoff },
+      },
+    }),
+  ]);
+  return { failedDeleted, completedDeleted };
+}
+
+async function getQueueSummaryForModels(models) {
+  const { QuotationPdfJob } = models;
+  const [pending, processing, completed, failed] = await Promise.all([
+    QuotationPdfJob.count({ where: { status: JOB_STATUS.PENDING } }),
+    QuotationPdfJob.count({ where: { status: JOB_STATUS.PROCESSING } }),
+    QuotationPdfJob.count({ where: { status: JOB_STATUS.COMPLETED } }),
+    QuotationPdfJob.count({ where: { status: JOB_STATUS.FAILED } }),
+  ]);
+  return {
+    pending,
+    processing,
+    completed,
+    failed,
+    active: pending + processing,
+  };
+}
+
 function getModelsForTenantSequelize(sequelize) {
   return getModelsForSequelize(sequelize);
 }
@@ -212,7 +319,10 @@ module.exports = {
   markJobCompletedForModels,
   markJobFailedForModels,
   recoverStuckProcessingJobsForModels,
+  cleanupOldJobsForModels,
+  getQueueSummaryForModels,
   getModelsForTenantSequelize,
   sanitizeJob,
+  getJobTimingPolicy,
 };
 
