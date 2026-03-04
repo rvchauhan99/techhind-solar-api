@@ -43,7 +43,7 @@ const QuotationPdfJob = sequelize.define(
     max_attempts: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      defaultValue: 3,
+      defaultValue: 2,
     },
     started_at: {
       type: DataTypes.DATE,

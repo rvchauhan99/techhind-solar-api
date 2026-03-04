@@ -17,27 +17,6 @@ const { resolvePdfMetadataForQuotation } = require("./quotationPdfArtifact.servi
 const FILE_UNAVAILABLE_MESSAGE =
     "We couldn't save your documents right now. Please try again in a few minutes.";
 
-// #region agent log
-function debugLog(hypothesisId, location, message, data = {}) {
-    fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "883c30",
-        },
-        body: JSON.stringify({
-            sessionId: "883c30",
-            runId: "pdf-debug-1",
-            hypothesisId,
-            location,
-            message,
-            data,
-            timestamp: Date.now(),
-        }),
-    }).catch(() => { });
-}
-// #endregion
-
 const resolveQuotationVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
     const userId = Number(req.user?.id);
@@ -394,11 +373,21 @@ const uploadTemplateConfigImage = asyncHandler(async (req, res) => {
 
 const getPdfStatus = asyncHandler(async (req, res) => {
     const runner = pdfRunnerService.getRunnerStatus();
+    let queue = null;
+    try {
+        const tenantModels = getTenantModels(req);
+        queue = await pdfJobService.getQueueSummaryForModels(tenantModels);
+    } catch (_) {
+        queue = null;
+    }
     return responseHandler.sendSuccess(
         res,
         {
             asyncMode: process.env.PDF_ASYNC_MODE !== "false",
             runner,
+            tenant_id: req.tenant?.id || "default",
+            queue,
+            timing: buildPdfTimingMetadata(),
         },
         null,
         200
@@ -426,6 +415,16 @@ const sendArtifactResponse = async ({ req, res, artifactKey, filename }) => {
         "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
     });
     return res.end(pdfBuffer);
+};
+
+const buildPdfTimingMetadata = (maxAttempts) => {
+    const timing = pdfJobService.getJobTimingPolicy(maxAttempts);
+    return {
+        attempt_timeout_ms: timing.attempt_timeout_ms,
+        max_attempts: timing.max_attempts,
+        retry_budget_ms: timing.retry_budget_ms,
+        recommended_poll_timeout_ms: timing.recommended_poll_timeout_ms,
+    };
 };
 
 const ensurePdfJobForQuotation = async (req, quotation) => {
@@ -477,7 +476,6 @@ const ensurePdfJobForQuotation = async (req, quotation) => {
 };
 
 const createPdfJob = asyncHandler(async (req, res) => {
-    const t0 = Date.now();
     const { id } = req.params;
     const quotation = await quotationService.getQuotationForPdf({ id });
     if (!quotation) return responseHandler.sendError(res, "Quotation not found", 404);
@@ -493,43 +491,21 @@ const createPdfJob = asyncHandler(async (req, res) => {
         job_id: jobState.job ? jobState.job.id : null,
         artifact_key: jobState.artifactKey,
         version_key: jobState.versionKey,
+        timing: buildPdfTimingMetadata(jobState.job?.max_attempts),
     };
-    // #region agent log
-    debugLog("H2", "quotation.controller.js:createPdfJob", "create_pdf_job_completed", {
-        quotationId: Number(id),
-        elapsedMs: Date.now() - t0,
-        status: jobState.status,
-        jobId: jobState.job ? jobState.job.id : null,
-    });
-    // #endregion
     return responseHandler.sendSuccess(res, payload, "PDF job prepared", jobState.status === "completed" ? 200 : 202);
 });
 
 const getPdfJobStatus = asyncHandler(async (req, res) => {
-    const t0 = Date.now();
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
+    // Force dynamic validator for this polling endpoint to avoid stale 304 loops.
+    res.setHeader("ETag", `"pdf-job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}"`);
     const { jobId } = req.params;
     const job = await pdfJobService.getJobById(req, jobId);
     if (!job) return responseHandler.sendError(res, "PDF job not found", 404);
-    // #region agent log
-    debugLog("H5", "quotation.controller.js:getPdfJobStatus", "job_status_read", {
-        jobId: Number(jobId),
-        elapsedMs: Date.now() - t0,
-        status: job.status,
-        attempts: job.attempts,
-        maxAttempts: job.max_attempts,
-        hasError: Boolean(job.last_error),
-        runnerId: job.runner_id || null,
-        startedAt: job.started_at || null,
-        ageMs:
-            job.started_at != null
-                ? Math.max(0, Date.now() - new Date(job.started_at).getTime())
-                : null,
-    });
-    // #endregion
     return responseHandler.sendSuccess(
         res,
         {
@@ -541,6 +517,7 @@ const getPdfJobStatus = asyncHandler(async (req, res) => {
             artifact_key: job.artifact_key,
             can_download: job.status === "completed",
             download_path: `/api/quotation/pdf/jobs/${job.id}/download`,
+            timing: buildPdfTimingMetadata(job.max_attempts),
         },
         "PDF job status fetched",
         200

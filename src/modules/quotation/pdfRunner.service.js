@@ -5,6 +5,7 @@ const { fork } = require("child_process");
 const db = require("../../models/index.js");
 const dbPoolManager = require("../tenant/dbPoolManager.js");
 const tenantRegistryService = require("../tenant/tenantRegistry.service.js");
+const { initializeRegistryConnection, isRegistryAvailable } = require("../../config/registryDb.js");
 const pdfJobService = require("./pdfJob.service.js");
 const { getModelsForSequelize } = require("../tenant/tenantModels.js");
 
@@ -13,6 +14,7 @@ const POLL_MS = Math.max(500, parseInt(process.env.PDF_JOB_RUNNER_POLL_MS || "10
 const MAX_CONCURRENCY = Math.max(1, parseInt(process.env.PDF_JOB_MAX_CONCURRENCY || "1", 10));
 const CHILD_TIMEOUT_MS = Math.max(15_000, parseInt(process.env.PDF_CHILD_TIMEOUT_MS || "120000", 10));
 const HEARTBEAT_MS = Math.max(5000, parseInt(process.env.PDF_JOB_RUNNER_HEARTBEAT_MS || "30000", 10));
+const CLEANUP_EVERY_MS = Math.max(60_000, parseInt(process.env.PDF_JOB_CLEANUP_INTERVAL_MS || "900000", 10));
 
 let _started = false;
 let _timer = null;
@@ -20,63 +22,44 @@ let _heartbeatTimer = null;
 let _activeChildren = 0;
 let _lastTenantCache = { ts: 0, items: [] };
 let _tickInProgress = false;
-
-// #region agent log
-function debugLog(hypothesisId, location, message, data = {}) {
-  fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "883c30",
-    },
-    body: JSON.stringify({
-      sessionId: "883c30",
-      runId: "pdf-debug-1",
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
-// #endregion
+let _lastCleanupAt = 0;
+let _tenantCursor = 0;
 
 async function listTenantExecutors() {
-  const t0 = Date.now();
-  if (!dbPoolManager.isSharedMode()) {
-    // #region agent log
-    debugLog("H1", "pdfRunner.service.js:listTenantExecutors", "dedicated_mode_executor_resolved", {
-      elapsedMs: Date.now() - t0,
-      executors: 1,
-    });
-    // #endregion
-    return [{ tenantId: "default", sequelize: db.sequelize }];
+  // Independent/dedicated mode: no registry URL → single executor for the app DB (DATABASE_URL / DB_*).
+  if (!process.env.TENANT_REGISTRY_DB_URL) {
+    const seq = await dbPoolManager.getPool("default");
+    return [{ tenantId: "default", sequelize: seq }];
   }
 
-  const now = Date.now();
-  if (now - _lastTenantCache.ts < 10_000 && _lastTenantCache.items.length > 0) {
-    return _lastTenantCache.items;
-  }
-
-  const tenants = await tenantRegistryService.getActiveTenantsForMigrations({ sharedOnly: false });
-  const items = [];
-  for (const t of tenants) {
-    try {
-      const sequelize = await dbPoolManager.getPool(t.id);
-      items.push({ tenantId: t.id, sequelize });
-    } catch (err) {
-      // Ignore one-tenant failure and continue polling others.
+  // Multi-tenant mode: registry URL set → poll all tenant DBs so runner sees jobs the API wrote.
+  try {
+    if (!isRegistryAvailable()) await initializeRegistryConnection();
+    const now = Date.now();
+    if (now - _lastTenantCache.ts < 10_000 && _lastTenantCache.items.length > 0) {
+      return _lastTenantCache.items;
     }
+    const tenants = await tenantRegistryService.getActiveTenantsForMigrations({ sharedOnly: false });
+    const items = [];
+    for (const t of tenants) {
+      try {
+        const sequelize = await dbPoolManager.getPool(t.id);
+        items.push({ tenantId: t.id, sequelize });
+      } catch (err) {
+        // Ignore one-tenant failure and continue polling others.
+      }
+    }
+    if (items.length > 0) {
+      _lastTenantCache = { ts: now, items };
+      return items;
+    }
+  } catch (err) {
+    // Registry or tenant list failed; fall back to default DB below.
   }
-  _lastTenantCache = { ts: now, items };
-  // #region agent log
-  debugLog("H1", "pdfRunner.service.js:listTenantExecutors", "shared_mode_executors_resolved", {
-    elapsedMs: Date.now() - t0,
-    executors: items.length,
-  });
-  // #endregion
-  return items;
+
+  // Fallback: registry set but returned no tenants or failed. Use main app DB.
+  const seq = dbPoolManager.isSharedMode() ? db.sequelize : await dbPoolManager.getPool("default");
+  return [{ tenantId: "default", sequelize: seq }];
 }
 
 function runJobInChild({ tenantId, jobId }) {
@@ -108,20 +91,59 @@ function runJobInChild({ tenantId, jobId }) {
 }
 
 async function tickOnce() {
+  // #region agent log
+  if (Date.now() % 5000 < 1100) {
+    fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "883c30" },
+      body: JSON.stringify({
+        sessionId: "883c30",
+        hypothesisId: "H3",
+        location: "pdfRunner.service.js:tickOnce:entry",
+        message: "tickOnce entry",
+        data: { _tickInProgress, _activeChildren, MAX_CONCURRENCY },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   if (_tickInProgress) return;
   _tickInProgress = true;
   try {
     if (_activeChildren >= MAX_CONCURRENCY) return;
-    // #region agent log
-    debugLog("H4", "pdfRunner.service.js:tickOnce", "tick_started", {
-      activeChildren: _activeChildren,
-      maxConcurrency: MAX_CONCURRENCY,
-    });
-    // #endregion
     const executors = await listTenantExecutors();
-    for (const ex of executors) {
+    const fairExecutors = executors.length
+      ? executors
+          .slice(_tenantCursor % executors.length)
+          .concat(executors.slice(0, _tenantCursor % executors.length))
+      : executors;
+    if (executors.length > 0) {
+      _tenantCursor = (_tenantCursor + 1) % executors.length;
+    }
+    for (const ex of fairExecutors) {
       if (_activeChildren >= MAX_CONCURRENCY) break;
       const models = getModelsForSequelize(ex.sequelize);
+      // #region agent log
+      if (Date.now() % 5000 < 1100) {
+        fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "883c30" },
+          body: JSON.stringify({
+            sessionId: "883c30",
+            hypothesisId: "H5",
+            location: "pdfRunner.service.js:tickOnce:models",
+            message: "models for executor",
+            data: {
+              tenantId: ex.tenantId,
+              hasModels: !!models,
+              hasQuotationPdfJob: !!(models && models.QuotationPdfJob),
+              dbName: ex.sequelize?.config?.database,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
       if (!models || !models.QuotationPdfJob) continue;
 
       try {
@@ -138,17 +160,35 @@ async function tickOnce() {
           `[PDF_RUNNER] stuck-job recovery failed tenant=${ex.tenantId}: ${recoveryErr.message}`
         );
       }
+      if (Date.now() - _lastCleanupAt >= CLEANUP_EVERY_MS) {
+        try {
+          const cleanup = await pdfJobService.cleanupOldJobsForModels(models);
+          if ((cleanup.failedDeleted || 0) > 0 || (cleanup.completedDeleted || 0) > 0) {
+            console.info(
+              `[PDF_RUNNER] cleanup tenant=${ex.tenantId} failedDeleted=${cleanup.failedDeleted} completedDeleted=${cleanup.completedDeleted}`
+            );
+          }
+        } catch (cleanupErr) {
+          console.error(`[PDF_RUNNER] cleanup failed tenant=${ex.tenantId}: ${cleanupErr.message}`);
+        } finally {
+          _lastCleanupAt = Date.now();
+        }
+      }
 
-      const claimT0 = Date.now();
       const job = await pdfJobService.claimNextPendingJobForModels(models, { runnerId: String(process.pid) });
       // #region agent log
-      debugLog("H1", "pdfRunner.service.js:tickOnce", "claim_attempt_result", {
-        tenantId: ex.tenantId,
-        elapsedMs: Date.now() - claimT0,
-        claimed: Boolean(job),
-        jobId: job ? job.id : null,
-        jobStatus: job ? job.status : null,
-      });
+      fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "883c30" },
+        body: JSON.stringify({
+          sessionId: "883c30",
+          hypothesisId: "H2",
+          location: "pdfRunner.service.js:tickOnce:afterClaim",
+          message: "claim result",
+          data: { tenantId: ex.tenantId, jobId: job ? job.id : null, hasJob: !!job },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
       // #endregion
       if (!job) continue;
       console.info(
@@ -157,36 +197,15 @@ async function tickOnce() {
 
       _activeChildren += 1;
       const startedAt = Date.now();
-      // #region agent log
-      debugLog("H4", "pdfRunner.service.js:tickOnce", "child_spawned", {
-        tenantId: ex.tenantId,
-        jobId: job.id,
-      });
-      // #endregion
       runJobInChild({ tenantId: ex.tenantId, jobId: job.id })
         .then(() => {
           const elapsedMs = Date.now() - startedAt;
-          // #region agent log
-          debugLog("H4", "pdfRunner.service.js:tickOnce", "child_completed", {
-            tenantId: ex.tenantId,
-            jobId: job.id,
-            elapsedMs,
-          });
-          // #endregion
           console.info(
             `[PDF_RUNNER] completed job id=${job.id} tenant=${ex.tenantId} elapsedMs=${elapsedMs}`
           );
         })
         .catch(async (err) => {
           const elapsedMs = Date.now() - startedAt;
-          // #region agent log
-          debugLog("H4", "pdfRunner.service.js:tickOnce", "child_failed", {
-            tenantId: ex.tenantId,
-            jobId: job.id,
-            elapsedMs,
-            error: err.message,
-          });
-          // #endregion
           console.warn(
             `[PDF_RUNNER] failed job id=${job.id} tenant=${ex.tenantId} elapsedMs=${elapsedMs} error=${err.message}`
           );
