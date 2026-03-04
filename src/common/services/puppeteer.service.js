@@ -4,11 +4,54 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 
+// Production-hardened Chromium args.
+// Goal: minimise peak memory when rendering PDF pages with large embedded images.
 const DEFAULT_ARGS = [
+    // Security / sandbox
     "--no-sandbox",
     "--disable-setuid-sandbox",
+
+    // Memory: use /tmp instead of /dev/shm (avoids 64 MB shared-mem limit in Docker/Linux)
     "--disable-dev-shm-usage",
+
+    // Rendering: disable GPU (headless server has no GPU)
     "--disable-gpu",
+    "--disable-software-rasterizer",
+
+    // Memory reduction: disable unused subsystems
+    "--disable-extensions",
+    "--disable-plugins",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-breakpad",
+    "--disable-client-side-phishing-detection",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-domain-reliability",
+    "--disable-features=AudioServiceOutOfProcess,TranslateUI",
+    "--disable-hang-monitor",
+    "--disable-ipc-flooding-protection",
+    "--disable-notifications",
+    "--disable-offer-store-unmasked-wallet-cards",
+    "--disable-popup-blocking",
+    "--disable-print-preview",
+    "--disable-prompt-on-repost",
+    "--disable-renderer-backgrounding",
+    "--disable-speech-api",
+    "--disable-sync",
+    "--disable-translate",
+    "--hide-scrollbars",
+    "--ignore-gpu-blocklist",
+    "--metrics-recording-only",
+    "--mute-audio",
+    "--no-default-browser-check",
+    "--no-first-run",
+    "--no-pings",
+    "--no-zygote",
+    "--password-store=basic",
+    "--safebrowsing-disable-auto-update",
+    "--use-mock-keychain",
 ];
 
 /**
@@ -111,7 +154,7 @@ async function getBrowser() {
  */
 async function closeBrowser() {
     if (_browserInstance) {
-        await _browserInstance.close().catch(() => {});
+        await _browserInstance.close().catch(() => { });
         _browserInstance = null;
         _browserLaunchPromise = null;
     }
