@@ -23,6 +23,7 @@ router.put("/templates/:id", controller.updateTemplate);
 router.put("/templates/:id/config", controller.updateTemplateConfig);
 router.post("/templates/:id/config/upload", uploadMemory.single("file"), controller.uploadTemplateConfigImage);
 
+router.get("/pdf/status", controller.getPdfStatus);
 router.get("/:id/pdf", controller.generatePDF);
 router.get("/:id", controller.getById);
 router.put("/:id/approve", controller.approve);

@@ -3,6 +3,7 @@
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const bucketService = require("../../common/services/bucket.service.js");
+const pdfService = require("./pdf.service.js");
 const path = require("path");
 const fs = require("fs");
 
@@ -109,6 +110,9 @@ const updateTemplateConfig = async (id, payload, req) => {
         ...(payload.default_footer_image_path !== undefined && { default_footer_image_path: payload.default_footer_image_path || null }),
         ...(payload.page_backgrounds !== undefined && { page_backgrounds: payload.page_backgrounds || null }),
     });
+    if (req.tenant && req.tenant.id != null) {
+        pdfService.invalidatePdfCacheForTenant(req.tenant.id);
+    }
     return getTemplateById(id, req);
 };
 
@@ -138,6 +142,9 @@ const uploadTemplateConfigImage = async (id, fieldName, file, req) => {
     }
     if (Object.keys(updatePayload).length > 0) {
         await config.update(updatePayload);
+        if (req.tenant && req.tenant.id != null) {
+            pdfService.invalidatePdfCacheForTenant(req.tenant.id);
+        }
     }
     return { path: key, url: bucketService.getPublicUrl(key), template: await getTemplateById(id, req) };
 };

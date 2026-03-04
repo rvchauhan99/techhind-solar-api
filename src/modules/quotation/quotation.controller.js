@@ -368,6 +368,21 @@ const uploadTemplateConfigImage = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, result, "Image uploaded and config updated", 200);
 });
 
+const getPdfStatus = asyncHandler(async (req, res) => {
+    const pdfQueue = require("./pdfQueue.service.js");
+    const depth = pdfQueue.getQueueDepth();
+    return responseHandler.sendSuccess(
+        res,
+        {
+            queueEnabled: pdfQueue.isQueueEnabled(),
+            pending: depth.pending,
+            active: depth.active,
+        },
+        null,
+        200
+    );
+});
+
 const generatePDF = asyncHandler(async (req, res) => {
     const { id } = req.params;
 
@@ -421,10 +436,13 @@ const generatePDF = asyncHandler(async (req, res) => {
         bucketClient
     );
 
-    // Build a version key so cached PDFs are invalidated when underlying data changes.
+    // Build a version key so cached PDFs are invalidated when underlying data changes (incl. template config images).
+    const configUpdatedAt = template && template.config && template.config.updated_at
+        ? new Date(template.config.updated_at).toISOString() : "";
     const versionParts = [
         quotation.updated_at ? new Date(quotation.updated_at).toISOString() : "",
         template && template.updated_at ? new Date(template.updated_at).toISOString() : "",
+        configUpdatedAt,
         company && company.updated_at ? new Date(company.updated_at).toISOString() : "",
         bankAccount && bankAccount.updated_at ? new Date(bankAccount.updated_at).toISOString() : "",
     ];
@@ -439,7 +457,11 @@ const generatePDF = asyncHandler(async (req, res) => {
 
     const tenantId = req.tenant?.id || "default";
 
-    const pdfBuffer = await pdfService.generateQuotationPDF(pdfData, {
+    const pdfQueue = require("./pdfQueue.service.js");
+    const depth = pdfQueue.getQueueDepth();
+    metricsContext.queuePending = depth.pending;
+    metricsContext.queueActive = depth.active;
+    const pdfBuffer = await pdfQueue.enqueuePdfJob(pdfData, {
         bucketClient,
         templateKey,
         templateConfig,
@@ -485,6 +507,7 @@ module.exports = {
     updateTemplate,
     updateTemplateConfig,
     uploadTemplateConfigImage,
+    getPdfStatus,
     generatePDF
 };
 
