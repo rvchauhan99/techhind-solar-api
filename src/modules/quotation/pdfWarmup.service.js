@@ -151,6 +151,14 @@ async function warmupTemplateAssetCache() {
             );
         }
     } catch (e) {
+        const isConnectionError =
+            /remaining connection slots|too many clients|connection limit|ECONNREFUSED|ETIMEDOUT|connection refused/i.test(
+                e && e.message ? e.message : String(e)
+            );
+        if (isConnectionError) {
+            console.warn("[PDF] Warmup skipped (connection limit or DB unavailable):", e.message);
+            return { warmed: 0, errors: 1, skipped: 0, scanned: 0, _skippedReason: "connection_limit" };
+        }
         console.warn("[PDF] Warmup failed:", e.message);
     }
 
