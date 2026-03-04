@@ -23,7 +23,9 @@ const corsOptions = {
     "Cookie",
     "x-timezone",
     "x-admin-api-key",
-    "x-current-module-route", // add this
+    "x-current-module-route",
+    "x-request-id",
+    "x-client-route",
   ],
   exposedHeaders: ["X-Upload-Summary", "Content-Disposition"],
   credentials: true,
