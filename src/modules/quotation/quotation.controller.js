@@ -17,6 +17,27 @@ const { resolvePdfMetadataForQuotation } = require("./quotationPdfArtifact.servi
 const FILE_UNAVAILABLE_MESSAGE =
     "We couldn't save your documents right now. Please try again in a few minutes.";
 
+// #region agent log
+function debugLog(hypothesisId, location, message, data = {}) {
+    fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "883c30",
+        },
+        body: JSON.stringify({
+            sessionId: "883c30",
+            runId: "pdf-debug-1",
+            hypothesisId,
+            location,
+            message,
+            data,
+            timestamp: Date.now(),
+        }),
+    }).catch(() => { });
+}
+// #endregion
+
 const resolveQuotationVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
     const userId = Number(req.user?.id);
@@ -421,6 +442,9 @@ const ensurePdfJobForQuotation = async (req, quotation) => {
     const bucketClient = bucketService.getBucketForRequest(req);
     const artifactExists = await bucketService.fileExistsWithClient(bucketClient, artifactKey).catch(() => false);
     if (artifactExists) {
+        console.info(
+            `[PDF_JOB] artifact_hit tenant=${tenantId} quotation=${quotation.id} version=${metadata.versionKey}`
+        );
         return {
             quotation,
             versionKey: metadata.versionKey,
@@ -429,6 +453,9 @@ const ensurePdfJobForQuotation = async (req, quotation) => {
             job: null,
         };
     }
+    console.info(
+        `[PDF_JOB] artifact_miss tenant=${tenantId} quotation=${quotation.id} version=${metadata.versionKey}`
+    );
 
     const job = await pdfJobService.createOrGetJob(req, {
         tenantId,
@@ -437,6 +464,9 @@ const ensurePdfJobForQuotation = async (req, quotation) => {
         artifactKey,
         payload: { quotation_id: quotation.id },
     });
+    console.info(
+        `[PDF_JOB] ${job._reused ? "job_reused" : "job_created"} tenant=${tenantId} quotation=${quotation.id} job=${job.id} status=${job.status}`
+    );
     return {
         quotation,
         versionKey: metadata.versionKey,
@@ -447,6 +477,7 @@ const ensurePdfJobForQuotation = async (req, quotation) => {
 };
 
 const createPdfJob = asyncHandler(async (req, res) => {
+    const t0 = Date.now();
     const { id } = req.params;
     const quotation = await quotationService.getQuotationForPdf({ id });
     if (!quotation) return responseHandler.sendError(res, "Quotation not found", 404);
@@ -463,13 +494,42 @@ const createPdfJob = asyncHandler(async (req, res) => {
         artifact_key: jobState.artifactKey,
         version_key: jobState.versionKey,
     };
+    // #region agent log
+    debugLog("H2", "quotation.controller.js:createPdfJob", "create_pdf_job_completed", {
+        quotationId: Number(id),
+        elapsedMs: Date.now() - t0,
+        status: jobState.status,
+        jobId: jobState.job ? jobState.job.id : null,
+    });
+    // #endregion
     return responseHandler.sendSuccess(res, payload, "PDF job prepared", jobState.status === "completed" ? 200 : 202);
 });
 
 const getPdfJobStatus = asyncHandler(async (req, res) => {
+    const t0 = Date.now();
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     const { jobId } = req.params;
     const job = await pdfJobService.getJobById(req, jobId);
     if (!job) return responseHandler.sendError(res, "PDF job not found", 404);
+    // #region agent log
+    debugLog("H5", "quotation.controller.js:getPdfJobStatus", "job_status_read", {
+        jobId: Number(jobId),
+        elapsedMs: Date.now() - t0,
+        status: job.status,
+        attempts: job.attempts,
+        maxAttempts: job.max_attempts,
+        hasError: Boolean(job.last_error),
+        runnerId: job.runner_id || null,
+        startedAt: job.started_at || null,
+        ageMs:
+            job.started_at != null
+                ? Math.max(0, Date.now() - new Date(job.started_at).getTime())
+                : null,
+    });
+    // #endregion
     return responseHandler.sendSuccess(
         res,
         {
