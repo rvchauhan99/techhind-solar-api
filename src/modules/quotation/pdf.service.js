@@ -13,6 +13,33 @@ const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.
 const TEMPLATE_BASE = path.join(__dirname, "../../../templates/quotation");
 const PUBLIC_DIR = path.join(__dirname, "../../../public");
 
+// Concurrency limit for PDF page renders (prevents Chromium OOM under burst traffic)
+const PDF_RENDER_MAX_CONCURRENCY = Math.max(1, parseInt(process.env.PDF_RENDER_MAX_CONCURRENCY || "2", 10));
+const pdfRenderSemaphore = { active: 0, queue: [] };
+
+function acquirePdfRenderSlot() {
+    if (pdfRenderSemaphore.active < PDF_RENDER_MAX_CONCURRENCY) {
+        pdfRenderSemaphore.active += 1;
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        pdfRenderSemaphore.queue.push(resolve);
+    });
+}
+
+function releasePdfRenderSlot() {
+    pdfRenderSemaphore.active -= 1;
+    if (pdfRenderSemaphore.queue.length > 0) {
+        const next = pdfRenderSemaphore.queue.shift();
+        pdfRenderSemaphore.active += 1;
+        if (typeof next === "function") next();
+    }
+}
+
+// URL image fetch guards (prevent hang/OOM from slow or huge responses)
+const PDF_IMAGE_FETCH_TIMEOUT_MS = Math.max(1000, parseInt(process.env.PDF_IMAGE_FETCH_TIMEOUT_MS || "15000", 10));
+const PDF_IMAGE_FETCH_MAX_BYTES = Math.max(1024 * 100, parseInt(process.env.PDF_IMAGE_FETCH_MAX_BYTES || "5242880", 10)); // default 5MB
+
 // In-memory cache for public URL image fetches (tenant-agnostic; key = URL). Reduces repeated fetches across PDFs.
 const URL_IMAGE_CACHE_MAX = 100;
 const URL_IMAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -62,6 +89,47 @@ function setCachedFileDataUrl(key, dataUrl) {
     fileDataUrlCache.set(key, { dataUrl, ts: Date.now() });
 }
 
+// Bounded in-memory cache for template config images (background/footer/page) prefetched at startup.
+// Key: "tenantId:bucketKey". Reduces bucket fetches on first PDF per tenant.
+const TEMPLATE_ASSET_CACHE_MAX_ENTRIES = parseInt(process.env.PDF_TEMPLATE_ASSET_CACHE_MAX_ENTRIES || "100", 10);
+const TEMPLATE_ASSET_CACHE_MAX_BYTES = parseInt(process.env.PDF_TEMPLATE_ASSET_CACHE_MAX_BYTES || "0", 10) || 15 * 1024 * 1024; // 15MB default
+const templateAssetCache = new Map(); // "tenantId:key" -> { dataUrl, ts, bytes }
+let templateAssetCacheTotalBytes = 0;
+
+function getTemplateAssetDataUrl(tenantId, key) {
+    if (tenantId == null || !key) return null;
+    const cacheKey = `${tenantId}:${key}`;
+    const entry = templateAssetCache.get(cacheKey);
+    return entry ? entry.dataUrl : null;
+}
+
+function setTemplateAssetDataUrl(tenantId, key, dataUrl) {
+    if (tenantId == null || !key || !dataUrl) return;
+    const bytes = Buffer.byteLength(dataUrl, "utf8");
+    while (
+        templateAssetCache.size >= TEMPLATE_ASSET_CACHE_MAX_ENTRIES ||
+        (TEMPLATE_ASSET_CACHE_MAX_BYTES > 0 && templateAssetCacheTotalBytes + bytes > TEMPLATE_ASSET_CACHE_MAX_BYTES)
+    ) {
+        if (templateAssetCache.size === 0) break;
+        let oldestKey = null;
+        let oldestTs = Infinity;
+        for (const [k, v] of templateAssetCache) {
+            if (v.ts < oldestTs) {
+                oldestTs = v.ts;
+                oldestKey = k;
+            }
+        }
+        if (oldestKey != null) {
+            const e = templateAssetCache.get(oldestKey);
+            if (e && e.bytes) templateAssetCacheTotalBytes -= e.bytes;
+            templateAssetCache.delete(oldestKey);
+        }
+    }
+    const cacheKey = `${tenantId}:${key}`;
+    templateAssetCache.set(cacheKey, { dataUrl, ts: Date.now(), bytes });
+    templateAssetCacheTotalBytes += bytes;
+}
+
 // Soft dedupe for missing bucket keys: avoid logging the same missing key repeatedly in a short window.
 const MISSING_BUCKET_KEY_LOG_TTL_MS = 60 * 1000; // 1 minute
 const missingBucketKeyLogCache = new Map(); // key -> ts
@@ -78,14 +146,20 @@ function shouldLogMissingBucketKey(key) {
 
 // ---------------------------------------------------------------------------
 // Module-level compiled template cache: compile Handlebars templates + CSS
-// exactly once per templateKey. Eliminates repeated fs.readFileSync + compile
-// on every PDF request (biggest latency win for cold-path requests).
+// exactly once per templateKey. Bounded by count + TTL to avoid unbounded growth.
 // ---------------------------------------------------------------------------
-const compiledTemplateCache = new Map(); // templateKey -> compiled bundle
+const COMPILED_TEMPLATE_CACHE_MAX = Math.max(5, parseInt(process.env.COMPILED_TEMPLATE_CACHE_MAX || "20", 10));
+const COMPILED_TEMPLATE_CACHE_TTL_MS = parseInt(process.env.COMPILED_TEMPLATE_CACHE_TTL_MS || "0", 10) || 60 * 60 * 1000; // 1 hour, 0 = no TTL
+const compiledTemplateCache = new Map(); // templateKey -> { bundle, ts }
 
 function getCompiledTemplates(templateKey) {
-    if (compiledTemplateCache.has(templateKey)) {
-        return compiledTemplateCache.get(templateKey);
+    const entry = compiledTemplateCache.get(templateKey);
+    if (entry) {
+        if (COMPILED_TEMPLATE_CACHE_TTL_MS > 0 && Date.now() - entry.ts > COMPILED_TEMPLATE_CACHE_TTL_MS) {
+            compiledTemplateCache.delete(templateKey);
+        } else {
+            return entry.bundle;
+        }
     }
     const templateDir = getTemplateDir(templateKey);
 
@@ -110,16 +184,28 @@ function getCompiledTemplates(templateKey) {
         page9Template: loadTemplate(templateDir, "partials/page9-thankyou.hbs"),
         mainTemplate: loadTemplate(templateDir, "quotation.hbs"),
     };
-    compiledTemplateCache.set(templateKey, bundle);
+    if (compiledTemplateCache.size >= COMPILED_TEMPLATE_CACHE_MAX) {
+        let oldestKey = null;
+        let oldestTs = Infinity;
+        for (const [k, v] of compiledTemplateCache) {
+            if (v.ts < oldestTs) {
+                oldestTs = v.ts;
+                oldestKey = k;
+            }
+        }
+        if (oldestKey != null) compiledTemplateCache.delete(oldestKey);
+    }
+    compiledTemplateCache.set(templateKey, { bundle, ts: Date.now() });
     console.info(`[PDF] Compiled templates cached for key: "${templateKey}"`);
     return bundle;
 }
 
 // ---------------------------------------------------------------------------
-// QR code cache: same UPI string → same QR code. Avoids regenerating on every
-// request when the company's UPI ID hasn't changed.
+// QR code cache: same UPI string → same QR code. Bounded by count + TTL.
 // ---------------------------------------------------------------------------
-const qrCodeCache = new Map(); // upiString -> dataUrl
+const QR_CODE_CACHE_MAX = Math.max(10, parseInt(process.env.QR_CODE_CACHE_MAX || "100", 10));
+const QR_CODE_CACHE_TTL_MS = parseInt(process.env.QR_CODE_CACHE_TTL_MS || "0", 10) || 5 * 60 * 1000; // 5 min
+const qrCodeCache = new Map(); // upiString -> { dataUrl, ts }
 
 /**
  * Get template directory for a template key
@@ -219,11 +305,12 @@ const fileToDataUrl = (filePath, mimeType = "image/jpeg", warnIfMissing = true) 
  * @param {string} pathOrKey - Bucket key (no leading /), legacy path (e.g. /uploads/logo.png), or http(s) URL
  * @param {string} mimeType - MIME type fallback
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
+ * @param {{ tenantId?: string|number }} [options] - Optional tenantId for template-asset warm cache lookup
  * @returns {Promise<string>} Base64 data URL
  */
-const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) => {
+const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, options = {}) => {
     if (!pathOrKey) return "";
-    // Full URL: use in-memory cache to avoid refetching same config image across PDFs
+    // Full URL: use in-memory cache to avoid refetching same config image across PDFs (with timeout + max size)
     if (pathOrKey.startsWith("http://") || pathOrKey.startsWith("https://")) {
         const cached = getCachedUrlImage(pathOrKey);
         if (cached) return cached;
@@ -232,27 +319,54 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
             const http = require("http");
             const protocol = pathOrKey.startsWith("https") ? https : http;
             const { buf, contentType: resolvedType } = await new Promise((resolve, reject) => {
-                protocol.get(pathOrKey, (res) => {
+                const req = protocol.get(pathOrKey, (res) => {
+                    if (res.statusCode !== 200) {
+                        clearTimeout(timeoutId);
+                        reject(new Error(`Image fetch status ${res.statusCode}`));
+                        return;
+                    }
                     const chunks = [];
-                    res.on("data", (chunk) => chunks.push(chunk));
+                    let totalLength = 0;
+                    res.on("data", (chunk) => {
+                        totalLength += chunk.length;
+                        if (totalLength > PDF_IMAGE_FETCH_MAX_BYTES) {
+                            clearTimeout(timeoutId);
+                            reject(new Error(`Image exceeds max size ${PDF_IMAGE_FETCH_MAX_BYTES} bytes`));
+                            req.destroy();
+                            return;
+                        }
+                        chunks.push(chunk);
+                    });
                     res.on("end", () => {
+                        clearTimeout(timeoutId);
                         const buf = Buffer.concat(chunks);
                         const ct = res.headers["content-type"] || "";
                         const contentType = /image\/png/i.test(ct) ? "image/png"
                             : /image\/svg/i.test(ct) ? "image/svg+xml"
-                                : (buf[0] === 0x89 && buf[1] === 0x50) ? "image/png"
+                                : (buf.length >= 2 && buf[0] === 0x89 && buf[1] === 0x50) ? "image/png"
                                     : mimeType;
                         resolve({ buf, contentType });
                     });
-                    res.on("error", reject);
-                }).on("error", reject);
+                    res.on("error", (err) => {
+                        clearTimeout(timeoutId);
+                        reject(err);
+                    });
+                });
+                const timeoutId = setTimeout(() => {
+                    req.destroy();
+                    reject(new Error(`Image fetch timeout after ${PDF_IMAGE_FETCH_TIMEOUT_MS}ms`));
+                }, PDF_IMAGE_FETCH_TIMEOUT_MS);
+                req.on("error", (err) => {
+                    clearTimeout(timeoutId);
+                    reject(err);
+                });
             });
             const base64 = buf.toString("base64");
             const dataUrl = `data:${resolvedType};base64,${base64}`;
             setCachedUrlImage(pathOrKey, dataUrl);
             return dataUrl;
         } catch (err) {
-            console.error(`Error fetching logo URL ${pathOrKey}:`, err);
+            console.error(`Error fetching logo URL ${pathOrKey}:`, err.message || err);
             return "";
         }
     }
@@ -280,6 +394,11 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
     if (pathOrKey.startsWith("/")) {
         const absolutePath = path.join(PUBLIC_DIR, pathOrKey);
         return fileToDataUrl(absolutePath, mimeType, false);
+    }
+    // Bucket key: check warm cache first (startup-prefetched template assets)
+    if (options.tenantId != null) {
+        const warm = getTemplateAssetDataUrl(options.tenantId, pathOrKey);
+        if (warm) return warm;
     }
     const tryFetch = async (client) => {
         try {
@@ -317,7 +436,14 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
 const generateQRCode = async (data) => {
     try {
         if (!data) return "";
-        if (qrCodeCache.has(data)) return qrCodeCache.get(data);
+        const entry = qrCodeCache.get(data);
+        if (entry) {
+            if (QR_CODE_CACHE_TTL_MS > 0 && Date.now() - entry.ts > QR_CODE_CACHE_TTL_MS) {
+                qrCodeCache.delete(data);
+            } else {
+                return entry.dataUrl;
+            }
+        }
         const dataUrl = await QRCode.toDataURL(data, {
             width: 150,
             margin: 1,
@@ -326,7 +452,18 @@ const generateQRCode = async (data) => {
                 light: "#ffffff",
             },
         });
-        qrCodeCache.set(data, dataUrl);
+        if (qrCodeCache.size >= QR_CODE_CACHE_MAX) {
+            let oldestKey = null;
+            let oldestTs = Infinity;
+            for (const [k, v] of qrCodeCache) {
+                if (v.ts < oldestTs) {
+                    oldestTs = v.ts;
+                    oldestKey = k;
+                }
+            }
+            if (oldestKey != null) qrCodeCache.delete(oldestKey);
+        }
+        qrCodeCache.set(data, { dataUrl, ts: Date.now() });
         return dataUrl;
     } catch (error) {
         console.error("Error generating QR code:", error);
@@ -373,18 +510,19 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
         return ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
     };
     const resolvedTemplateImages = {};
+    const pathToDataUrlOpts = options.tenantId != null ? { tenantId: options.tenantId } : {};
     const resolveTemplateImage = async (key) => {
         if (!key) return "";
         if (key.startsWith("http://") || key.startsWith("https://")) {
             try {
-                return await pathToDataUrl(key, mimeFromKey(key), bucketClient);
+                return await pathToDataUrl(key, mimeFromKey(key), bucketClient, pathToDataUrlOpts);
             } catch (_) {
                 return "";
             }
         }
         if (resolvedTemplateImages[key] !== undefined) return resolvedTemplateImages[key];
         const mime = mimeFromKey(key);
-        const dataUrl = await pathToDataUrl(key, mime, bucketClient);
+        const dataUrl = await pathToDataUrl(key, mime, bucketClient, pathToDataUrlOpts);
         resolvedTemplateImages[key] = dataUrl || "";
         return resolvedTemplateImages[key];
     };
@@ -431,7 +569,7 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
         if (pathOrKey) {
             const ext = path.extname(pathOrKey).toLowerCase();
             const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
-            const dataUrl = await pathToDataUrl(pathOrKey, mimeType, bucketClient);
+            const dataUrl = await pathToDataUrl(pathOrKey, mimeType, bucketClient, pathToDataUrlOpts);
             if (dataUrl) return dataUrl;
         }
         for (const fp of fallbackPaths) {
@@ -539,28 +677,73 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
 const PDF_CACHE_ENABLED = process.env.PDF_CACHE_ENABLED !== "false";
 const PDF_SINGLEFLIGHT_ENABLED = process.env.PDF_SINGLEFLIGHT_ENABLED !== "false";
 const PDF_CACHE_MAX = parseInt(process.env.PDF_CACHE_MAX || "50", 10);
+const PDF_CACHE_TTL_MS = parseInt(process.env.PDF_CACHE_TTL_MS || "0", 10) || 15 * 60 * 1000; // 15 min, 0 = no TTL
+const PDF_CACHE_MAX_BYTES = parseInt(process.env.PDF_CACHE_MAX_BYTES || "0", 10); // 0 = no byte limit
 const PDF_METRICS_ENABLED = process.env.PDF_METRICS_ENABLED === "true";
 
 // In-memory versioned PDF cache and singleflight map
-const pdfCache = new Map(); // cacheKey -> { buffer, ts }
+const pdfCache = new Map(); // cacheKey -> { buffer, ts, bytes }
 const pdfSingleflight = new Map(); // cacheKey -> Promise<Buffer>
+let pdfCacheTotalBytes = 0;
 
 function getCachedPdf(cacheKey) {
     const entry = pdfCache.get(cacheKey);
-    return entry ? entry.buffer : null;
+    if (!entry) return null;
+    if (PDF_CACHE_TTL_MS > 0 && Date.now() - entry.ts > PDF_CACHE_TTL_MS) {
+        pdfCache.delete(cacheKey);
+        pdfCacheTotalBytes -= entry.bytes || 0;
+        return null;
+    }
+    return entry.buffer;
+}
+
+function evictOldestPdfCacheEntry() {
+    let oldestKey = null;
+    let oldestTs = Infinity;
+    for (const [k, v] of pdfCache) {
+        if (v.ts < oldestTs) {
+            oldestTs = v.ts;
+            oldestKey = k;
+        }
+    }
+    if (oldestKey != null) {
+        const entry = pdfCache.get(oldestKey);
+        if (entry && entry.bytes) pdfCacheTotalBytes -= entry.bytes;
+        pdfCache.delete(oldestKey);
+    }
 }
 
 function setCachedPdf(cacheKey, buffer) {
-    if (pdfCache.size >= PDF_CACHE_MAX) {
-        const firstKey = pdfCache.keys().next().value;
-        if (firstKey !== undefined) pdfCache.delete(firstKey);
+    const bytes = buffer && buffer.length ? buffer.length : 0;
+    while (pdfCache.size >= PDF_CACHE_MAX || (PDF_CACHE_MAX_BYTES > 0 && pdfCacheTotalBytes + bytes > PDF_CACHE_MAX_BYTES)) {
+        if (pdfCache.size === 0) break;
+        evictOldestPdfCacheEntry();
     }
-    pdfCache.set(cacheKey, { buffer, ts: Date.now() });
+    pdfCache.set(cacheKey, { buffer, ts: Date.now(), bytes });
+    pdfCacheTotalBytes += bytes;
 }
 
-function recordPdfMetrics(stageTimings, cacheInfo) {
+/**
+ * Invalidate all PDF cache entries for a tenant (e.g. after template config image update).
+ * Call from quotationTemplate.service when config is updated.
+ * @param {string|number} tenantId - Tenant ID (must match cache key prefix)
+ */
+function invalidatePdfCacheForTenant(tenantId) {
+    if (tenantId == null) return;
+    const prefix = `${tenantId}:`;
+    for (const key of pdfCache.keys()) {
+        if (String(key).startsWith(prefix)) {
+            const entry = pdfCache.get(key);
+            if (entry && entry.bytes) pdfCacheTotalBytes -= entry.bytes;
+            pdfCache.delete(key);
+        }
+    }
+}
+
+function recordPdfMetrics(stageTimings, cacheInfo, metricsContext = {}) {
     if (!PDF_METRICS_ENABLED) return;
     const safe = (v) => (Number.isFinite(v) ? v : null);
+    const mem = process.memoryUsage && process.memoryUsage();
     const payload = {
         source: "quotation_pdf",
         t_fetchDataMs: safe(stageTimings.fetchDataMs),
@@ -570,9 +753,10 @@ function recordPdfMetrics(stageTimings, cacheInfo) {
         t_totalMs: safe(stageTimings.totalMs),
         cacheHit: cacheInfo.cacheHit,
         singleflightJoined: cacheInfo.singleflightJoined,
+        ...(metricsContext.queuePending != null && { queuePending: metricsContext.queuePending }),
+        ...(metricsContext.queueActive != null && { queueActive: metricsContext.queueActive }),
+        ...(mem && Number.isFinite(mem.heapUsed) && { heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024) }),
     };
-    // For now, log to console; can be wired to structured logger or APM later.
-    // Avoid huge logs by keeping payload small.
     console.info("[PDF_METRICS]", JSON.stringify(payload));
 }
 
@@ -586,10 +770,11 @@ function recordPdfMetrics(stageTimings, cacheInfo) {
 const renderQuotationPDF = async (quotationData, options = {}) => {
     const { bucketClient, templateKey, templateConfig } = options;
 
+    await acquirePdfRenderSlot();
     const doRenderAttempt = async () => {
         let page = null;
         try {
-            const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig });
+            const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig, tenantId: options.tenantId });
 
             const browser = await puppeteerService.getBrowser();
             page = await browser.newPage();
@@ -650,6 +835,8 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
 
         console.error("Error generating PDF:", error);
         throw error;
+    } finally {
+        releasePdfRenderSlot();
     }
 };
 
@@ -679,7 +866,7 @@ const generateQuotationPDF = async (quotationData, options = {}) => {
         const cached = getCachedPdf(cacheKey);
         if (cached) {
             stageTimings.totalMs = Date.now() - tStart;
-            recordPdfMetrics(stageTimings, { cacheHit: true, singleflightJoined: false });
+            recordPdfMetrics(stageTimings, { cacheHit: true, singleflightJoined: false }, options._metricsContext || {});
             return cached;
         }
     }
@@ -690,7 +877,7 @@ const generateQuotationPDF = async (quotationData, options = {}) => {
             setCachedPdf(cacheKey, buffer);
         }
         stageTimings.totalMs = Date.now() - tStart;
-        recordPdfMetrics(stageTimings, { cacheHit: false, singleflightJoined });
+        recordPdfMetrics(stageTimings, { cacheHit: false, singleflightJoined }, options._metricsContext || {});
         return buffer;
     };
 
@@ -1201,4 +1388,6 @@ module.exports = {
     generateQuotationPDF,
     prepareQuotationData,
     buildHtmlDocument,
+    invalidatePdfCacheForTenant,
+    setTemplateAssetDataUrl,
 };

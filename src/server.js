@@ -207,6 +207,12 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     const socketTransports = "websocket, polling";
 
     server = httpServer.listen(PORT, () => {
+      // Optional: prefetch template config images for active tenants (set PDF_WARMUP_ENABLED=true)
+      setImmediate(() => {
+        const pdfWarmup = require("./modules/quotation/pdfWarmup.service.js");
+        pdfWarmup.warmupTemplateAssetCache().catch((err) => console.warn("[PDF] Warmup error:", err?.message));
+      });
+
       if (NODE_ENV === "development" || NODE_ENV === "test") {
         console.log(`
 ============================================
