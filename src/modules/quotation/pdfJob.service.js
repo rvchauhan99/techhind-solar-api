@@ -139,31 +139,6 @@ async function getJobByIdForModels(models, jobId) {
 async function claimNextPendingJobForModels(models, { runnerId }) {
   const { QuotationPdfJob, sequelize } = models;
   const now = new Date();
-  // #region agent log
-  let pendingCount = 0;
-  try {
-    pendingCount = await QuotationPdfJob.count({
-      where: {
-        status: JOB_STATUS.PENDING,
-        [Op.or]: [{ next_retry_at: null }, { next_retry_at: { [Op.lte]: now } }],
-      },
-    });
-  } catch (_) {
-    pendingCount = -1;
-  }
-  fetch("http://127.0.0.1:7579/ingest/f5cb29de-5464-4f4d-96fc-7edaeea5c572", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "883c30" },
-    body: JSON.stringify({
-      sessionId: "883c30",
-      hypothesisId: "H2",
-      location: "pdfJob.service.js:claimNextPendingJobForModels",
-      message: "pending count before claim",
-      data: { pendingCount, dbName: sequelize?.config?.database },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   return sequelize.transaction(async (transaction) => {
     const job = await QuotationPdfJob.findOne({
       where: {
