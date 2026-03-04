@@ -393,6 +393,19 @@ async function headObject(key) {
 }
 
 /**
+ * Head object (metadata) using specific client.
+ * @param {{ s3: AWS.S3, bucketName: string }} client
+ * @param {string} key - Object key
+ * @returns {Promise<object>}
+ */
+async function headObjectWithClient(client, key) {
+  if (!key) throw new Error("File path (key) is required");
+  const { s3, bucketName: bucket } = client;
+  const result = await s3.headObject({ Bucket: bucket, Key: key }).promise();
+  return result;
+}
+
+/**
  * Check if object exists.
  * @param {string} key - Object key
  * @returns {Promise<boolean>}
@@ -401,6 +414,23 @@ async function fileExists(key) {
   if (!key) return false;
   try {
     await headObject(key);
+    return true;
+  } catch (error) {
+    if (error.code === "NotFound" || error.statusCode === 404) return false;
+    throw error;
+  }
+}
+
+/**
+ * Check if object exists using specific client.
+ * @param {{ s3: AWS.S3, bucketName: string }} client
+ * @param {string} key - Object key
+ * @returns {Promise<boolean>}
+ */
+async function fileExistsWithClient(client, key) {
+  if (!key) return false;
+  try {
+    await headObjectWithClient(client, key);
     return true;
   } catch (error) {
     if (error.code === "NotFound" || error.statusCode === 404) return false;
@@ -506,7 +536,9 @@ module.exports = {
   getPublicUrl,
   getObject,
   headObject,
+  headObjectWithClient,
   fileExists,
+  fileExistsWithClient,
   listObjects,
   copyObject,
 };

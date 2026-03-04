@@ -375,6 +375,8 @@ const getPdfStatus = asyncHandler(async (req, res) => {
         res,
         {
             queueEnabled: pdfQueue.isQueueEnabled(),
+            redisBackend: pdfQueue.isRedisBackend(),
+            queueBackend: pdfQueue.getQueueBackend(),
             pending: depth.pending,
             active: depth.active,
         },
@@ -456,34 +458,56 @@ const generatePDF = asyncHandler(async (req, res) => {
     };
 
     const tenantId = req.tenant?.id || "default";
+    const pdfArtifactMode = (process.env.PDF_ARTIFACT_MODE || "buffer").toLowerCase();
+    const pdfArtifactSignedUrlTtlSec = Math.max(60, parseInt(process.env.PDF_ARTIFACT_SIGNED_URL_TTL_SEC || "300", 10));
 
     const pdfQueue = require("./pdfQueue.service.js");
-    const depth = pdfQueue.getQueueDepth();
-    metricsContext.queuePending = depth.pending;
-    metricsContext.queueActive = depth.active;
-    const pdfBuffer = await pdfQueue.enqueuePdfJob(pdfData, {
-        bucketClient,
-        templateKey,
-        templateConfig,
+    const artifactKey = pdfQueue.buildArtifactKey({
         tenantId,
         quotationId: quotation.id,
         versionKey,
-        _metricsContext: metricsContext,
     });
+    const sendPdfArtifactResponse = async () => {
+        if (pdfArtifactMode === "signed_url") {
+            const signedUrl = await bucketService.getSignedUrl(artifactKey, pdfArtifactSignedUrlTtlSec, bucketClient);
+            return res.redirect(302, signedUrl);
+        }
+        const artifactObject = await bucketService.getObjectWithClient(bucketClient, artifactKey);
+        const pdfBuffer = Buffer.isBuffer(artifactObject.body) ? artifactObject.body : Buffer.from(artifactObject.body);
+        const filename = `quotation-${quotation.quotation_number || id}.pdf`;
+        res.writeHead(200, {
+            "Content-Type": "application/pdf",
+            "Content-Length": pdfBuffer.length,
+            "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
+        });
+        return res.end(pdfBuffer);
+    };
 
-    const filename = `quotation-${quotation.quotation_number || id}.pdf`;
+    const artifactExists = await bucketService.fileExistsWithClient(bucketClient, artifactKey).catch(() => false);
+    if (!artifactExists) {
+        const depth = pdfQueue.getQueueDepth();
+        metricsContext.queuePending = depth.pending;
+        metricsContext.queueActive = depth.active;
+        await pdfQueue.enqueuePdfJob({
+            quotationData: pdfData,
+            renderOptions: {
+                templateKey,
+                templateConfig,
+                tenantId,
+                quotationId: quotation.id,
+                versionKey,
+                _metricsContext: metricsContext,
+            },
+            artifactKey,
+            tenantId,
+        });
+    }
 
     if (req.tenant?.id) {
         const usageService = require("../billing/usage.service.js");
         usageService.incrementPdfGenerated(req.tenant.id).catch(() => {});
     }
-
-    res.writeHead(200, {
-        "Content-Type": "application/pdf",
-        "Content-Length": pdfBuffer.length,
-        "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '\\"')}"`,
-    });
-    return res.end(pdfBuffer);
+    return sendPdfArtifactResponse();
 });
 
 module.exports = {
