@@ -137,6 +137,12 @@ async function gracefulShutdown(signal) {
     });
   }
   try {
+    const pdfRunner = require("./modules/quotation/pdfRunner.service.js");
+    pdfRunner.stopRunner();
+  } catch (e) {
+    // ignore
+  }
+  try {
     await db.sequelize.close();
     console.log("Main DB pool closed.");
   } catch (e) {
@@ -210,7 +216,20 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
       // Optional: prefetch template config images for active tenants (set PDF_WARMUP_ENABLED=true)
       setImmediate(() => {
         const pdfWarmup = require("./modules/quotation/pdfWarmup.service.js");
-        pdfWarmup.warmupTemplateAssetCache().catch((err) => console.warn("[PDF] Warmup error:", err?.message));
+        pdfWarmup
+          .warmupTemplateAssetCache()
+          .then((result) => {
+            if (!result) return;
+            const { scanned = 0, warmed = 0, skipped = 0, errors = 0 } = result;
+            if (scanned > 0 || warmed > 0 || skipped > 0 || errors > 0) {
+              console.info(
+                `[PDF] Startup image cache preload finished: scanned=${scanned}, cached=${warmed}, skipped=${skipped}, errors=${errors}`
+              );
+            }
+          })
+          .catch((err) => console.warn("[PDF] Warmup error:", err?.message));
+        const pdfRunner = require("./modules/quotation/pdfRunner.service.js");
+        pdfRunner.startRunner();
       });
 
       if (NODE_ENV === "development" || NODE_ENV === "test") {
