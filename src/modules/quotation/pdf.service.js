@@ -496,38 +496,42 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
         return resolvedTemplateImages[key];
     };
 
-    // Collect all unique S3 keys for template images, then resolve in parallel
+    // Prefer inline data (stored in config); only resolve from bucket when missing
+    const hasInlineBg = templateConfig.default_background_image_data && String(templateConfig.default_background_image_data).trim().length > 0;
+    const hasInlineFooter = templateConfig.default_footer_image_data && String(templateConfig.default_footer_image_data).trim().length > 0;
+    const pageBackgroundsData = templateConfig.page_backgrounds_data && typeof templateConfig.page_backgrounds_data === "object" ? templateConfig.page_backgrounds_data : {};
+
     const allTemplateKeys = new Set();
-    if (templateConfig.default_background_image_path) allTemplateKeys.add(templateConfig.default_background_image_path);
-    if (templateConfig.default_footer_image_path) allTemplateKeys.add(templateConfig.default_footer_image_path);
+    if (!hasInlineBg && templateConfig.default_background_image_path) allTemplateKeys.add(templateConfig.default_background_image_path);
+    if (!hasInlineFooter && templateConfig.default_footer_image_path) allTemplateKeys.add(templateConfig.default_footer_image_path);
     for (let n = 1; n <= 9; n++) {
-        const key = templateConfig.page_backgrounds && templateConfig.page_backgrounds[String(n)];
+        const pageKey = String(n);
+        if (pageBackgroundsData[pageKey]) continue; // has inline data for this page
+        const key = (templateConfig.page_backgrounds && templateConfig.page_backgrounds[pageKey]) || templateConfig.default_background_image_path;
         if (key) allTemplateKeys.add(key);
     }
 
     await Promise.all([...allTemplateKeys].map(k => resolveTemplateImage(k)));
 
-    const defaultConfigBg = templateConfig.default_background_image_path
-        ? resolvedTemplateImages[templateConfig.default_background_image_path] || ""
-        : "";
-    const defaultFooterImageUrl = templateConfig.default_footer_image_path
-        ? resolvedTemplateImages[templateConfig.default_footer_image_path] || ""
-        : "";
+    const defaultConfigBg = hasInlineBg
+        ? templateConfig.default_background_image_data
+        : (templateConfig.default_background_image_path ? resolvedTemplateImages[templateConfig.default_background_image_path] || "" : "");
+    const defaultFooterImageUrl = hasInlineFooter
+        ? templateConfig.default_footer_image_data
+        : (templateConfig.default_footer_image_path ? resolvedTemplateImages[templateConfig.default_footer_image_path] || "" : "");
 
-    if (templateConfig.default_footer_image_path && !defaultFooterImageUrl) {
+    if (templateConfig.default_footer_image_path && !hasInlineFooter && !defaultFooterImageUrl) {
         console.warn("[PDF] default_footer_image_path is set but footer image resolution failed:", templateConfig.default_footer_image_path);
     }
-
 
     const pageBackgrounds = {};
     for (let n = 1; n <= 9; n++) {
         const pageKey = String(n);
-        const key = (templateConfig.page_backgrounds && templateConfig.page_backgrounds[pageKey])
-            || templateConfig.default_background_image_path;
-        if (key) {
-            pageBackgrounds[n] = resolvedTemplateImages[key] || defaultConfigBg || fallbackBackgroundImage;
+        if (pageBackgroundsData[pageKey]) {
+            pageBackgrounds[n] = pageBackgroundsData[pageKey];
         } else {
-            pageBackgrounds[n] = defaultConfigBg || fallbackBackgroundImage;
+            const key = (templateConfig.page_backgrounds && templateConfig.page_backgrounds[pageKey]) || templateConfig.default_background_image_path;
+            pageBackgrounds[n] = key ? (resolvedTemplateImages[key] || defaultConfigBg || fallbackBackgroundImage) : (defaultConfigBg || fallbackBackgroundImage);
         }
     }
 

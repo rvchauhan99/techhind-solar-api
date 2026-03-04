@@ -14,7 +14,7 @@ const listTemplates = async (req) => {
     const { QuotationTemplate, QuotationTemplateConfig } = models;
     const rows = await QuotationTemplate.findAll({
         where: { deleted_at: null },
-        include: [{ model: QuotationTemplateConfig, as: "config", attributes: ["id", "default_background_image_path", "default_footer_image_path"], required: false }],
+        include: [{ model: QuotationTemplateConfig, as: "config", attributes: ["id", "default_background_image_path", "default_footer_image_path", "page_backgrounds"], required: false }],
         order: [["is_default", "DESC"], ["name", "ASC"]],
     });
     return rows.map((r) => {
@@ -45,6 +45,7 @@ const getTemplateById = async (id, req) => {
     if (!row) return null;
     const j = row.toJSON();
     const config = j.config || {};
+    // Omit *_data from API response to avoid large payloads; PDF build gets full config server-side
     return {
         ...j,
         config: {
@@ -116,6 +117,9 @@ const updateTemplateConfig = async (id, payload, req) => {
     return getTemplateById(id, req);
 };
 
+/** Max size (bytes) for storing inline image data in config; above this we keep path-only to avoid huge rows */
+const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB
+
 const uploadTemplateConfigImage = async (id, fieldName, file, req) => {
     const models = getTenantModels(req);
     const { QuotationTemplate, QuotationTemplateConfig } = models;
@@ -140,6 +144,24 @@ const uploadTemplateConfigImage = async (id, fieldName, file, req) => {
         pageBackgrounds[pageNum] = key;
         updatePayload.page_backgrounds = pageBackgrounds;
     }
+
+    // Store inline base64 data URL for PDF so we don't need to fetch from bucket
+    const buffer = file.buffer;
+    if (buffer && buffer.length > 0 && buffer.length <= MAX_INLINE_IMAGE_BYTES) {
+        const mime = file.mimetype || "image/png";
+        const dataUrl = `data:${mime};base64,${buffer.toString("base64")}`;
+        if (fieldName === "default_background" || fieldName === "default_background_image_path") {
+            updatePayload.default_background_image_data = dataUrl;
+        } else if (fieldName === "default_footer" || fieldName === "default_footer_image_path") {
+            updatePayload.default_footer_image_data = dataUrl;
+        } else if (fieldName && fieldName.startsWith("page_")) {
+            const pageNum = fieldName.replace("page_", "");
+            const existing = config.page_backgrounds_data && typeof config.page_backgrounds_data === "object" ? { ...config.page_backgrounds_data } : {};
+            existing[pageNum] = dataUrl;
+            updatePayload.page_backgrounds_data = existing;
+        }
+    }
+
     if (Object.keys(updatePayload).length > 0) {
         await config.update(updatePayload);
         if (req.tenant && req.tenant.id != null) {

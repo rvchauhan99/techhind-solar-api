@@ -50,12 +50,16 @@ async function resolvePdfMetadataForQuotation({ tenantSequelize, quotation }) {
   ]);
 
   const templateKey = template ? template.template_key : "default";
+  const configObj = template && template.config ? (template.config.toJSON ? template.config.toJSON() : template.config) : {};
   const templateConfig =
     template && template.config
       ? {
-          default_background_image_path: template.config.default_background_image_path || null,
-          default_footer_image_path: template.config.default_footer_image_path || null,
-          page_backgrounds: template.config.page_backgrounds || null,
+          default_background_image_path: configObj.default_background_image_path || null,
+          default_footer_image_path: configObj.default_footer_image_path || null,
+          page_backgrounds: configObj.page_backgrounds || null,
+          default_background_image_data: configObj.default_background_image_data || null,
+          default_footer_image_data: configObj.default_footer_image_data || null,
+          page_backgrounds_data: configObj.page_backgrounds_data || null,
         }
       : {};
 
