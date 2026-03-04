@@ -577,53 +577,79 @@ function recordPdfMetrics(stageTimings, cacheInfo) {
 }
 
 /**
- * Low-level renderer: generate PDF from prepared HTML
+ * Low-level renderer: generate PDF from prepared HTML.
+ * Includes one automatic retry if the browser crashes/disconnects (e.g. OOM on production).
  * @param {Object} quotationData - Complete quotation data object
  * @param {{ bucketClient?: { s3: object, bucketName: string }, templateKey?: string, templateConfig?: object }} [options]
  * @returns {Promise<Buffer>}
  */
 const renderQuotationPDF = async (quotationData, options = {}) => {
     const { bucketClient, templateKey, templateConfig } = options;
-    let page = null;
-    const timings = {
-        resolveAssetsMs: 0,
-        htmlBuildMs: 0,
-        pdfRenderMs: 0,
+
+    const doRenderAttempt = async () => {
+        let page = null;
+        try {
+            const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig });
+
+            const browser = await puppeteerService.getBrowser();
+            page = await browser.newPage();
+
+            // Limit page memory: intercept and block third-party requests (none expected in self-contained HTML)
+            await page.setRequestInterception(true);
+            page.on("request", (req) => {
+                const type = req.resourceType();
+                // Allow: document, stylesheet, image, font (needed for inline PDF content)
+                // Block: xhr, fetch, websocket, media (not needed; reduces memory)
+                if (["xhr", "fetch", "websocket", "media", "other"].includes(type)) {
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+            });
+
+            await page.setContent(html, {
+                waitUntil: "domcontentloaded",
+                timeout: 60000,
+            });
+
+            const pdfBuffer = await page.pdf({
+                format: "A4",
+                printBackground: true,
+                preferCSSPageSize: true,
+                margin: { top: "0", right: "0", bottom: "0", left: "0" },
+                timeout: 60000,
+            });
+
+            return pdfBuffer;
+        } finally {
+            if (page) {
+                await page.close().catch(() => { });
+            }
+        }
     };
 
     try {
-        const t0 = Date.now();
-        const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig });
-        timings.resolveAssetsMs = Date.now() - t0;
-
-        const browser = await puppeteerService.getBrowser();
-        page = await browser.newPage();
-
-        const tHtml0 = Date.now();
-        await page.setContent(html, {
-            waitUntil: "domcontentloaded",
-            timeout: 60000,
-        });
-        timings.htmlBuildMs = Date.now() - tHtml0;
-
-        const tPdf0 = Date.now();
-        const pdfBuffer = await page.pdf({
-            format: "A4",
-            printBackground: true,
-            preferCSSPageSize: true,
-            margin: { top: "0", right: "0", bottom: "0", left: "0" },
-            timeout: 60000,
-        });
-        timings.pdfRenderMs = Date.now() - tPdf0;
-
-        return pdfBuffer;
+        return await doRenderAttempt();
     } catch (error) {
+        const isCrash = error?.message?.includes("disconnected") ||
+            error?.message?.includes("Session closed") ||
+            error?.message?.includes("Target closed") ||
+            error?.message?.includes("Protocol error");
+
+        if (isCrash) {
+            console.warn("[PDF] Browser crash detected — relaunching and retrying once...", error.message);
+            // Force the browser singleton to relaunch
+            await puppeteerService.closeBrowser().catch(() => { });
+            try {
+                return await doRenderAttempt();
+            } catch (retryError) {
+                console.error("[PDF] Retry after crash also failed:", retryError);
+                throw retryError;
+            }
+        }
+
         console.error("Error generating PDF:", error);
         throw error;
-    } finally {
-        if (page) {
-            await page.close().catch(() => { });
-        }
     }
 };
 
