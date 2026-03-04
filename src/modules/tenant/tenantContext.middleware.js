@@ -55,7 +55,6 @@ async function tenantContextMiddleware(req, res, next) {
     }
     if (req.tenant?.id) {
       req.tenantIdForLog = req.tenant.id;
-      console.log(`[tenant_id=${req.tenant.id}] ${req.method} ${req.originalUrl || req.url}`);
     }
 
     if (isAuditLogsEnabled() && req.tenant) {

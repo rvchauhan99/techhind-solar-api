@@ -371,14 +371,14 @@ const uploadTemplateConfigImage = asyncHandler(async (req, res) => {
 const generatePDF = asyncHandler(async (req, res) => {
     const { id } = req.params;
 
-    const quotation = await quotationService.getQuotationById({ id });
+    const quotation = await quotationService.getQuotationForPdf({ id });
     if (!quotation) {
         return responseHandler.sendError(res, "Quotation not found", 404);
     }
     const context = await resolveQuotationVisibilityContext(req);
     assertRecordVisibleByListingCriteria(quotation, context, { handledByField: "user_id" });
 
-    const { Company, CompanyBankAccount, ProductMake, QuotationTemplate, QuotationTemplateConfig } = getTenantModels(req);
+    const { Company, CompanyBankAccount, QuotationTemplate, QuotationTemplateConfig } = getTenantModels(req);
 
     let template = null;
     if (quotation.branch && quotation.branch.quotation_template_id) {
@@ -402,20 +402,15 @@ const generatePDF = asyncHandler(async (req, res) => {
         }
         : {};
 
-    const [company, bankAccount, productMakes] = await Promise.all([
+    const tFetchStart = Date.now();
+    const [company, bankAccount, productMakesMap] = await Promise.all([
         Company.findOne({ where: { deleted_at: null } }),
         CompanyBankAccount.findOne({
             where: { deleted_at: null },
             order: [["is_default", "DESC"], ["created_at", "ASC"]],
         }),
-        ProductMake.findAll({
-            where: { deleted_at: null },
-            attributes: ["id", "name", "logo"],
-        }),
+        quotationService.getProductMakesMapForPdf({ tenantId: req.tenant?.id }),
     ]);
-    const productMakesMap = new Map(
-        productMakes.map(pm => [pm.id, { name: pm.name, logo: pm.logo }])
-    );
 
     const bucketClient = bucketService.getBucketForRequest(req);
     const pdfData = await pdfService.prepareQuotationData(
@@ -426,10 +421,32 @@ const generatePDF = asyncHandler(async (req, res) => {
         bucketClient
     );
 
+    // Build a version key so cached PDFs are invalidated when underlying data changes.
+    const versionParts = [
+        quotation.updated_at ? new Date(quotation.updated_at).toISOString() : "",
+        template && template.updated_at ? new Date(template.updated_at).toISOString() : "",
+        company && company.updated_at ? new Date(company.updated_at).toISOString() : "",
+        bankAccount && bankAccount.updated_at ? new Date(bankAccount.updated_at).toISOString() : "",
+    ];
+    const versionKey = versionParts.join("|");
+    const metricsContext = {
+        fetchDataMs: Date.now() - tFetchStart,
+        resolveAssetsMs: null,
+        htmlBuildMs: null,
+        pdfRenderMs: null,
+        totalMs: null,
+    };
+
+    const tenantId = req.tenant?.id || "default";
+
     const pdfBuffer = await pdfService.generateQuotationPDF(pdfData, {
         bucketClient,
         templateKey,
         templateConfig,
+        tenantId,
+        quotationId: quotation.id,
+        versionKey,
+        _metricsContext: metricsContext,
     });
 
     const filename = `quotation-${quotation.quotation_number || id}.pdf`;

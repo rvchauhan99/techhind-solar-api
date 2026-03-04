@@ -9,6 +9,23 @@ const { URL } = require("url");
 
 let s3Client = null;
 let bucketName = null;
+const MISSING_OBJECT_LOG_TTL_MS = 60 * 1000;
+const missingObjectLogCache = new Map();
+
+function shouldLogMissingObjectKey(key) {
+  const now = Date.now();
+  const last = missingObjectLogCache.get(key);
+  if (last && now - last < MISSING_OBJECT_LOG_TTL_MS) return false;
+  missingObjectLogCache.set(key, now);
+
+  // Trim old entries so map does not grow forever.
+  if (missingObjectLogCache.size > 2000) {
+    for (const [k, ts] of missingObjectLogCache) {
+      if (now - ts >= MISSING_OBJECT_LOG_TTL_MS) missingObjectLogCache.delete(k);
+    }
+  }
+  return true;
+}
 
 /**
  * Get S3 client (lazy-init from env). Throws if config is missing.
@@ -351,7 +368,14 @@ async function getObject(key) {
       contentType: result.ContentType,
     };
   } catch (error) {
-    console.error("Error getting object from bucket:", error);
+    const isNotFound = error.code === "NoSuchKey" || error.statusCode === 404;
+    if (isNotFound) {
+      if (shouldLogMissingObjectKey(key)) {
+        console.warn("Object not found in bucket:", key);
+      }
+    } else {
+      console.error("Error getting object from bucket:", error);
+    }
     throw new Error(`Failed to get object: ${error.message}`);
   }
 }
@@ -447,11 +471,23 @@ function getBucketForRequest(req) {
 async function getObjectWithClient(client, key) {
   if (!key) throw new Error("File path (key) is required");
   const { s3, bucketName: bucket } = client;
-  const result = await s3.getObject({ Bucket: bucket, Key: key }).promise();
-  return {
-    body: result.Body,
-    contentType: result.ContentType,
-  };
+  try {
+    const result = await s3.getObject({ Bucket: bucket, Key: key }).promise();
+    return {
+      body: result.Body,
+      contentType: result.ContentType,
+    };
+  } catch (error) {
+    const isNotFound = error.code === "NoSuchKey" || error.statusCode === 404;
+    if (isNotFound) {
+      if (shouldLogMissingObjectKey(key)) {
+        console.warn("Object not found in bucket:", key);
+      }
+    } else {
+      console.error("Error getting object from bucket (client):", error);
+    }
+    throw new Error(`Failed to get object: ${error.message}`);
+  }
 }
 
 module.exports = {

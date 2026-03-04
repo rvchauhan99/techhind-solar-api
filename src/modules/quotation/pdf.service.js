@@ -13,6 +13,69 @@ const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.
 const TEMPLATE_BASE = path.join(__dirname, "../../../templates/quotation");
 const PUBLIC_DIR = path.join(__dirname, "../../../public");
 
+// In-memory cache for public URL image fetches (tenant-agnostic; key = URL). Reduces repeated fetches across PDFs.
+const URL_IMAGE_CACHE_MAX = 100;
+const URL_IMAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+const urlImageCache = new Map(); // key -> { dataUrl, ts }
+
+function getCachedUrlImage(url) {
+    const entry = urlImageCache.get(url);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > URL_IMAGE_CACHE_TTL_MS) {
+        urlImageCache.delete(url);
+        return null;
+    }
+    return entry.dataUrl;
+}
+
+function setCachedUrlImage(url, dataUrl) {
+    if (urlImageCache.size >= URL_IMAGE_CACHE_MAX) {
+        let oldest = Infinity;
+        let oldestKey = null;
+        for (const [k, v] of urlImageCache) {
+            if (v.ts < oldest) {
+                oldest = v.ts;
+                oldestKey = k;
+            }
+        }
+        if (oldestKey != null) urlImageCache.delete(oldestKey);
+    }
+    urlImageCache.set(url, { dataUrl, ts: Date.now() });
+}
+
+// In-memory cache for local file -> data URL conversions (template assets, logos, etc.).
+// Keyed by filePath + mimeType, stores empty string for missing files so we do not re-stat them.
+const FILE_DATA_URL_CACHE_MAX = 200;
+const fileDataUrlCache = new Map(); // key -> { dataUrl, ts }
+
+function getCachedFileDataUrl(key) {
+    const entry = fileDataUrlCache.get(key);
+    return entry ? entry.dataUrl : null;
+}
+
+function setCachedFileDataUrl(key, dataUrl) {
+    if (fileDataUrlCache.size >= FILE_DATA_URL_CACHE_MAX) {
+        // simple FIFO eviction
+        const firstKey = fileDataUrlCache.keys().next().value;
+        if (firstKey !== undefined) fileDataUrlCache.delete(firstKey);
+    }
+    fileDataUrlCache.set(key, { dataUrl, ts: Date.now() });
+}
+
+// Soft dedupe for missing bucket keys: avoid logging the same missing key repeatedly in a short window.
+const MISSING_BUCKET_KEY_LOG_TTL_MS = 60 * 1000; // 1 minute
+const missingBucketKeyLogCache = new Map(); // key -> ts
+
+function shouldLogMissingBucketKey(key) {
+    const now = Date.now();
+    const last = missingBucketKeyLogCache.get(key);
+    if (last && now - last < MISSING_BUCKET_KEY_LOG_TTL_MS) {
+        return false;
+    }
+    missingBucketKeyLogCache.set(key, now);
+    return true;
+}
+
 /**
  * Get template directory for a template key
  * @param {string} templateKey - e.g. "default"
@@ -76,20 +139,29 @@ const loadTemplate = (templateDir, templatePath) => {
 };
 
 /**
- * Read file as base64 data URL (local filesystem)
+ * Read file as base64 data URL (local filesystem). Use only for assets that exist in repo (e.g. template assets).
  * @param {string} filePath - Absolute path to file
  * @param {string} mimeType - MIME type of the file
- * @returns {string} Base64 data URL
+ * @param {boolean} [warnIfMissing] - If true, log when file not found (default true)
+ * @returns {string} Base64 data URL or ""
  */
-const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
+const fileToDataUrl = (filePath, mimeType = "image/jpeg", warnIfMissing = true) => {
     try {
+        const cacheKey = `${filePath}|${mimeType}`;
+        const cached = getCachedFileDataUrl(cacheKey);
+        if (cached !== null) {
+            return cached;
+        }
         if (!fs.existsSync(filePath)) {
-            console.warn(`File not found: ${filePath}`);
+            if (warnIfMissing) console.warn(`File not found: ${filePath}`);
+            setCachedFileDataUrl(cacheKey, "");
             return "";
         }
         const fileBuffer = fs.readFileSync(filePath);
         const base64 = fileBuffer.toString("base64");
-        return `data:${mimeType};base64,${base64}`;
+        const dataUrl = `data:${mimeType};base64,${base64}`;
+        setCachedFileDataUrl(cacheKey, dataUrl);
+        return dataUrl;
     } catch (error) {
         console.error(`Error reading file ${filePath}:`, error);
         return "";
@@ -97,7 +169,8 @@ const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
 };
 
 /**
- * Resolve path to base64 data URL: bucket key, legacy /uploads/ path, or full URL
+ * Resolve path to base64 data URL: bucket key, legacy /uploads/ path (→ bucket first), or full URL (cached).
+ * Avoids local filesystem for /uploads/ and missing files; uses bucket or public URL.
  * @param {string} pathOrKey - Bucket key (no leading /), legacy path (e.g. /uploads/logo.png), or http(s) URL
  * @param {string} mimeType - MIME type fallback
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
@@ -105,11 +178,10 @@ const fileToDataUrl = (filePath, mimeType = "image/jpeg") => {
  */
 const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) => {
     if (!pathOrKey) return "";
-    if (pathOrKey.startsWith("/")) {
-        const absolutePath = path.join(PUBLIC_DIR, pathOrKey);
-        return fileToDataUrl(absolutePath, mimeType);
-    }
+    // Full URL: use in-memory cache to avoid refetching same config image across PDFs
     if (pathOrKey.startsWith("http://") || pathOrKey.startsWith("https://")) {
+        const cached = getCachedUrlImage(pathOrKey);
+        if (cached) return cached;
         try {
             const https = require("https");
             const http = require("http");
@@ -131,11 +203,38 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
                 }).on("error", reject);
             });
             const base64 = buf.toString("base64");
-            return `data:${resolvedType};base64,${base64}`;
+            const dataUrl = `data:${resolvedType};base64,${base64}`;
+            setCachedUrlImage(pathOrKey, dataUrl);
+            return dataUrl;
         } catch (err) {
             console.error(`Error fetching logo URL ${pathOrKey}:`, err);
             return "";
         }
+    }
+    // Legacy /uploads/ path: resolve from bucket (tenant or default), not local filesystem
+    if (pathOrKey.startsWith("/uploads/")) {
+        const bucketKey = pathOrKey.slice(1); // "uploads/..."
+        const tryFetch = async (client) => {
+            try {
+                const result = client
+                    ? await bucketService.getObjectWithClient(client, bucketKey)
+                    : await bucketService.getObject(bucketKey);
+                const body = result.body;
+                const contentType = result.contentType || mimeType;
+                const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
+                return `data:${contentType};base64,${base64}`;
+            } catch (e) {
+                return null;
+            }
+        };
+        let dataUrl = await tryFetch(bucketClient);
+        if (!dataUrl && bucketClient) dataUrl = await tryFetch(null);
+        return dataUrl || "";
+    }
+    // Other paths starting with /: try local only (e.g. /public/solar-background.jpg in config)
+    if (pathOrKey.startsWith("/")) {
+        const absolutePath = path.join(PUBLIC_DIR, pathOrKey);
+        return fileToDataUrl(absolutePath, mimeType, false);
     }
     const tryFetch = async (client) => {
         try {
@@ -157,7 +256,9 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient) =
         } catch (_) { /* ignore */ }
     }
     if (!dataUrl) {
-        console.error(`Error reading from bucket: ${pathOrKey}`);
+        if (shouldLogMissingBucketKey(pathOrKey)) {
+            console.warn(`Error reading from bucket: ${pathOrKey}`);
+        }
         return "";
     }
     return dataUrl;
@@ -221,7 +322,9 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     const mainTemplate = loadTemplate(templateDir, "quotation.hbs");
 
     const fallbackBackgroundPath = path.join(PUBLIC_DIR, "solar-background.jpg");
-    const fallbackBackgroundImage = fileToDataUrl(fallbackBackgroundPath, "image/jpeg");
+    const fallbackBackgroundImage = fs.existsSync(fallbackBackgroundPath)
+        ? fileToDataUrl(fallbackBackgroundPath, "image/jpeg", false)
+        : "";
 
     // Resolve template image key to data URL (tenant bucket); cache by key to avoid duplicate fetches
     const mimeFromKey = (key) => {
@@ -388,35 +491,78 @@ const buildHtmlDocument = async (data, bucketClient, options = {}) => {
     return html;
 };
 
+// PDF cache + singleflight controls (env-driven)
+const PDF_CACHE_ENABLED = process.env.PDF_CACHE_ENABLED === "true";
+const PDF_SINGLEFLIGHT_ENABLED = process.env.PDF_SINGLEFLIGHT_ENABLED === "true";
+const PDF_CACHE_MAX = parseInt(process.env.PDF_CACHE_MAX || "50", 10);
+const PDF_METRICS_ENABLED = process.env.PDF_METRICS_ENABLED === "true";
+
+// In-memory versioned PDF cache and singleflight map
+const pdfCache = new Map(); // cacheKey -> { buffer, ts }
+const pdfSingleflight = new Map(); // cacheKey -> Promise<Buffer>
+
+function getCachedPdf(cacheKey) {
+    const entry = pdfCache.get(cacheKey);
+    return entry ? entry.buffer : null;
+}
+
+function setCachedPdf(cacheKey, buffer) {
+    if (pdfCache.size >= PDF_CACHE_MAX) {
+        const firstKey = pdfCache.keys().next().value;
+        if (firstKey !== undefined) pdfCache.delete(firstKey);
+    }
+    pdfCache.set(cacheKey, { buffer, ts: Date.now() });
+}
+
+function recordPdfMetrics(stageTimings, cacheInfo) {
+    if (!PDF_METRICS_ENABLED) return;
+    const safe = (v) => (Number.isFinite(v) ? v : null);
+    const payload = {
+        source: "quotation_pdf",
+        t_fetchDataMs: safe(stageTimings.fetchDataMs),
+        t_resolveAssetsMs: safe(stageTimings.resolveAssetsMs),
+        t_htmlBuildMs: safe(stageTimings.htmlBuildMs),
+        t_pdfRenderMs: safe(stageTimings.pdfRenderMs),
+        t_totalMs: safe(stageTimings.totalMs),
+        cacheHit: cacheInfo.cacheHit,
+        singleflightJoined: cacheInfo.singleflightJoined,
+    };
+    // For now, log to console; can be wired to structured logger or APM later.
+    // Avoid huge logs by keeping payload small.
+    console.info("[PDF_METRICS]", JSON.stringify(payload));
+}
+
 /**
- * Generate PDF from quotation data
+ * Low-level renderer: generate PDF from prepared HTML
  * @param {Object} quotationData - Complete quotation data object
- * @param {{ bucketClient?: { s3: object, bucketName: string }, templateKey?: string, templateConfig?: object }} [options] - Optional tenant bucket client, template key and config
- * @returns {Promise<Buffer>} PDF file as buffer
+ * @param {{ bucketClient?: { s3: object, bucketName: string }, templateKey?: string, templateConfig?: object }} [options]
+ * @returns {Promise<Buffer>}
  */
-const generateQuotationPDF = async (quotationData, options = {}) => {
+const renderQuotationPDF = async (quotationData, options = {}) => {
     const { bucketClient, templateKey, templateConfig } = options;
     let page = null;
+    const timings = {
+        resolveAssetsMs: 0,
+        htmlBuildMs: 0,
+        pdfRenderMs: 0,
+    };
 
     try {
+        const t0 = Date.now();
         const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig });
-
-        // Debug: Save HTML to file for inspection
-        const debugHtmlPath = path.join(PUBLIC_DIR, "pdfs", "debug-quotation.html");
-        const pdfsDir = path.join(PUBLIC_DIR, "pdfs");
-        if (!fs.existsSync(pdfsDir)) {
-            fs.mkdirSync(pdfsDir, { recursive: true });
-        }
-        fs.writeFileSync(debugHtmlPath, html);
+        timings.resolveAssetsMs = Date.now() - t0;
 
         const browser = await puppeteerService.getBrowser();
         page = await browser.newPage();
 
+        const tHtml0 = Date.now();
         await page.setContent(html, {
             waitUntil: "domcontentloaded",
             timeout: 60000,
         });
+        timings.htmlBuildMs = Date.now() - tHtml0;
 
+        const tPdf0 = Date.now();
         const pdfBuffer = await page.pdf({
             format: "A4",
             printBackground: true,
@@ -424,6 +570,7 @@ const generateQuotationPDF = async (quotationData, options = {}) => {
             margin: { top: "0", right: "0", bottom: "0", left: "0" },
             timeout: 60000,
         });
+        timings.pdfRenderMs = Date.now() - tPdf0;
 
         return pdfBuffer;
     } catch (error) {
@@ -434,6 +581,70 @@ const generateQuotationPDF = async (quotationData, options = {}) => {
             await page.close().catch(() => {});
         }
     }
+};
+
+/**
+ * Generate PDF from quotation data with optional cache + singleflight.
+ * @param {Object} quotationData - Complete quotation data object
+ * @param {{ bucketClient?: { s3: object, bucketName: string }, templateKey?: string, templateConfig?: object, tenantId?: string|number, quotationId?: string|number, versionKey?: string }} [options]
+ * @returns {Promise<Buffer>} PDF file as buffer
+ */
+const generateQuotationPDF = async (quotationData, options = {}) => {
+    const { tenantId, quotationId, versionKey, _metricsContext } = options;
+
+    const hasVersion = tenantId != null && quotationId != null && versionKey;
+    const cacheKey = hasVersion ? `${tenantId}:${quotationId}:${versionKey}` : null;
+
+    // 1) Cache hit
+    const stageTimings = _metricsContext || {
+        fetchDataMs: null,
+        resolveAssetsMs: null,
+        htmlBuildMs: null,
+        pdfRenderMs: null,
+        totalMs: null,
+    };
+    const tStart = Date.now();
+
+    if (PDF_CACHE_ENABLED && cacheKey) {
+        const cached = getCachedPdf(cacheKey);
+        if (cached) {
+            stageTimings.totalMs = Date.now() - tStart;
+            recordPdfMetrics(stageTimings, { cacheHit: true, singleflightJoined: false });
+            return cached;
+        }
+    }
+
+    const doRender = async (singleflightJoined) => {
+        const buffer = await renderQuotationPDF(quotationData, options);
+        if (PDF_CACHE_ENABLED && cacheKey) {
+            setCachedPdf(cacheKey, buffer);
+        }
+        stageTimings.totalMs = Date.now() - tStart;
+        recordPdfMetrics(stageTimings, { cacheHit: false, singleflightJoined });
+        return buffer;
+    };
+
+    // 2) Singleflight dedupe
+    if (PDF_SINGLEFLIGHT_ENABLED && cacheKey) {
+        const inFlight = pdfSingleflight.get(cacheKey);
+        if (inFlight) {
+            return inFlight.finally(() => {
+                // Metrics for joined requests are handled by the leader; joined callers just await.
+            });
+        }
+        const promise = (async () => {
+            try {
+                return await doRender(false);
+            } finally {
+                pdfSingleflight.delete(cacheKey);
+            }
+        })();
+        pdfSingleflight.set(cacheKey, promise);
+        return promise;
+    }
+
+    // 3) Plain render (no cache/singleflight)
+    return doRender(false);
 };
 
 /**

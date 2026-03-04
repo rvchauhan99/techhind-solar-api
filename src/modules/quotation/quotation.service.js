@@ -21,6 +21,29 @@ const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     return out;
 };
 
+// Per-tenant in-memory cache for ProductMake map (id -> { name, logo }) used by PDF generation.
+const PRODUCT_MAKE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const productMakeCache = new Map(); // key (tenantId|default) -> { map, ts }
+
+const getProductMakesMapForPdf = async ({ tenantId } = {}) => {
+    const cacheKey = tenantId != null ? String(tenantId) : "default";
+    const now = Date.now();
+    const existing = productMakeCache.get(cacheKey);
+    if (existing && now - existing.ts < PRODUCT_MAKE_CACHE_TTL_MS) {
+        return existing.map;
+    }
+
+    const models = getTenantModels();
+    const { ProductMake } = models;
+    const rows = await ProductMake.findAll({
+        where: { deleted_at: null },
+        attributes: ["id", "name", "logo"],
+    });
+    const map = new Map(rows.map((pm) => [pm.id, { name: pm.name, logo: pm.logo }]));
+    productMakeCache.set(cacheKey, { map, ts: now });
+    return map;
+};
+
 const listQuotations = async ({
     search,
     inquiry_id,
@@ -334,6 +357,33 @@ const getQuotationById = async ({ id }) => {
             { model: OrderType, as: "orderType", attributes: ["id", "name"] },
             { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"] },
             { model: ProjectPrice, as: "projectPrice", attributes: ["id", "project_capacity", "total_project_value"] },
+            { model: Inquiry, as: "inquiry", attributes: ["id", "inquiry_number"] },
+        ],
+    });
+
+    if (!found) return null;
+    const result = found.toJSON();
+    const derived = derivePanelAndInverterFromBomSnapshot(result.bom_snapshot);
+    if (derived.panel_product != null) result.panel_product = derived.panel_product;
+    if (derived.inverter_product != null) result.inverter_product = derived.inverter_product;
+    return result;
+};
+
+// Minimal quotation fetch for PDF generation: only joins needed for PDF (user, branch, customer, state, projectScheme, orderType, inquiry).
+const getQuotationForPdf = async ({ id }) => {
+    const models = getTenantModels();
+    const { Quotation, User, CompanyBranch, Customer, State, OrderType, ProjectScheme, Inquiry } = models;
+    if (!id) return null;
+
+    const found = await Quotation.findOne({
+        where: { id, deleted_at: null },
+        include: [
+            { model: User, as: "user", attributes: ["id", "name", "mobile_number", "email"] },
+            { model: CompanyBranch, as: "branch", attributes: ["id", "name", "quotation_template_id"] },
+            { model: Customer, as: "customer", attributes: ["id", "customer_name", "mobile_number", "email_id", "company_name"] },
+            { model: State, as: "state", attributes: ["id", "name"] },
+            { model: OrderType, as: "orderType", attributes: ["id", "name"] },
+            { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"] },
             { model: Inquiry, as: "inquiry", attributes: ["id", "inquiry_number"] },
         ],
     });
@@ -1018,6 +1068,7 @@ module.exports = {
     listQuotations,
     exportQuotations,
     getQuotationById,
+    getQuotationForPdf,
     createQuotation,
     updateQuotation,
     approveQuotation,
@@ -1028,5 +1079,6 @@ module.exports = {
     getProductMakes,
     getNextQuotationNumber,
     getQuotationCountByInquiry,
-    getAllProducts
+    getAllProducts,
+    getProductMakesMapForPdf,
 };
