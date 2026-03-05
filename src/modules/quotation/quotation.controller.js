@@ -430,7 +430,7 @@ const buildPdfTimingMetadata = (maxAttempts) => {
 const ensurePdfJobForQuotation = async (req, quotation) => {
     const tenantId = req.tenant?.id || "default";
     const tenantSequelize = getTenantSequelizeForReq(req);
-    const metadata = await resolvePdfMetadataForQuotation({ tenantSequelize, quotation });
+    const metadata = await resolvePdfMetadataForQuotation({ tenantSequelize, quotation, includeImageData: false });
 
     const artifactKey = buildArtifactKey({
         tenantId,

@@ -23,21 +23,39 @@ function buildVersionKey({ quotation, template, company, bankAccount }) {
   return versionParts.join("|");
 }
 
-async function resolvePdfMetadataForQuotation({ tenantSequelize, quotation }) {
+/** Config attributes when we do NOT need inline image data (e.g. job creation: only versionKey). Excludes large *_data columns. */
+const CONFIG_ATTRIBUTES_LIGHT = [
+  "id",
+  "quotation_template_id",
+  "default_background_image_path",
+  "default_footer_image_path",
+  "page_backgrounds",
+  "created_at",
+  "updated_at",
+];
+
+async function resolvePdfMetadataForQuotation({ tenantSequelize, quotation, includeImageData = false }) {
   const models = getModelsForSequelize(tenantSequelize);
   const { Company, CompanyBankAccount, QuotationTemplate, QuotationTemplateConfig } = models;
+
+  const configInclude = {
+    model: QuotationTemplateConfig,
+    as: "config",
+    required: false,
+    ...(includeImageData ? {} : { attributes: CONFIG_ATTRIBUTES_LIGHT }),
+  };
 
   let template = null;
   if (quotation.branch && quotation.branch.quotation_template_id) {
     template = await QuotationTemplate.findByPk(quotation.branch.quotation_template_id, {
       where: { deleted_at: null },
-      include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
+      include: [configInclude],
     });
   }
   if (!template) {
     template = await QuotationTemplate.findOne({
       where: { is_default: true, deleted_at: null },
-      include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
+      include: [configInclude],
     });
   }
 
@@ -102,7 +120,7 @@ async function buildPdfGenerationContext({ tenantId, tenantSequelize, quotationI
   if (!quotation) return null;
 
   const [metadata, productMakesMap] = await Promise.all([
-    resolvePdfMetadataForQuotation({ tenantSequelize, quotation }),
+    resolvePdfMetadataForQuotation({ tenantSequelize, quotation, includeImageData: true }),
     runWithTenantRequestContext({ tenantId, tenantSequelize }, () =>
       quotationService.getProductMakesMapForPdf({ tenantId })
     ),
