@@ -3,7 +3,6 @@
 const fs = require("fs");
 const path = require("path");
 const handlebars = require("handlebars");
-const puppeteer = require("puppeteer");
 const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 const { normalizeBomSnapshotForDisplay } = require("../../common/utils/bomUtils.js");
@@ -160,11 +159,11 @@ const buildOrderHtmlDocument = async (data) => {
 };
 
 const generateOrderPDF = async (data) => {
-    let browser = null;
+    let page = null;
     try {
         const html = await buildOrderHtmlDocument(data);
-        browser = await puppeteer.launch(puppeteerService.getLaunchOptions());
-        const page = await browser.newPage();
+        const browser = await puppeteerService.getBrowser();
+        page = await browser.newPage();
         await page.setContent(html, {
             waitUntil: "domcontentloaded",
             timeout: 60000,
@@ -176,7 +175,7 @@ const generateOrderPDF = async (data) => {
             timeout: 60000,
         });
     } finally {
-        if (browser) await browser.close();
+        if (page) await page.close().catch(() => {});
     }
 };
 

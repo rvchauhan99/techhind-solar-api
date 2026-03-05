@@ -1,6 +1,5 @@
 "use strict";
 
-const puppeteer = require("puppeteer");
 const handlebars = require("handlebars");
 const fs = require("fs");
 const path = require("path");
