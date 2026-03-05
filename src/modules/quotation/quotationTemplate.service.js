@@ -35,17 +35,19 @@ const listTemplates = async (req) => {
     });
 };
 
+/** Config attributes for template detail API; exclude large *_data columns to avoid loading multi-MB in main process. */
+const CONFIG_ATTRIBUTES_API = ["id", "default_background_image_path", "default_footer_image_path", "page_backgrounds"];
+
 const getTemplateById = async (id, req) => {
     const models = getTenantModels(req);
     const { QuotationTemplate, QuotationTemplateConfig } = models;
     const row = await QuotationTemplate.findOne({
         where: { id, deleted_at: null },
-        include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
+        include: [{ model: QuotationTemplateConfig, as: "config", required: false, attributes: CONFIG_ATTRIBUTES_API }],
     });
     if (!row) return null;
     const j = row.toJSON();
     const config = j.config || {};
-    // Omit *_data from API response to avoid large payloads; PDF build gets full config server-side
     return {
         ...j,
         config: {

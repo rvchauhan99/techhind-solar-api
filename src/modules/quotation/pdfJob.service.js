@@ -26,7 +26,7 @@ const POLL_WINDOW_BUFFER_MS = Math.max(
 );
 const PROCESSING_STALE_MS = Math.max(
   30_000,
-  parseInt(process.env.PDF_JOB_PROCESSING_STALE_MS || "180000", 10)
+  parseInt(process.env.PDF_JOB_PROCESSING_STALE_MS || "60000", 10)
 );
 const STALE_RECOVERY_BATCH = Math.max(
   1,
