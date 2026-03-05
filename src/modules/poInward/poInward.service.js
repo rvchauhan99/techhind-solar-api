@@ -655,11 +655,76 @@ const updatePOInward = async ({ id, payload, transaction } = {}) => {
   }
 };
 
+const DUPLICATE_SERIAL_MESSAGE = "Duplicate serial number for this product type.";
+
+/**
+ * Validate serial numbers for a product (same rule as create/update: unique per product_type_id).
+ * Read-only; returns which serials are already used for this product type.
+ * @param {Object} opts
+ * @param {number} opts.product_id - Product id (used to resolve product_type_id)
+ * @param {string[]} opts.serial_numbers - Serial numbers to check
+ * @param {number} [opts.po_inward_id] - When editing, exclude serials that already belong to this inward
+ * @returns {{ valid: boolean, invalid_serials?: Array<{ serial_number: string, message: string }> }}
+ */
+const validatePOInwardSerials = async ({ product_id, serial_numbers, po_inward_id } = {}) => {
+  const models = getTenantModels();
+  const { POInwardSerial, POInwardItem, Product } = models;
+
+  const serials = (serial_numbers || [])
+    .map((s) => (s != null ? String(s).trim() : ""))
+    .filter(Boolean);
+  if (serials.length === 0) {
+    return { valid: true };
+  }
+
+  const product = await Product.findByPk(parseInt(product_id, 10), {
+    attributes: ["id", "product_type_id"],
+  });
+  if (!product) {
+    return { valid: false, invalid_serials: serials.map((sn) => ({ serial_number: sn, message: "Product not found." })) };
+  }
+
+  const productTypeId = product.product_type_id ?? null;
+
+  const where = {
+    product_type_id: productTypeId,
+    serial_number: { [Op.in]: serials },
+  };
+
+  const include = [
+    {
+      model: POInwardItem,
+      as: "poInwardItem",
+      required: true,
+      attributes: ["id", "po_inward_id"],
+      ...(po_inward_id != null && { where: { po_inward_id: { [Op.ne]: parseInt(po_inward_id, 10) } } }),
+    },
+  ];
+
+  const existing = await POInwardSerial.findAll({
+    where,
+    include,
+    attributes: ["serial_number"],
+  });
+
+  const invalidSet = new Set(existing.map((r) => r.serial_number));
+  if (invalidSet.size === 0) {
+    return { valid: true };
+  }
+
+  const invalid_serials = [...invalidSet].map((serial_number) => ({
+    serial_number,
+    message: DUPLICATE_SERIAL_MESSAGE,
+  }));
+  return { valid: false, invalid_serials };
+};
+
 module.exports = {
   listPOInwards,
   getPOInwardById,
   createPOInward,
   updatePOInward,
   approvePOInward,
+  validatePOInwardSerials,
 };
 
