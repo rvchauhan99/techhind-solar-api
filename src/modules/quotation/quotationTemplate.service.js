@@ -112,6 +112,9 @@ const updateTemplateConfig = async (id, payload, req) => {
         ...(payload.default_background_image_path !== undefined && { default_background_image_path: payload.default_background_image_path || null }),
         ...(payload.default_footer_image_path !== undefined && { default_footer_image_path: payload.default_footer_image_path || null }),
         ...(payload.page_backgrounds !== undefined && { page_backgrounds: payload.page_backgrounds || null }),
+        ...(payload.default_background_image_data !== undefined && { default_background_image_data: payload.default_background_image_data || null }),
+        ...(payload.default_footer_image_data !== undefined && { default_footer_image_data: payload.default_footer_image_data || null }),
+        ...(payload.page_backgrounds_data !== undefined && { page_backgrounds_data: payload.page_backgrounds_data || null }),
     });
     if (req.tenant && req.tenant.id != null) {
         pdfService.invalidatePdfCacheForTenant(req.tenant.id);

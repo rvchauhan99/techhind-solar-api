@@ -1,15 +1,35 @@
-FROM ghcr.io/puppeteer/puppeteer:22.0.0
+FROM node:20-slim
 
-# Switch to root to set up directories and permissions
-USER root
+# Install Chromium runtime shared libraries required by @sparticuz/chromium
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxcb1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 
-# Create uploads and temp directories (app uses public/uploads; Puppeteer uses /tmp)
+# Create uploads and temp directories
 RUN mkdir -p /usr/src/app/public/uploads && \
-    mkdir -p /tmp/uploads && \
-    chown -R pptruser:pptruser /usr/src/app && \
-    chown -R pptruser:pptruser /tmp/uploads
+    mkdir -p /tmp/uploads
 
 # Copy package files
 COPY package*.json ./
@@ -20,11 +40,7 @@ RUN npm ci --omit=dev
 # Copy source code and project structure
 COPY . .
 
-# Set ownership of all files to pptruser; entrypoint must be executable
-RUN chown -R pptruser:pptruser /usr/src/app && chmod +x /usr/src/app/docker-entrypoint.sh
-
-# Switch back to pptruser for running the app
-USER pptruser
+RUN chmod +x /usr/src/app/docker-entrypoint.sh
 
 # App default port (override with PORT env)
 EXPOSE 5000

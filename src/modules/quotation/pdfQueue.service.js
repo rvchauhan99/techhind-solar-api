@@ -12,6 +12,7 @@ const PDF_QUEUE_CANARY_TENANTS = (process.env.PDF_QUEUE_CANARY_TENANT_IDS || "")
     .map((s) => s.trim())
     .filter(Boolean);
 const PDF_QUEUE_JOB_TIMEOUT_MS = Math.max(5000, parseInt(process.env.PDF_QUEUE_JOB_TIMEOUT_MS || "120000", 10)); // 2 min default
+const PDF_QUEUE_MAX_DEPTH = Math.max(1, parseInt(process.env.PDF_QUEUE_MAX_DEPTH || "20", 10)); // hard cap for in-memory queue depth
 
 const pending = [];
 let activeCount = 0;
@@ -78,6 +79,12 @@ function processNext() {
 
 function enqueueInMemory(jobData) {
     return new Promise((resolve, reject) => {
+        if (pending.length >= PDF_QUEUE_MAX_DEPTH) {
+            const err = new Error("PDF queue full");
+            err.statusCode = 503;
+            reject(err);
+            return;
+        }
         let settled = false;
         const onceResolve = (result) => {
             if (settled) return;
