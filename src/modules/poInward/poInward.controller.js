@@ -154,6 +154,19 @@ const approve = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, approved, "PO Inward approved", 200);
 });
 
+const validateSerials = asyncHandler(async (req, res) => {
+  const { product_id, serial_numbers, po_inward_id } = req.body || {};
+  if (product_id == null || !Array.isArray(serial_numbers)) {
+    return responseHandler.sendError(res, "product_id and serial_numbers are required", 400);
+  }
+  const result = await poInwardService.validatePOInwardSerials({
+    product_id: parseInt(product_id, 10),
+    serial_numbers,
+    po_inward_id: po_inward_id != null ? parseInt(po_inward_id, 10) : undefined,
+  });
+  return responseHandler.sendSuccess(res, result, "Serials validated", 200);
+});
+
 module.exports = {
   list,
   exportList,
@@ -162,5 +175,6 @@ module.exports = {
   create,
   update,
   approve,
+  validateSerials,
 };
 
