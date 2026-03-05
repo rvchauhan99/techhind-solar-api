@@ -3,7 +3,6 @@
 const fs = require("fs");
 const path = require("path");
 const handlebars = require("handlebars");
-const puppeteer = require("puppeteer");
 const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 
@@ -110,10 +109,10 @@ const generateB2BOrderPDF = async (data) => {
   const compiled = handlebars.compile(template);
   const html = compiled({ ...data, styles });
 
-  let browser = null;
+  let page = null;
   try {
-    browser = await puppeteer.launch(puppeteerService.getLaunchOptions());
-    const page = await browser.newPage();
+    const browser = await puppeteerService.getBrowser();
+    page = await browser.newPage();
     await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 60000 });
     return await page.pdf({
       format: "A4",
@@ -122,7 +121,7 @@ const generateB2BOrderPDF = async (data) => {
       timeout: 60000,
     });
   } finally {
-    if (browser) await browser.close();
+    if (page) await page.close().catch(() => {});
   }
 };
 

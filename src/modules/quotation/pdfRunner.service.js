@@ -20,6 +20,7 @@ let _started = false;
 let _timer = null;
 let _heartbeatTimer = null;
 let _activeChildren = 0;
+const _activeChildProcs = new Set();
 let _lastTenantCache = { ts: 0, items: [] };
 let _tickInProgress = false;
 let _lastCleanupAt = 0;
@@ -69,22 +70,33 @@ function runJobInChild({ tenantId, jobId }) {
       stdio: "inherit",
     });
 
+    _activeChildProcs.add(child);
+
     const timeoutId = setTimeout(() => {
       try {
-        child.kill("SIGKILL");
+        child.kill("SIGTERM");
       } catch (_) {
         // ignore
       }
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch (_) {
+          // ignore
+        }
+      }, 5000);
       reject(new Error(`Child timeout after ${CHILD_TIMEOUT_MS}ms`));
     }, CHILD_TIMEOUT_MS);
 
     child.on("exit", (code) => {
       clearTimeout(timeoutId);
+      _activeChildProcs.delete(child);
       if (code === 0) resolve();
       else reject(new Error(`Child exited with code ${code}`));
     });
     child.on("error", (err) => {
       clearTimeout(timeoutId);
+      _activeChildProcs.delete(child);
       reject(err);
     });
   });
@@ -207,6 +219,13 @@ function stopRunner() {
   if (_heartbeatTimer) clearInterval(_heartbeatTimer);
   _timer = null;
   _heartbeatTimer = null;
+  for (const child of _activeChildProcs) {
+    try {
+      child.kill("SIGTERM");
+    } catch (_) {
+      // ignore
+    }
+  }
   _started = false;
 }
 
