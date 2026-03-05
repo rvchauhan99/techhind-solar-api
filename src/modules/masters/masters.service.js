@@ -857,9 +857,12 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
 
     // Build order clause
     let orderBy = [['id', 'ASC']];
-    
-    // Special handling for State model - order by is_default first
-    if (model === 'state.model' || Model.tableName === 'states') {
+    const isPurchaseOrderModel = model === 'purchaseOrder.model' || model === 'purchase_order.model' || Model.tableName === 'purchase_orders';
+
+    // PurchaseOrder: latest first (desc by id) for PO selection (e.g. PO Inward)
+    if (isPurchaseOrderModel) {
+        orderBy = [['id', 'DESC']];
+    } else if (model === 'state.model' || Model.tableName === 'states') {
         if (modelAttributes.is_default) {
             orderBy = [['is_default', 'DESC']];
             if (hasOrderByField) {
@@ -901,14 +904,13 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
     }
 
     // For PurchaseOrder, include Supplier so we can show "po_number - supplier_name" in dropdown
-    const isPurchaseOrder = model === 'purchaseOrder.model' || model === 'purchase_order.model' || Model.tableName === 'purchase_orders';
     const models = getTenantModels();
     const findOptions = {
         where,
         order: orderBy,
         attributes: attributes,
     };
-    if (isPurchaseOrder && models.Supplier) {
+    if (isPurchaseOrderModel && models.Supplier) {
         findOptions.include = [
             { model: models.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
         ];
@@ -926,7 +928,7 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
     const options = rows.map((row) => {
         const data = row.toJSON();
         let label = data[displayField] || data.name || data.code || data.title || data.label || `ID: ${data.id}`;
-        if (isPurchaseOrder && data.supplier && data.supplier.supplier_name) {
+        if (isPurchaseOrderModel && data.supplier && data.supplier.supplier_name) {
             label = `${data.po_number || data.id} - ${data.supplier.supplier_name}`;
         }
         // Return all the data fields, so frontend can use the actual field names (name, unit, etc.)
