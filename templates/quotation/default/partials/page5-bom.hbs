@@ -9,34 +9,6 @@
   </div>
   <div class="bom-underline"></div>
 
-  {{#if bom_snapshot_table.length}}
-  <!-- Full BOM Table (all items) -->
-  <div class="bom-snapshot-table">
-    <table class="bom-table">
-      <thead>
-        <tr>
-          <th style="width: 28px;">#</th>
-          <th>Product</th>
-          <th style="width: 90px;">Type</th>
-          <th style="width: 55px;">Qty</th>
-          <th style="width: 55px;">Unit</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{#each bom_snapshot_table}}
-        <tr>
-          <td>{{add @index 1}}</td>
-          <td>{{product_name}}</td>
-          <td>{{product_type_name}}</td>
-          <td>{{quantity}}</td>
-          <td>{{measurement_unit_name}}</td>
-        </tr>
-        {{/each}}
-      </tbody>
-    </table>
-  </div>
-
-  {{else}}
   {{#if bom_show_panel}}
   <!-- Panel Section -->
   <div class="bom-section">
@@ -246,6 +218,80 @@
       </svg>
     </div>
     <div class="bom-section-content">
+      <div class="bom-cables-horizontal">
+      {{#if cables_ac_items.length}}
+        {{#each cables_ac_items}}
+        <div class="bom-cable-item">
+          <span class="bom-label">AC Cable:</span>
+          <span class="bom-value">{{product_make_name}}</span>
+          <span class="bom-sublabel">Qty: {{quantity}} {{measurement_unit_name}}</span>
+          {{#if product_name}}<span class="bom-sublabel">{{product_name}}</span>{{/if}}
+          {{#if make_logos.length}}
+          <div class="bom-cable-logos">
+            {{#each make_logos}}
+            <img src="{{this.logo}}" alt="{{this.name}}" class="bom-cable-logo" />
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+        {{/each}}
+      {{/if}}
+      {{#if cables_dc_items.length}}
+        {{#each cables_dc_items}}
+        <div class="bom-cable-item">
+          <span class="bom-label">DC Cable:</span>
+          <span class="bom-value">{{product_make_name}}</span>
+          <span class="bom-sublabel">Qty: {{quantity}} {{measurement_unit_name}}</span>
+          {{#if product_name}}<span class="bom-sublabel">{{product_name}}</span>{{/if}}
+          {{#if make_logos.length}}
+          <div class="bom-cable-logos">
+            {{#each make_logos}}
+            <img src="{{this.logo}}" alt="{{this.name}}" class="bom-cable-logo" />
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+        {{/each}}
+      {{/if}}
+      {{#if cables_earthing_items.length}}
+        {{#each cables_earthing_items}}
+        <div class="bom-cable-item">
+          <span class="bom-label">Earthing Cable:</span>
+          <span class="bom-value">{{product_make_name}}</span>
+          <span class="bom-sublabel">Qty: {{quantity}} {{measurement_unit_name}}</span>
+          {{#if product_name}}<span class="bom-sublabel">{{product_name}}</span>{{/if}}
+          {{#if make_logos.length}}
+          <div class="bom-cable-logos">
+            {{#each make_logos}}
+            <img src="{{this.logo}}" alt="{{this.name}}" class="bom-cable-logo" />
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+        {{/each}}
+      {{/if}}
+      {{#if cables_la_items.length}}
+        {{#each cables_la_items}}
+        <div class="bom-cable-item">
+          <span class="bom-label">LA Cable:</span>
+          <span class="bom-value">{{product_make_name}}</span>
+          <span class="bom-sublabel">Qty: {{quantity}} {{measurement_unit_name}}</span>
+          {{#if product_name}}<span class="bom-sublabel">{{product_name}}</span>{{/if}}
+          {{#if make_logos.length}}
+          <div class="bom-cable-logos">
+            {{#each make_logos}}
+            <img src="{{this.logo}}" alt="{{this.name}}" class="bom-cable-logo" />
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+        {{/each}}
+      {{/if}}
+      </div>
+      {{#unless cables_ac_items.length}}
+      {{#unless cables_dc_items.length}}
+      {{#unless cables_la_items.length}}
+      {{#unless cables_earthing_items.length}}
       <div class="bom-row bom-cables-row">
         <div class="bom-col">
           <span class="bom-label">AC Cable:</span>
@@ -268,6 +314,10 @@
           <span class="bom-sublabel">{{cables.la_description}}</span>
         </div>
       </div>
+      {{/unless}}
+      {{/unless}}
+      {{/unless}}
+      {{/unless}}
     </div>
     <div class="bom-section-label">Cables</div>
   </div>
@@ -275,25 +325,145 @@
 
   {{#if bom_show_structure}}
   <!-- Structure Section -->
-  <div class="bom-text-section">
-    <h3 class="bom-text-title">Structure</h3>
-    <p><strong>Height Of Structure:</strong> {{structure.height}}</p>
-    <p><strong>Material:</strong> {{structure.material}}</p>
-    <p><strong>System Warranty:</strong> {{structure.warranty}} Year</p>
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="8" y="28" width="48" height="8" rx="2" fill="#1a3a5c"/>
+        <rect x="12" y="20" width="12" height="24" rx="1" fill="#5d6d7e"/>
+        <rect x="40" y="20" width="12" height="24" rx="1" fill="#5d6d7e"/>
+        <line x1="20" y1="36" x2="44" y2="36" stroke="#e87722" stroke-width="2"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      {{#if structure_items.length}}
+        {{#each structure_items}}
+        <div class="bom-row">
+          <div class="bom-col">
+            <span class="bom-label">Product:</span>
+            <span class="bom-value">{{product_name}}</span>
+          </div>
+          <div class="bom-col">
+            <span class="bom-label">Qty:</span>
+            <span class="bom-value">{{quantity}} {{measurement_unit_name}}</span>
+          </div>
+          <div class="bom-col">
+            <span class="bom-label">Make:</span>
+            <span class="bom-value">{{product_make_name}}</span>
+          </div>
+          <div class="bom-col bom-make-logos">
+            {{#if make_logos.length}}
+            <div class="make-logos-container">
+              {{#each make_logos}}
+              <div class="make-logo-item"><img src="{{this.logo}}" alt="{{this.name}}" /></div>
+              {{/each}}
+            </div>
+            {{/if}}
+          </div>
+        </div>
+        {{/each}}
+      {{else}}
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">Height Of Structure:</span>
+          <span class="bom-value">{{structure.height}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Material:</span>
+          <span class="bom-value">{{structure.material}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">System Warranty:</span>
+          <span class="bom-value">{{structure.warranty}} Year</span>
+        </div>
+      </div>
+      {{/if}}
+    </div>
+    <div class="bom-section-label">Structure</div>
+  </div>
+  {{/if}}
+
+  {{#if bom_show_accessories}}
+  <!-- Accessories Section -->
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="12" y="12" width="18" height="18" rx="2" fill="#1a3a5c"/>
+        <rect x="34" y="12" width="18" height="18" rx="2" fill="#1a3a5c"/>
+        <rect x="12" y="34" width="18" height="18" rx="2" fill="#1a3a5c"/>
+        <rect x="34" y="34" width="18" height="18" rx="2" fill="#1a3a5c"/>
+        <path d="M21 21 L31 31 M31 21 L21 31" stroke="#e87722" stroke-width="2"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      {{#each accessories_items}}
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">Product:</span>
+          <span class="bom-value">{{product_name}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Qty:</span>
+          <span class="bom-value">{{quantity}} {{measurement_unit_name}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Make:</span>
+          <span class="bom-value">{{product_make_name}}</span>
+        </div>
+        <div class="bom-col bom-make-logos">
+          {{#if make_logos.length}}
+          <div class="make-logos-container">
+            {{#each make_logos}}
+            <div class="make-logo-item"><img src="{{this.logo}}" alt="{{this.name}}" /></div>
+            {{/each}}
+          </div>
+          {{/if}}
+        </div>
+      </div>
+      {{/each}}
+    </div>
+    <div class="bom-section-label">Accessories</div>
   </div>
   {{/if}}
 
   {{#if bom_show_balance_of_system}}
   <!-- Balance of System Section -->
-  <div class="bom-text-section">
-    <h3 class="bom-text-title">Balance of System</h3>
-    <p><strong>ACDB:</strong> {{balance_of_system.acdb}}</p>
-    <p><strong>DCDB:</strong> {{balance_of_system.dcdb}}</p>
-    <p><strong>Earthing:</strong> {{balance_of_system.earthing}}</p>
-    <p><strong>Lightening Arrestor:</strong> {{balance_of_system.lightening_arrestor}}</p>
-    <p><strong>Miscellaneous Item:</strong> {{balance_of_system.miscellaneous}}</p>
+  <div class="bom-section">
+    <div class="bom-section-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
+        <rect x="10" y="14" width="44" height="36" rx="4" fill="#1a3a5c"/>
+        <rect x="16" y="20" width="14" height="10" rx="1" fill="#3498db"/>
+        <rect x="34" y="20" width="14" height="10" rx="1" fill="#3498db"/>
+        <rect x="16" y="34" width="14" height="10" rx="1" fill="#2ecc71"/>
+        <rect x="34" y="34" width="14" height="10" rx="1" fill="#e87722"/>
+      </svg>
+    </div>
+    <div class="bom-section-content">
+      <div class="bom-row">
+        <div class="bom-col">
+          <span class="bom-label">ACDB:</span>
+          <span class="bom-value">{{balance_of_system.acdb}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">DCDB:</span>
+          <span class="bom-value">{{balance_of_system.dcdb}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Earthing:</span>
+          <span class="bom-value">{{balance_of_system.earthing}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Lightening Arrestor:</span>
+          <span class="bom-value">{{balance_of_system.lightening_arrestor}}</span>
+        </div>
+        <div class="bom-col">
+          <span class="bom-label">Miscellaneous:</span>
+          <span class="bom-value">{{balance_of_system.miscellaneous}}</span>
+        </div>
+      </div>
+    </div>
+    <div class="bom-section-label">Balance of System</div>
   </div>
   {{/if}}
-  {{/if}}
+
   {{> templateFooter defaultFooterImageUrl=defaultFooterImageUrl}}
 </div>
