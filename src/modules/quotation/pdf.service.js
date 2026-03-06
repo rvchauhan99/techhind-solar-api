@@ -1247,12 +1247,16 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         miscellaneous: quotation.mis_description || "",
     };
 
+    const normalizedBomSnapshotForTable =
+        Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0
+            ? normalizeBomSnapshotForDisplay(quotation.bom_snapshot)
+            : null;
+
     // When quotation has bom_snapshot, derive section data from it so section-based BOM page is populated.
     // Snapshot data should drive the BOM composition (size, qty, make, etc.) but we KEEP warranty fields
     // from the quotation form (since BOM lines typically don't carry warranty info).
-    if (Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0) {
-        const normalizedSnapshot = normalizeBomSnapshotForDisplay(quotation.bom_snapshot);
-        const derived = await deriveBomSectionsFromSnapshot(normalizedSnapshot, productMakesMap, bucketClient);
+    if (Array.isArray(normalizedBomSnapshotForTable) && normalizedBomSnapshotForTable.length > 0) {
+        const derived = await deriveBomSectionsFromSnapshot(normalizedBomSnapshotForTable, productMakesMap, bucketClient);
         if (derived) {
             panel = {
                 ...panel,
@@ -1409,8 +1413,9 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
                 (balance_of_system.miscellaneous != null && String(balance_of_system.miscellaneous).trim() !== "")
             ),
 
-        // BOM page always uses section-based layout; never pass bom_snapshot so table is never rendered
-        bom_snapshot: null,
+        // BOM table: include ALL items from bom_snapshot (duplicates included).
+        // Template will render this in the Bill Of Material page.
+        bom_snapshot_table: normalizedBomSnapshotForTable || [],
 
         // Savings and Payback data
         savings: {

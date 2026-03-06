@@ -678,13 +678,13 @@ body {
 .bom-snapshot-table .bom-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 9px;
 }
 
 .bom-snapshot-table .bom-table th,
 .bom-snapshot-table .bom-table td {
   border: 1px solid var(--border-gray);
-  padding: 8px 10px;
+  padding: 4px 6px;
   text-align: left;
 }
 
