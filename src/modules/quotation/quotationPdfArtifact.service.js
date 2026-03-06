@@ -131,7 +131,8 @@ async function buildPdfGenerationContext({ tenantId, tenantSequelize, quotationI
     metadata.company ? metadata.company.toJSON() : null,
     metadata.bankAccount ? metadata.bankAccount.toJSON() : null,
     productMakesMap,
-    bucketClient
+    bucketClient,
+    tenantId
   );
 
   return {

@@ -8,6 +8,11 @@ const fs = require("fs");
 // On macOS/Windows (local dev) we fall back to the system Chrome/Chromium.
 // On Linux (Docker / DigitalOcean) we use the @sparticuz/chromium binary.
 
+const CHROMIUM_HEAP_MB = Math.max(128, parseInt(process.env.PUPPETEER_JS_MAX_OLD_SPACE_SIZE || "256", 10));
+const JS_FLAGS_HEAP = `--js-flags=--max-old-space-size=${CHROMIUM_HEAP_MB}`;
+const MAX_RENDERS_BEFORE_RESTART = Math.max(1, parseInt(process.env.PDF_CHROMIUM_MAX_RENDERS || "50", 10));
+const MAX_AGE_MS_BEFORE_RESTART = Math.max(60_000, parseInt(process.env.PDF_CHROMIUM_MAX_AGE_MS || "1800000", 10)); // 30 min default
+
 const LOCAL_CHROME_CANDIDATES = [
     // macOS
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -33,7 +38,7 @@ async function getLaunchConfig() {
     if (envPath && fs.existsSync(envPath)) {
         return {
             executablePath: envPath,
-            args: chromium.args,
+            args: [...(Array.isArray(chromium.args) ? chromium.args : []), JS_FLAGS_HEAP],
             headless: true,
         };
     }
@@ -42,7 +47,7 @@ async function getLaunchConfig() {
         // Production path: use @sparticuz/chromium (Linux x64 serverless binary)
         return {
             executablePath: await chromium.executablePath(),
-            args: chromium.args,
+            args: [...(Array.isArray(chromium.args) ? chromium.args : []), JS_FLAGS_HEAP],
             headless: chromium.headless,
         };
     }
@@ -62,6 +67,7 @@ async function getLaunchConfig() {
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
+            JS_FLAGS_HEAP,
         ],
         headless: true,
     };
@@ -69,6 +75,8 @@ async function getLaunchConfig() {
 
 let _browserInstance = null;
 let _browserLaunchPromise = null;
+let _renderCount = 0;
+let _browserLaunchedAt = 0;
 
 /**
  * Get or create a persistent browser instance (avoids cold-start on every PDF).
@@ -84,6 +92,8 @@ async function getBrowser() {
     _browserLaunchPromise = (async () => {
         const config = await getLaunchConfig();
         _browserInstance = await puppeteer.launch(config);
+        _renderCount = 0;
+        _browserLaunchedAt = Date.now();
         _browserInstance.on("disconnected", () => {
             _browserInstance = null;
             _browserLaunchPromise = null;
@@ -95,6 +105,20 @@ async function getBrowser() {
 }
 
 /**
+ * Call after each PDF render. Restarts Chromium after N renders or M minutes to cap memory growth.
+ */
+function recordRender() {
+    _renderCount += 1;
+    const ageMs = _browserLaunchedAt ? Date.now() - _browserLaunchedAt : 0;
+    if (
+        _renderCount >= MAX_RENDERS_BEFORE_RESTART ||
+        ageMs >= MAX_AGE_MS_BEFORE_RESTART
+    ) {
+        closeBrowser().catch(() => { });
+    }
+}
+
+/**
  * Gracefully close the persistent browser (call on process shutdown).
  */
 async function closeBrowser() {
@@ -103,6 +127,8 @@ async function closeBrowser() {
         _browserInstance = null;
         _browserLaunchPromise = null;
     }
+    _renderCount = 0;
+    _browserLaunchedAt = 0;
 }
 
 process.on("SIGTERM", closeBrowser);
@@ -111,4 +137,5 @@ process.on("SIGINT", closeBrowser);
 module.exports = {
     getBrowser,
     closeBrowser,
+    recordRender,
 };

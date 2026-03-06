@@ -15,8 +15,9 @@ const create = asyncHandler(async (req, res) => {
 
     if (req.files) {
         try {
+            const bucketClient = bucketService.getBucketForRequest(req);
             const uploadOne = async (file) => {
-                const result = await bucketService.uploadFile(file, { prefix: "site-surveys", acl: "private" });
+                const result = await bucketService.uploadFile(file, { prefix: "site-surveys", acl: "private" }, bucketClient);
                 return result.path;
             };
             if (req.files.building_front_photo && req.files.building_front_photo[0]) {
@@ -124,7 +125,8 @@ const getDocumentUrl = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Invalid path for site survey documents", 400);
     }
     try {
-        const url = await bucketService.getSignedUrl(key, 3600);
+        const bucketClient = bucketService.getBucketForRequest(req);
+        const url = await bucketService.getSignedUrl(key, 3600, bucketClient);
         return responseHandler.sendSuccess(
             res,
             { url, expires_in: 3600 },

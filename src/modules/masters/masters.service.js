@@ -7,12 +7,14 @@ const { getTenantModels } = require('../tenant/tenantModels.js');
 
 /**
  * Helper function to get model by name (tenant-aware).
- * Uses getTenantModels() so queries hit tenant DB when registry is configured.
+ * Uses getTenantModels(req) so queries hit tenant DB when registry is configured.
+ * Pass req when called from HTTP handlers to avoid AsyncLocalStorage context loss.
  * @param {string} model - Model name (e.g., "company.model")
+ * @param {import("express").Request} [req] - Optional request (use for tenant context; avoids "Tenant context required" in shared mode)
  * @returns {Object} - Sequelize Model
  */
-const getModelByName = (model) => {
-    const models = getTenantModels();
+const getModelByName = (model, req) => {
+    const models = getTenantModels(req);
     const raw = String(model || "").replace(/\.model$/i, "").trim();
     const normalize = (s) => String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 
@@ -112,12 +114,12 @@ const buildDateCond = (fieldName, value, op = 'equals', valueTo = null) => {
  * @param {Object} [params.filters] - query params for column filters (field names, field_op, field_to)
  * @returns {Object} - { fields, data, meta }
  */
-const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = null, visibility = null, filters = null } = {}) => {
+const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = null, visibility = null, filters = null } = {}, req) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
 
     // Get master configuration from masters.json
     const mastersConfig = require('../../common/utils/masters.json');
@@ -259,7 +261,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
                     } else {
                         // Resolve text to ID(s) via related model display field (e.g. product_type name)
                         try {
-                            const RefModel = getModelByName(field.reference.model);
+                            const RefModel = getModelByName(field.reference.model, req);
                             const displayConfig = modelDisplayFields[field.reference.model] || {};
                             const displayField = displayConfig.displayField || 'name';
                             const refAttributes = RefModel.rawAttributes || {};
@@ -321,7 +323,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
     const includes = [];
     fields.forEach((field) => {
         if (field.reference && !field.isMultiSelect) {
-            const RefModel = getModelByName(field.reference.model);
+            const RefModel = getModelByName(field.reference.model, req);
             if (RefModel) {
                 // Get display field configuration
                 const displayConfig = modelDisplayFields[field.reference.model] || {};
@@ -367,7 +369,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
 
         // Handle multiselect references (BelongsToMany)
         if (field.reference && field.isMultiSelect) {
-            const RefModel = getModelByName(field.reference.model);
+            const RefModel = getModelByName(field.reference.model, req);
             if (RefModel && Model.associations) {
                 const displayConfig = modelDisplayFields[field.reference.model] || {};
                 const displayField = displayConfig.displayField || 'name';
@@ -439,7 +441,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
 
                 // Check if there's a defined association
                 if (Model.associations) {
-                    const RefModel = getModelByName(field.reference.model);
+                    const RefModel = getModelByName(field.reference.model, req);
                     const association = Object.values(Model.associations).find(
                         assoc => assoc.target === RefModel && assoc.associationType === 'BelongsTo'
                     );
@@ -463,7 +465,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
             // Build display for multiselect (BelongsToMany) fields
             if (field.reference && field.isMultiSelect) {
                 let refKey = null;
-                const RefModel = getModelByName(field.reference.model);
+                const RefModel = getModelByName(field.reference.model, req);
                 if (Model.associations && RefModel) {
                     const association = Object.values(Model.associations).find(
                         assoc => assoc.target === RefModel && assoc.associationType === 'BelongsToMany'
@@ -505,12 +507,12 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
  * @param {Object} params - { model, id }
  * @returns {boolean}
  */
-const deleteMaster = async ({ model, id } = {}) => {
+const deleteMaster = async ({ model, id } = {}, req) => {
     if (!model || !id) {
         throw new AppError('Model name and id are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
     const record = await Model.findOne({ where: { id, deleted_at: null } });
     if (!record) {
         throw new AppError('Record not found', RESPONSE_STATUS_CODES.NOT_FOUND);
@@ -535,12 +537,12 @@ const deleteMaster = async ({ model, id } = {}) => {
  * @param {Object} params - { model, payload, userId } - userId kept for backwards compatibility; audit fields auto-set from request context
  * @returns {Object} - Created record
  */
-const createMaster = async ({ model, payload, userId } = {}) => {
+const createMaster = async ({ model, payload, userId } = {}, req) => {
     if (!model || !payload) {
         throw new AppError('Model name and payload are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
     const modelAttributes = Model.rawAttributes || {};
 
     // Load multiselect config for this model
@@ -613,7 +615,7 @@ const createMaster = async ({ model, payload, userId } = {}) => {
     if (Array.isArray(multiSelectConfigs) && multiSelectConfigs.length > 0 && Model.associations) {
         for (const cfg of multiSelectConfigs) {
             if (!cfg || !cfg.name || !cfg.reference_model) continue;
-            const RefModel = getModelByName(cfg.reference_model);
+            const RefModel = getModelByName(cfg.reference_model, req);
             if (!RefModel) continue;
 
             const association = Object.values(Model.associations).find(
@@ -637,12 +639,12 @@ const createMaster = async ({ model, payload, userId } = {}) => {
  * @param {Object} params - { model, id }
  * @returns {Object} - Record
  */
-const getMasterById = async ({ model, id } = {}) => {
+const getMasterById = async ({ model, id } = {}, req) => {
     if (!model || !id) {
         throw new AppError('Model name and id are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
 
     // Load multiselect config for this model (to include associations)
     const mastersConfig = require('../../common/utils/masters.json');
@@ -654,7 +656,7 @@ const getMasterById = async ({ model, id } = {}) => {
     if (Array.isArray(multiSelectConfigs) && multiSelectConfigs.length > 0 && Model.associations) {
         for (const cfg of multiSelectConfigs) {
             if (!cfg || !cfg.reference_model) continue;
-            const RefModel = getModelByName(cfg.reference_model);
+            const RefModel = getModelByName(cfg.reference_model, req);
             if (!RefModel) continue;
             const association = Object.values(Model.associations).find(
                 assoc => assoc.target === RefModel && assoc.associationType === 'BelongsToMany'
@@ -684,7 +686,7 @@ const getMasterById = async ({ model, id } = {}) => {
     if (Array.isArray(multiSelectConfigs) && multiSelectConfigs.length > 0 && Model.associations) {
         for (const cfg of multiSelectConfigs) {
             if (!cfg || !cfg.name || !cfg.reference_model) continue;
-            const RefModel = getModelByName(cfg.reference_model);
+            const RefModel = getModelByName(cfg.reference_model, req);
             if (!RefModel) continue;
             const association = Object.values(Model.associations).find(
                 assoc => assoc.target === RefModel && assoc.associationType === 'BelongsToMany'
@@ -703,14 +705,15 @@ const getMasterById = async ({ model, id } = {}) => {
  * @param {Object} params - { model, id, updates, userId }
  * @returns {Object} - Updated record
  */
-const updateMaster = async ({ model, id, updates, userId } = {}) => {
+const updateMaster = async ({ model, id, updates, userId } = {}, req) => {
     if (!model || !id || !updates) {
         throw new AppError('Model name, id, and updates are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
     const modelAttributes = Model.rawAttributes || {};
     delete updates.created_by; // never allow updating created_by
+    delete updates.updated_by; // audit field; set by model hook from request context
 
     // Load multiselect config for this model
     const mastersConfig = require('../../common/utils/masters.json');
@@ -803,7 +806,7 @@ const updateMaster = async ({ model, id, updates, userId } = {}) => {
     if (Array.isArray(multiSelectConfigs) && multiSelectConfigs.length > 0 && Model.associations) {
         for (const cfg of multiSelectConfigs) {
             if (!cfg || !cfg.name || !cfg.reference_model) continue;
-            const RefModel = getModelByName(cfg.reference_model);
+            const RefModel = getModelByName(cfg.reference_model, req);
             if (!RefModel) continue;
 
             const association = Object.values(Model.associations).find(
@@ -829,12 +832,12 @@ const updateMaster = async ({ model, id, updates, userId } = {}) => {
  * @param {Object} params - { model, status, q, limit, id } - status optional; q search term (optional); limit max results (optional, default 20 when q present); id optional single id to fetch one option
  * @returns {Array} - Array of { id, label, value, ... } objects
  */
-const getReferenceOptions = async ({ model, status, status_in, q = null, limit = null, id: idParam = null } = {}) => {
+const getReferenceOptions = async ({ model, status, status_in, q = null, limit = null, id: idParam = null } = {}, req) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
 
     // Get display field configuration from config file or model static property
     const modelNameForConfig = model.replace(/\.model$/i, '');
@@ -972,8 +975,8 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
  * Get the default state
  * @returns {Object|null} - Default state or null if none exists
  */
-const getDefaultState = async () => {
-    const State = getModelByName('state.model');
+const getDefaultState = async (req) => {
+    const State = getModelByName('state.model', req);
     
     const defaultState = await State.findOne({
         where: { deleted_at: null, is_default: true },
@@ -986,8 +989,8 @@ const getDefaultState = async () => {
  * Get the default branch (company_branch where is_default is true)
  * @returns {Object|null} - Default branch or null if none exists
  */
-const getDefaultBranch = async () => {
-    const CompanyBranch = getModelByName('company_branch.model');
+const getDefaultBranch = async (req) => {
+    const CompanyBranch = getModelByName('company_branch.model', req);
     
     const defaultBranch = await CompanyBranch.findOne({
         where: { deleted_at: null, is_default: true },
@@ -1029,11 +1032,11 @@ function formatFieldLabel(fieldName, isReference = false) {
  * Uses display labels matching the listing (e.g., "State" instead of "state_id")
  * Skips file upload fields and internal fields
  */
-const generateSampleCsv = async ({ model } = {}) => {
+const generateSampleCsv = async ({ model } = {}, req) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
     const mastersConfig = require('../../common/utils/masters.json');
     const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
     const fileUploadFields = masterConfig.file_upload_fields || [];
@@ -1149,13 +1152,13 @@ function parseCsvBasic(csvText) {
  * @param {string} displayValue - The display value (e.g., state name)
  * @returns {Promise<{id: number|null, error: string|null}>} - The ID and any error
  */
-async function resolveReferenceValue(reference, displayValue) {
+async function resolveReferenceValue(reference, displayValue, req) {
     if (!reference || !displayValue || displayValue.trim() === '') {
         return { id: null, error: null };
     }
 
     try {
-        const RefModel = getModelByName(reference.model);
+        const RefModel = getModelByName(reference.model, req);
         const displayField = reference.displayField || 'name';
         const searchValue = displayValue.trim();
         
@@ -1216,11 +1219,11 @@ async function resolveReferenceValue(reference, displayValue) {
  * Maps display headers back to field names and resolves reference fields by name.
  * Validates CSV headers match expected fields for the model.
  */
-const bulkUploadFromCsv = async ({ model, csvText, filename } = {}) => {
+const bulkUploadFromCsv = async ({ model, csvText, filename } = {}, req) => {
     if (!model || !csvText) {
         throw new AppError('Model and csvText are required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
-    const Model = getModelByName(model);
+    const Model = getModelByName(model, req);
     const mastersConfig = require('../../common/utils/masters.json');
     const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
     const fileUploadFields = masterConfig.file_upload_fields || [];
@@ -1386,7 +1389,7 @@ const bulkUploadFromCsv = async ({ model, csvText, filename } = {}) => {
 
             // Resolve reference fields by name
             if (isReference && reference && val && val.trim() !== '') {
-                const { id: resolvedId, error: refError } = await resolveReferenceValue(reference, val);
+                const { id: resolvedId, error: refError } = await resolveReferenceValue(reference, val, req);
                 if (refError) {
                     rowError = `${displayHeader}: ${refError}`;
                     break; // Stop processing this row
@@ -1454,7 +1457,7 @@ const bulkUploadFromCsv = async ({ model, csvText, filename } = {}) => {
         }
 
         try {
-            const created = await createMaster({ model, payload });
+            const created = await createMaster({ model, payload }, req);
             const resultEntry = {
                 row: idx + 2,
                 status: 'inserted',

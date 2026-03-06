@@ -118,7 +118,8 @@ const create = asyncHandler(async (req, res) => {
   // Handle file uploads if any (failure = no commit, professional error to client)
   if (req.files && req.files.length > 0) {
     try {
-      const uploadedFiles = await bucketService.uploadMultipleFiles(req.files, { prefix: "purchase-orders", acl: "private" });
+      const bucketClient = bucketService.getBucketForRequest(req);
+      const uploadedFiles = await bucketService.uploadMultipleFiles(req.files, { prefix: "purchase-orders", acl: "private" }, bucketClient);
       attachments = uploadedFiles;
     } catch (error) {
       console.error("Error uploading files:", error);
@@ -185,7 +186,8 @@ const update = asyncHandler(async (req, res) => {
   // Handle new file uploads if any (failure = no commit, professional error to client)
   if (req.files && req.files.length > 0) {
     try {
-      const uploadedFiles = await bucketService.uploadMultipleFiles(req.files, { prefix: "purchase-orders", acl: "private" });
+      const bucketClient = bucketService.getBucketForRequest(req);
+      const uploadedFiles = await bucketService.uploadMultipleFiles(req.files, { prefix: "purchase-orders", acl: "private" }, bucketClient);
       
       // Get existing attachments
       const existingPO = await purchaseOrderService.getPurchaseOrderById({ id });
@@ -226,7 +228,8 @@ const remove = asyncHandler(async (req, res) => {
     const filePaths = po.attachments.map(att => att.path).filter(Boolean);
     if (filePaths.length > 0) {
       try {
-        await bucketService.deleteMultipleFiles(filePaths);
+        const bucketClient = bucketService.getBucketForRequest(req);
+        await bucketService.deleteMultipleFilesWithClient(bucketClient, filePaths);
       } catch (error) {
         console.error("Error deleting attachments:", error);
         throw new AppError(FILE_UPLOAD_UNAVAILABLE_MESSAGE, 503);
@@ -262,7 +265,8 @@ const deleteAttachment = asyncHandler(async (req, res) => {
   // Delete file from bucket (failure = no commit, professional error to client)
   if (attachment.path) {
     try {
-      await bucketService.deleteFile(attachment.path);
+      const bucketClient = bucketService.getBucketForRequest(req);
+      await bucketService.deleteFileWithClient(bucketClient, attachment.path);
     } catch (error) {
       console.error("Error deleting file from bucket:", error);
       throw new AppError(FILE_UPLOAD_UNAVAILABLE_MESSAGE, 503);
@@ -303,8 +307,8 @@ const getAttachmentUrl = asyncHandler(async (req, res) => {
   // Generate signed URL (token-based access for private files)
   if (attachment.path) {
     try {
-      // Generate signed URL valid for 1 hour (3600 seconds)
-      const signedUrl = await bucketService.getSignedUrl(attachment.path, 3600);
+      const bucketClient = bucketService.getBucketForRequest(req);
+      const signedUrl = await bucketService.getSignedUrl(attachment.path, 3600, bucketClient);
       return responseHandler.sendSuccess(res, { 
         url: signedUrl,
         filename: attachment.filename,

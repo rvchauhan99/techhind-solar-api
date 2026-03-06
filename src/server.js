@@ -19,7 +19,10 @@ const {
   initializeRegistryConnection,
   isRegistryAvailable,
 } = require("./config/registryDb.js");
-const { closeAllPools } = require("./modules/tenant/dbPoolManager.js");
+const dbPoolManager = require("./modules/tenant/dbPoolManager.js");
+const { closeAllPools } = dbPoolManager;
+const bucketClientFactory = require("./modules/tenant/bucketClientFactory.js");
+const tenantRegistryService = require("./modules/tenant/tenantRegistry.service.js");
 const { requestContextMiddleware } = require("./common/utils/requestContext.js");
 const { setIO } = require("./config/socketInstance.js");
 
@@ -185,7 +188,7 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
         const sequelize = getRegistrySequelize();
         const { QueryTypes } = require("sequelize");
         const rows = await sequelize.query(
-          "SELECT tenant_key, mode, status FROM tenants ORDER BY tenant_key",
+          "SELECT id, tenant_key, mode, status FROM tenants WHERE status = 'active' ORDER BY tenant_key",
           { type: QueryTypes.SELECT }
         );
         const list = Array.isArray(rows) ? rows : [rows];
@@ -193,9 +196,29 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
           tenantLogLines.push("   Tenants  : (none in registry)");
         } else {
           tenantLogLines.push(`   Tenants  : ${list.length} active in registry`);
-          list.forEach((t) => {
+          for (const t of list) {
             tenantLogLines.push(`      - \x1b[36m${t.tenant_key ?? "—"}\x1b[0m (${t.mode ?? "—"}, ${t.status ?? "—"})`);
-          });
+            if (NODE_ENV === "development" || NODE_ENV === "test") {
+              try {
+                const config = await tenantRegistryService.getTenantById(t.id);
+                if (config) {
+                  const pool = await dbPoolManager.getPool(t.id, config);
+                  await pool.authenticate();
+                  const dbCfg = pool.config;
+                  tenantLogLines.push(`         💾 DB    : \x1b[34mconnected\x1b[0m \x1b[90m(${dbCfg?.database ?? "—"} @ ${dbCfg?.host ?? "—"})\x1b[0m`);
+                  try {
+                    const { bucketName } = await bucketClientFactory.getBucketClient(t.id, config);
+                    tenantLogLines.push(`         📦 Bucket: \x1b[34mconnected\x1b[0m \x1b[90m[${bucketName}]\x1b[0m`);
+                  } catch (bErr) {
+                    tenantLogLines.push(`         📦 Bucket: \x1b[33mfailed\x1b[0m \x1b[90m(${bErr?.message ?? "—"})\x1b[0m`);
+                  }
+                }
+              } catch (err) {
+                tenantLogLines.push(`         💾 DB    : \x1b[33mfailed\x1b[0m \x1b[90m(${err?.message ?? "—"})\x1b[0m`);
+                tenantLogLines.push(`         📦 Bucket: \x1b[33mskipped\x1b[0m (no config)`);
+              }
+            }
+          }
         }
       } catch (err) {
         tenantLogLines.push(`   Tenants  : \x1b[33mRegistry query failed: ${err.message}\x1b[0m`);
@@ -206,6 +229,16 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
       process.exit(1);
     } else {
       tenantLogLines.push(`   Tenant   : \x1b[36mdedicated\x1b[0m${dedicatedId ? ` (id: ${dedicatedId})` : ""}`);
+      if (NODE_ENV === "development" || NODE_ENV === "test") {
+        tenantLogLines.push(`      💾 DB    : \x1b[34mconnected\x1b[0m \x1b[90m(${database} @ ${host})\x1b[0m`);
+        try {
+          const bucketService = require("./common/services/bucket.service.js");
+          const { bucketName } = bucketService.getClient();
+          tenantLogLines.push(`      📦 Bucket: \x1b[34mconnected\x1b[0m \x1b[90m[${bucketName}]\x1b[0m`);
+        } catch (bErr) {
+          tenantLogLines.push(`      📦 Bucket: \x1b[33m${bErr?.code === "BUCKET_CONFIG_MISSING" ? "not configured" : "failed"}\x1b[0m`);
+        }
+      }
     }
 
     const tenantBlock = tenantLogLines.join("\n");
