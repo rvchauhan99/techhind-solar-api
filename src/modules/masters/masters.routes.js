@@ -24,6 +24,7 @@ router.post('/create', ...requireAuthWithTenant, masters("create"), uploadMemory
 router.get('/sample-file', ...requireAuthWithTenant, masters("read"), controller.downloadSample);
 router.post('/upload', ...requireAuthWithTenant, masters("create"), uploadMemory.single('file'), controller.uploadData);
 router.get('/:id/file-url', ...requireAuthWithTenant, masters("read"), controller.getFileUrl);
+router.delete('/:id/file', ...requireAuthWithTenant, masters("update"), controller.removeFile);
 router.get('/:id', ...requireAuthWithTenant, masters("read"), controller.getById);
 router.put('/:id', ...requireAuthWithTenant, masters("update"), uploadMemory.single('file'), controller.update);
 router.delete('/:id', ...requireAuthWithTenant, masters("delete"), controller.remove);

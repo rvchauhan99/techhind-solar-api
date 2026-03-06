@@ -14,6 +14,7 @@ const listProjectPrices = async ({
   project_for_name = null,
   order_type_name = null,
   bill_of_material_name = null,
+  has_bom = null,
   project_capacity,
   project_capacity_op,
   project_capacity_to,
@@ -56,6 +57,9 @@ const listProjectPrices = async ({
   if (system_warranty) where.system_warranty = { [Op.iLike]: `%${system_warranty}%` };
   if (is_locked !== undefined && is_locked !== "" && is_locked !== null) {
     where.is_locked = is_locked === "true" || is_locked === true;
+  }
+  if (has_bom === true || has_bom === "true") {
+    where.bill_of_material_id = { [Op.ne]: null };
   }
 
   const stateInclude = {

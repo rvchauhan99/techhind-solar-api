@@ -242,22 +242,47 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
     // Apply column filters from request (field name, field_op, field_to)
     const skipFilterFields = ['id', 'password', 'page', 'limit', 'q', 'status', 'visibility', 'sortBy', 'sortOrder'];
     if (filters && typeof filters === 'object') {
-        fields.forEach((field) => {
-            if (skipFilterFields.includes(field.name) || field.isFileUpload || field.primaryKey) return;
+        for (const field of fields) {
+            if (skipFilterFields.includes(field.name) || field.isFileUpload || field.primaryKey) continue;
             const value = filters[field.name];
             const valueTo = filters[field.name + '_to'];
             const op = filters[field.name + '_op'] || '';
 
             const type = (field.type || 'STRING').toUpperCase();
             if (field.reference && !field.isMultiSelect) {
-                // BelongsTo: filter by FK id (exact match); only apply when value is numeric
+                // BelongsTo: filter by FK id (exact match) or by related model display name (text search)
                 if (value !== '' && value != null && value !== undefined) {
-                    const idNum = Number(value);
-                    if (!Number.isNaN(idNum)) {
+                    const strVal = String(value).trim();
+                    const idNum = Number(strVal);
+                    if (!Number.isNaN(idNum) && String(idNum) === strVal) {
                         where[field.name] = idNum;
+                    } else {
+                        // Resolve text to ID(s) via related model display field (e.g. product_type name)
+                        try {
+                            const RefModel = getModelByName(field.reference.model);
+                            const displayConfig = modelDisplayFields[field.reference.model] || {};
+                            const displayField = displayConfig.displayField || 'name';
+                            const refAttributes = RefModel.rawAttributes || {};
+                            if (refAttributes[displayField]) {
+                                const refRows = await RefModel.findAll({
+                                    where: { [displayField]: { [Op.iLike]: `%${strVal}%` } },
+                                    attributes: ['id'],
+                                    paranoid: false,
+                                });
+                                const ids = refRows.map((r) => r.id);
+                                if (ids.length === 1) {
+                                    where[field.name] = ids[0];
+                                } else if (ids.length > 1) {
+                                    where[Op.and] = where[Op.and] || [];
+                                    where[Op.and].push({ [field.name]: { [Op.in]: ids } });
+                                }
+                            }
+                        } catch (err) {
+                            console.warn('Reference filter resolve failed for', field.name, err.message);
+                        }
                     }
                 }
-                return;
+                continue;
             }
             if (type === 'BOOLEAN') {
                 if (value === 'true' || value === true) {
@@ -265,7 +290,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
                 } else if (value === 'false' || value === false) {
                     where[field.name] = false;
                 }
-                return;
+                continue;
             }
             if (['INTEGER', 'BIGINT', 'DECIMAL', 'FLOAT', 'DOUBLE', 'NUMERIC'].includes(type)) {
                 const cond = buildNumberCond(field.name, value, op, valueTo);
@@ -273,7 +298,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
                     where[Op.and] = where[Op.and] || [];
                     where[Op.and].push(cond);
                 }
-                return;
+                continue;
             }
             if (['DATE', 'DATEONLY', 'TIMESTAMP'].includes(type)) {
                 const cond = buildDateCond(field.name, value, op, valueTo);
@@ -281,7 +306,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
                     where[Op.and] = where[Op.and] || [];
                     where[Op.and].push(cond);
                 }
-                return;
+                continue;
             }
             // STRING, TEXT, and reference display (treated as text)
             const cond = buildStringCond(field.name, value, op || 'contains');
@@ -289,7 +314,7 @@ const getMasterList = async ({ model, page = 1, limit = 20, q = null, status = n
                 where[Op.and] = where[Op.and] || [];
                 where[Op.and].push(cond);
             }
-        });
+        }
     }
 
     // Build includes for reference fields (foreign keys)

@@ -6,6 +6,7 @@ const { Op } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const { buildBomSnapshotFromProjectPrice } = require("../../common/utils/bomFromProjectPrice.js");
 const notificationService = require("../notification/notification.service.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
@@ -860,6 +861,7 @@ const getOrderById = async ({ id } = {}) => {
         solar_panel_id: row.solar_panel_id,
         inverter_id: row.inverter_id,
         project_phase_id: row.project_phase_id,
+        project_price_id: row.project_price_id,
         order_remarks: row.order_remarks,
         bom_snapshot: normalizeOrderBomSnapshot(row.bom_snapshot),
         // Related data
@@ -1076,7 +1078,7 @@ const createOrder = async ({ payload, transaction } = {}) => {
         if (payload.quotation_id) {
             const quotation = await Quotation.findOne({
                 where: { id: payload.quotation_id, deleted_at: null },
-                attributes: ["id", "bom_snapshot", "inquiry_id"],
+                attributes: ["id", "bom_snapshot", "inquiry_id", "project_price_id"],
                 transaction: t,
             });
             quotationForStatus = quotation;
@@ -1152,6 +1154,7 @@ const createOrder = async ({ payload, transaction } = {}) => {
             solar_panel_id,
             inverter_id,
             project_phase_id: payload.project_phase_id || null,
+            project_price_id: quotationForStatus?.project_price_id ?? payload.project_price_id ?? null,
             bom_snapshot,
         };
 
@@ -1232,6 +1235,20 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
 
         if (!order) throw new Error("Order not found");
 
+        // When Planner sends project_price_id and order has no BOM, build BOM from project and set on order
+        let bomSnapshotFromProject = null;
+        let derivedSolarPanelId = null;
+        let derivedInverterId = null;
+        if (payload.project_price_id != null && (!order.bom_snapshot || order.bom_snapshot.length === 0)) {
+            const built = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t, models);
+            if (built && built.length > 0) {
+                bomSnapshotFromProject = normalizeOrderBomSnapshot(built);
+                const derived = derivePanelAndInverterFromBomSnapshot(built);
+                derivedSolarPanelId = derived.solar_panel_id;
+                derivedInverterId = derived.inverter_id;
+            }
+        }
+
         const previousStatus = order.status;
         const previousPlannedWarehouseId = order.planned_warehouse_id;
         const previousFabricatorId = order.fabricator_id;
@@ -1254,6 +1271,19 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 const existingLog = Array.isArray(order.planner_activity_log) ? order.planner_activity_log : [];
                 plannerActivityLogUpdate = [...existingLog, ...activityEntries];
             }
+        }
+        if (bomSnapshotFromProject && bomSnapshotFromProject.length > 0) {
+            const existingLog = Array.isArray(order.planner_activity_log) ? order.planner_activity_log : [];
+            plannerActivityLogUpdate = [
+                ...existingLog,
+                {
+                    action: "bom_imported_from_project",
+                    at: new Date().toISOString(),
+                    user_id: user?.id ?? null,
+                    user_name: user?.name ?? null,
+                    project_price_id: payload.project_price_id,
+                },
+            ];
         }
 
         // Auto-transition order to completed when final stage is completed.
@@ -1335,15 +1365,18 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 geda_registration_date: payload.geda_registration_date ?? order.geda_registration_date,
                 payment_type: payload.payment_type ?? order.payment_type,
                 loan_type_id: payload.loan_type_id ?? order.loan_type_id,
-                solar_panel_id: payload.solar_panel_id ?? order.solar_panel_id,
-                inverter_id: payload.inverter_id ?? order.inverter_id,
+                solar_panel_id: payload.solar_panel_id ?? derivedSolarPanelId ?? order.solar_panel_id,
+                inverter_id: payload.inverter_id ?? derivedInverterId ?? order.inverter_id,
                 project_phase_id: payload.project_phase_id ?? order.project_phase_id,
+                project_price_id: payload.project_price_id ?? order.project_price_id,
                 order_remarks: payload.order_remarks ?? order.order_remarks,
 
-                // Allow updating normalized bom_snapshot from planner / other stages
-                bom_snapshot: payload.bom_snapshot
-                    ? normalizeOrderBomSnapshot(payload.bom_snapshot)
-                    : order.bom_snapshot,
+                // Allow updating normalized bom_snapshot from planner / other stages; or use BOM built from project when selected
+                bom_snapshot: bomSnapshotFromProject && bomSnapshotFromProject.length > 0
+                    ? bomSnapshotFromProject
+                    : payload.bom_snapshot
+                        ? normalizeOrderBomSnapshot(payload.bom_snapshot)
+                        : order.bom_snapshot,
 
                 // Pipeline fields
                 stages: payload.stages ?? order.stages,

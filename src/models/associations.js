@@ -534,6 +534,10 @@ module.exports = (db) => {
     Order.belongsTo(ProjectPhase, { foreignKey: "project_phase_id", as: "projectPhase" });
     ProjectPhase.hasMany(Order, { foreignKey: "project_phase_id", as: "orders" });
   }
+  if (Order && ProjectPrice) {
+    Order.belongsTo(ProjectPrice, { foreignKey: "project_price_id", as: "projectPrice" });
+    ProjectPrice.hasMany(Order, { foreignKey: "project_price_id", as: "orders" });
+  }
 
   if (Order && CompanyWarehouse) {
     Order.belongsTo(CompanyWarehouse, { foreignKey: "planned_warehouse_id", as: "plannedWarehouse" });
