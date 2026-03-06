@@ -47,13 +47,14 @@ const list = asyncHandler(async (req, res) => {
         reference_from,
         order_date_from,
         order_date_to,
+        current_stage_key,
     } = req.query;
     const { enforcedHandledByIds } = await resolveClosedOrderVisibilityContext(req);
     const result = await orderService.listOrders({
         page: parseInt(page),
         limit: parseInt(limit),
         search: q,
-        status: "completed", // Fixed filter for closed orders
+        status: "all", // closed-orders: show by current_stage_key only (order_completed), do not filter by status
         sortBy,
         sortOrder,
         customer_name,
@@ -66,6 +67,7 @@ const list = asyncHandler(async (req, res) => {
         reference_from,
         order_date_from,
         order_date_to,
+        current_stage_key: current_stage_key || "order_completed",
         enforced_handled_by_ids: enforcedHandledByIds,
     });
     return responseHandler.sendSuccess(res, result, "Closed order list fetched", 200);
