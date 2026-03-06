@@ -14,10 +14,11 @@ const createInquiryDocument = asyncHandler(async (req, res) => {
 
   if (req.file) {
     try {
+      const bucketClient = bucketService.getBucketForRequest(req);
       const result = await bucketService.uploadFile(req.file, {
         prefix: "inquiry-documents",
         acl: "private",
-      });
+      }, bucketClient);
       payload.document_path = result.path;
     } catch (error) {
       console.error("Error uploading document to bucket:", error);
@@ -34,10 +35,11 @@ const updateInquiryDocument = asyncHandler(async (req, res) => {
   const updates = { ...req.body };
 
   if (req.file) {
+    const bucketClient = bucketService.getBucketForRequest(req);
     const existing = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction, req);
     if (existing && existing.document_path && !existing.document_path.startsWith("/")) {
       try {
-        await bucketService.deleteFile(existing.document_path);
+        await bucketService.deleteFileWithClient(bucketClient, existing.document_path);
       } catch (error) {
         console.error("Error deleting old document from bucket:", error);
       }
@@ -46,7 +48,7 @@ const updateInquiryDocument = asyncHandler(async (req, res) => {
       const result = await bucketService.uploadFile(req.file, {
         prefix: "inquiry-documents",
         acl: "private",
-      });
+      }, bucketClient);
       updates.document_path = result.path;
     } catch (error) {
       console.error("Error uploading document to bucket:", error);
@@ -64,7 +66,8 @@ const deleteInquiryDocument = asyncHandler(async (req, res) => {
   const document = await inquiryDocumentsService.getInquiryDocumentById(id, req.transaction, req);
   if (document && document.document_path && !document.document_path.startsWith("/")) {
     try {
-      await bucketService.deleteFile(document.document_path);
+      const bucketClient = bucketService.getBucketForRequest(req);
+      await bucketService.deleteFileWithClient(bucketClient, document.document_path);
     } catch (error) {
       console.error("Error deleting document from bucket:", error);
       throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
@@ -94,7 +97,8 @@ const getDocumentUrl = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, "Legacy document; use static URL", 400);
   }
   try {
-    const url = await bucketService.getSignedUrl(document.document_path, 3600);
+    const bucketClient = bucketService.getBucketForRequest(req);
+    const url = await bucketService.getSignedUrl(document.document_path, 3600, bucketClient);
     return responseHandler.sendSuccess(
       res,
       { url, filename: document.doc_type || "document", expires_in: 3600 },

@@ -25,11 +25,12 @@ const create = asyncHandler(async (req, res) => {
     const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
     const fileUploadFields = masterConfig.file_upload_fields || [];
     const fieldName = fileUploadFields.length > 0 ? fileUploadFields[0] : 'file_path';
+    const bucketClient = bucketService.getBucketForRequest(req);
     try {
       const result = await bucketService.uploadFile(req.file, {
         prefix: `masters/${model}`,
         acl: 'private',
-      });
+      }, bucketClient);
       payload[fieldName] = result.path;
     } catch (error) {
       console.error('Error uploading file to bucket:', error);
@@ -41,7 +42,7 @@ const create = asyncHandler(async (req, res) => {
     model,
     payload,
     userId: req.user?.id,
-  });
+  }, req);
   return responseHandler.sendSuccess(res, created, 'Record created', 201);
 });
 
@@ -59,7 +60,7 @@ const list = asyncHandler(async (req, res) => {
     status: query.status || null,
     visibility: visibilityVal,
     filters: query,
-  });
+  }, req);
   return responseHandler.sendSuccess(res, result, 'Master list fetched', 200);
 });
 
@@ -69,7 +70,7 @@ const getById = asyncHandler(async (req, res) => {
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
-  const item = await masterService.getMasterById({ model, id });
+  const item = await masterService.getMasterById({ model, id }, req);
   return responseHandler.sendSuccess(res, item, 'Record fetched', 200);
 });
 
@@ -86,10 +87,11 @@ const update = asyncHandler(async (req, res) => {
     const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
     const fileUploadFields = masterConfig.file_upload_fields || [];
     const fieldName = fileUploadFields.length > 0 ? fileUploadFields[0] : 'file_path';
-    const existing = await masterService.getMasterById({ model, id });
+    const bucketClient = bucketService.getBucketForRequest(req);
+    const existing = await masterService.getMasterById({ model, id }, req);
     if (existing && existing[fieldName] && !existing[fieldName].startsWith('/')) {
       try {
-        await bucketService.deleteFile(existing[fieldName]);
+        await bucketService.deleteFileWithClient(bucketClient, existing[fieldName]);
       } catch (err) {
         console.error('Error deleting old file from bucket:', err);
       }
@@ -98,7 +100,7 @@ const update = asyncHandler(async (req, res) => {
       const result = await bucketService.uploadFile(req.file, {
         prefix: `masters/${model}`,
         acl: 'private',
-      });
+      }, bucketClient);
       updates[fieldName] = result.path;
     } catch (error) {
       console.error('Error uploading file to bucket:', error);
@@ -111,7 +113,7 @@ const update = asyncHandler(async (req, res) => {
     id,
     updates,
     userId: req.user?.id,
-  });
+  }, req);
   return responseHandler.sendSuccess(res, updated, 'Record updated', 200);
 });
 
@@ -132,17 +134,18 @@ const remove = asyncHandler(async (req, res) => {
   const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
   const fileUploadFields = masterConfig.file_upload_fields || [];
   const fieldName = fileUploadFields.length > 0 ? fileUploadFields[0] : 'file_path';
-  const existing = await masterService.getMasterById({ model, id: recordId });
+  const bucketClient = bucketService.getBucketForRequest(req);
+  const existing = await masterService.getMasterById({ model, id: recordId }, req);
   if (existing && existing[fieldName] && !existing[fieldName].startsWith('/')) {
     try {
-      await bucketService.deleteFile(existing[fieldName]);
+      await bucketService.deleteFileWithClient(bucketClient, existing[fieldName]);
     } catch (error) {
       console.error('Error deleting file from bucket:', error);
       throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
     }
   }
 
-  await masterService.deleteMaster({ model, id: recordId });
+  await masterService.deleteMaster({ model, id: recordId }, req);
   return responseHandler.sendSuccess(res, null, 'Record deleted', 200);
 });
 
@@ -158,7 +161,7 @@ const getReferenceOptions = asyncHandler(async (req, res) => {
     q: q || undefined,
     limit: limit != null && limit !== '' ? limit : undefined,
     id: id || undefined,
-  });
+  }, req);
   return responseHandler.sendSuccess(res, options, 'Reference options fetched', 200);
 });
 
@@ -173,12 +176,12 @@ const getAppConstants = asyncHandler(async (req, res) => {
 });
 
 const getDefaultState = asyncHandler(async (req, res) => {
-  const defaultState = await masterService.getDefaultState();
+  const defaultState = await masterService.getDefaultState(req);
   return responseHandler.sendSuccess(res, defaultState, 'Default state fetched', 200);
 });
 
 const getDefaultBranch = asyncHandler(async (req, res) => {
-  const defaultBranch = await masterService.getDefaultBranch();
+  const defaultBranch = await masterService.getDefaultBranch(req);
   return responseHandler.sendSuccess(res, defaultBranch, 'Default branch fetched', 200);
 });
 
@@ -187,7 +190,7 @@ const downloadSample = asyncHandler(async (req, res) => {
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
-  const { filename, csv } = await masterService.generateSampleCsv({ model });
+  const { filename, csv } = await masterService.generateSampleCsv({ model }, req);
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   return res.status(200).send(csv);
@@ -235,7 +238,7 @@ const uploadData = asyncHandler(async (req, res) => {
   
   const csvText = req.file.buffer ? req.file.buffer.toString('utf-8') : '';
   try {
-    const result = await masterService.bulkUploadFromCsv({ model, csvText, filename });
+    const result = await masterService.bulkUploadFromCsv({ model, csvText, filename }, req);
 
     // Return result CSV file with summary
     if (result.resultCsv) {
@@ -263,7 +266,7 @@ const getFileUrl = asyncHandler(async (req, res) => {
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
-  const item = await masterService.getMasterById({ model, id });
+  const item = await masterService.getMasterById({ model, id }, req);
   if (!item) {
     return responseHandler.sendError(res, 'Record not found', 404);
   }
@@ -279,7 +282,8 @@ const getFileUrl = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, 'Legacy file; use static URL', 400);
   }
   try {
-    const url = await bucketService.getSignedUrl(pathOrKey, 3600);
+    const bucketClient = bucketService.getBucketForRequest(req);
+    const url = await bucketService.getSignedUrl(pathOrKey, 3600, bucketClient);
     return responseHandler.sendSuccess(
       res,
       { url, expires_in: 3600 },
@@ -313,7 +317,7 @@ const removeFile = asyncHandler(async (req, res) => {
   }
 
   const fieldName = field && fileUploadFields.includes(field) ? field : fileUploadFields[0];
-  const existing = await masterService.getMasterById({ model, id: recordId });
+  const existing = await masterService.getMasterById({ model, id: recordId }, req);
 
   const pathOrKey = existing?.[fieldName];
   if (!pathOrKey) {
@@ -323,7 +327,8 @@ const removeFile = asyncHandler(async (req, res) => {
 
   if (!String(pathOrKey).startsWith('/')) {
     try {
-      await bucketService.deleteFile(pathOrKey);
+      const bucketClient = bucketService.getBucketForRequest(req);
+      await bucketService.deleteFileWithClient(bucketClient, pathOrKey);
     } catch (error) {
       console.error('Error deleting file from bucket:', error);
       throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
@@ -335,7 +340,7 @@ const removeFile = asyncHandler(async (req, res) => {
     id: recordId,
     updates: { [fieldName]: null },
     userId: req.user?.id,
-  });
+  }, req);
 
   return responseHandler.sendSuccess(res, updated, 'File removed', 200);
 });

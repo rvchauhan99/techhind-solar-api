@@ -15,10 +15,11 @@ const orderPaymentsController = {
 
             if (req.file) {
                 try {
+                    const bucketClient = bucketService.getBucketForRequest(req);
                     const result = await bucketService.uploadFile(req.file, {
                         prefix: "order-payments",
                         acl: "private",
-                    });
+                    }, bucketClient);
                     payload.receipt_cheque_file = result.path;
                 } catch (error) {
                     console.error("Error uploading receipt to bucket:", error);
@@ -73,7 +74,8 @@ const orderPaymentsController = {
                     result: { url: payment.receipt_cheque_file, expires_in: null },
                 });
             }
-            const url = await bucketService.getSignedUrl(payment.receipt_cheque_file, 3600);
+            const bucketClient = bucketService.getBucketForRequest(req);
+            const url = await bucketService.getSignedUrl(payment.receipt_cheque_file, 3600, bucketClient);
             res.json({
                 success: true,
                 result: { url, expires_in: 3600 },
@@ -115,10 +117,11 @@ const orderPaymentsController = {
             const payload = { ...req.body };
 
             if (req.file) {
+                const bucketClient = bucketService.getBucketForRequest(req);
                 const existingPayment = await orderPaymentService.getPaymentById(id);
                 if (existingPayment && existingPayment.receipt_cheque_file && !existingPayment.receipt_cheque_file.startsWith("/")) {
                     try {
-                        await bucketService.deleteFile(existingPayment.receipt_cheque_file);
+                        await bucketService.deleteFileWithClient(bucketClient, existingPayment.receipt_cheque_file);
                     } catch (err) {
                         console.error("Error deleting old receipt from bucket:", err);
                     }
@@ -127,7 +130,7 @@ const orderPaymentsController = {
                     const result = await bucketService.uploadFile(req.file, {
                         prefix: "order-payments",
                         acl: "private",
-                    });
+                    }, bucketClient);
                     payload.receipt_cheque_file = result.path;
                 } catch (error) {
                     console.error("Error uploading receipt to bucket:", error);
@@ -151,7 +154,8 @@ const orderPaymentsController = {
             const payment = await orderPaymentService.getPaymentById(id);
             if (payment && payment.receipt_cheque_file && !payment.receipt_cheque_file.startsWith("/")) {
                 try {
-                    await bucketService.deleteFile(payment.receipt_cheque_file);
+                    const bucketClient = bucketService.getBucketForRequest(req);
+                    await bucketService.deleteFileWithClient(bucketClient, payment.receipt_cheque_file);
                 } catch (error) {
                     console.error("Error deleting receipt from bucket:", error);
                     throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);

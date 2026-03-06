@@ -7,6 +7,23 @@ const https = require("https");
 const http = require("http");
 const { URL } = require("url");
 
+const IS_DEV = process.env.NODE_ENV === "development";
+const H = {
+  bold: "\x1b[1m",
+  yellow: "\x1b[33m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  reset: "\x1b[0m",
+};
+
+function logBucketAction(action, bucketName, details = "") {
+  if (!IS_DEV) return;
+  const bucket = `${H.bold}${H.cyan}[${bucketName}]${H.reset}`;
+  const act = `${H.yellow}${action}${H.reset}`;
+  const msg = details ? ` ${details}` : "";
+  console.log(`${H.green}[BUCKET]${H.reset} ${act} ${bucket}${msg}`);
+}
+
 let s3Client = null;
 let bucketName = null;
 const MISSING_OBJECT_LOG_TTL_MS = 60 * 1000;
@@ -134,6 +151,7 @@ async function uploadFile(file, optionsOrPrefix, client) {
 
   try {
     await s3.upload(params).promise();
+    logBucketAction("UPLOAD", bucket, `key=${key} size=${size}`);
     return {
       path: key,
       filename: originalName,
@@ -151,11 +169,12 @@ async function uploadFile(file, optionsOrPrefix, client) {
  * Upload multiple files.
  * @param {object[]} files - Array of Multer/file-like objects
  * @param {string|object} optionsOrPrefix - prefix or options (same as uploadFile)
+ * @param {{ s3: object, bucketName: string }} [client] - Optional bucket client (tenant bucket)
  * @returns {Promise<Array<{ path, filename, size, mime_type, uploaded_at }>>}
  */
-async function uploadMultipleFiles(files, optionsOrPrefix) {
+async function uploadMultipleFiles(files, optionsOrPrefix, client) {
   if (!files || files.length === 0) return [];
-  const results = await Promise.all(files.map((file) => uploadFile(file, optionsOrPrefix)));
+  const results = await Promise.all(files.map((file) => uploadFile(file, optionsOrPrefix, client)));
   return results;
 }
 
@@ -226,7 +245,11 @@ function uploadFromUrl(url, optionsOrPrefix, client) {
           size: buffer.length,
         };
 
-        uploadFile(fileLike, optionsOrPrefix, client).then(resolve).catch(reject);
+        (() => {
+          const c = client || getClient();
+          logBucketAction("UPLOAD_FROM_URL", c.bucketName, `url=${urlStr.substring(0, 60)}... key=${fileLike.originalname}`);
+          return uploadFile(fileLike, optionsOrPrefix, client);
+        })().then(resolve).catch(reject);
       });
       res.on("error", (err) => reject(err));
     });
@@ -250,6 +273,7 @@ async function deleteFile(key) {
   const { s3, bucketName: bucket } = getClient();
   try {
     await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+    logBucketAction("DELETE", bucket, `key=${key}`);
     return true;
   } catch (error) {
     console.error("Error deleting file from bucket:", error);
@@ -268,6 +292,7 @@ async function deleteFileWithClient(client, key) {
   const { s3, bucketName: bucket } = client;
   try {
     await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+    logBucketAction("DELETE", bucket, `key=${key} (client)`);
     return true;
   } catch (error) {
     console.error("Error deleting file from bucket:", error);
@@ -283,6 +308,18 @@ async function deleteFileWithClient(client, key) {
 async function deleteMultipleFiles(keys) {
   if (!keys || keys.length === 0) return true;
   await Promise.all(keys.map((key) => deleteFile(key)));
+  return true;
+}
+
+/**
+ * Delete multiple objects by key using a specific client (for tenant-scoped bucket).
+ * @param {{ s3: object, bucketName: string }} client
+ * @param {string[]} keys - Object keys
+ * @returns {Promise<boolean>}
+ */
+async function deleteMultipleFilesWithClient(client, keys) {
+  if (!keys || keys.length === 0) return true;
+  await Promise.all(keys.map((key) => deleteFileWithClient(client, key)));
   return true;
 }
 
@@ -303,6 +340,7 @@ async function getSignedUrl(key, expiresIn = 3600, client) {
       Key: k,
       Expires: expiresIn,
     });
+    logBucketAction("SIGNED_URL", bucket, `key=${k} expires=${expiresIn}s`);
     return url;
   } catch (error) {
     console.error("Error generating signed URL:", error);
@@ -363,6 +401,7 @@ async function getObject(key) {
   const { s3, bucketName: bucket } = getClient();
   try {
     const result = await s3.getObject({ Bucket: bucket, Key: key }).promise();
+    logBucketAction("GET", bucket, `key=${key}`);
     return {
       body: result.Body,
       contentType: result.ContentType,
@@ -389,6 +428,7 @@ async function headObject(key) {
   if (!key) throw new Error("File path (key) is required");
   const { s3, bucketName: bucket } = getClient();
   const result = await s3.headObject({ Bucket: bucket, Key: key }).promise();
+  logBucketAction("HEAD", bucket, `key=${key}`);
   return result;
 }
 
@@ -402,6 +442,7 @@ async function headObjectWithClient(client, key) {
   if (!key) throw new Error("File path (key) is required");
   const { s3, bucketName: bucket } = client;
   const result = await s3.headObject({ Bucket: bucket, Key: key }).promise();
+  logBucketAction("HEAD", bucket, `key=${key} (client)`);
   return result;
 }
 
@@ -454,6 +495,7 @@ async function listObjects(options = {}) {
 
   const result = await s3.listObjectsV2(params).promise();
   const keys = (result.Contents || []).map((item) => item.Key);
+  logBucketAction("LIST", bucket, `prefix=${options.prefix || "(root)"} count=${keys.length}`);
   return {
     keys,
     continuationToken: result.IsTruncated ? result.NextContinuationToken : undefined,
@@ -479,6 +521,7 @@ async function copyObject(sourceKey, destKey, options = {}) {
   if (options.acl) params.ACL = options.acl;
   if (options.metadata) params.Metadata = options.metadata;
   const result = await s3.copyObject(params).promise();
+  logBucketAction("COPY", bucket, `${sourceKey} -> ${destKey}`);
   return result;
 }
 
@@ -503,6 +546,7 @@ async function getObjectWithClient(client, key) {
   const { s3, bucketName: bucket } = client;
   try {
     const result = await s3.getObject({ Bucket: bucket, Key: key }).promise();
+    logBucketAction("GET", bucket, `key=${key} (client)`);
     return {
       body: result.Body,
       contentType: result.ContentType,
@@ -532,6 +576,7 @@ module.exports = {
   deleteFile,
   deleteFileWithClient,
   deleteMultipleFiles,
+  deleteMultipleFilesWithClient,
   getSignedUrl,
   getPublicUrl,
   getObject,
