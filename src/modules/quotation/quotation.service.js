@@ -698,8 +698,15 @@ const buildBomSnapshotFromQuotationProducts = async (payload, transaction, model
     };
 
     const items = [];
+    const hasMulti = (field) => Array.isArray(payload?.[field]) && payload[field].length > 0;
+    const skipScalarProductKeys = new Set();
+    if (hasMulti("structure_items")) skipScalarProductKeys.add("structure_product");
+    if (hasMulti("cable_ac_items")) skipScalarProductKeys.add("cable_ac_product");
+    if (hasMulti("cable_dc_items")) skipScalarProductKeys.add("cable_dc_product");
+
     for (let i = 0; i < QUOTATION_PRODUCT_MAPPING.length; i++) {
         const m = QUOTATION_PRODUCT_MAPPING[i];
+        if (skipScalarProductKeys.has(m.productKey)) continue;
         const productId = payload[m.productKey];
         if (!productId) continue;
         const id = parseInt(productId, 10);
@@ -716,6 +723,28 @@ const buildBomSnapshotFromQuotationProducts = async (payload, transaction, model
             mapping: m,
         });
     }
+
+    const pushMultiItems = (field) => {
+        const list = Array.isArray(payload?.[field]) ? payload[field] : [];
+        for (const it of list) {
+            const id = parseInt(it?.product_id, 10);
+            if (Number.isNaN(id) || id <= 0) continue;
+            items.push({
+                product_id: id,
+                quantity: parseQty(it?.quantity, 1),
+                sort_order: items.length,
+                mapping: null,
+            });
+        }
+    };
+
+    pushMultiItems("cable_ac_items");
+    pushMultiItems("cable_dc_items");
+    pushMultiItems("cable_la_items");
+    pushMultiItems("cable_earthing_items");
+    pushMultiItems("accessories_items");
+    pushMultiItems("structure_items");
+
     if (items.length === 0) return null;
 
     const productIds = [...new Set(items.map((i) => i.product_id))];

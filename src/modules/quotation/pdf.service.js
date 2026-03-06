@@ -1032,6 +1032,13 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
     const hybridInverterMakeIds = [];
     const batteryMakeIds = [];
 
+    const structure_items = [];
+    const accessories_items = [];
+    const cables_ac_items = [];
+    const cables_dc_items = [];
+    const cables_la_items = [];
+    const cables_earthing_items = [];
+
     const capNum = (v) => (v != null && !Number.isNaN(parseFloat(v))) ? parseFloat(v) : 0;
     const qtyNum = (v) => (v != null && !Number.isNaN(parseFloat(v))) ? parseFloat(v) : 0;
     const str = (v) => (v != null && String(v).trim() !== "") ? String(v).trim() : "";
@@ -1070,24 +1077,67 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
         } else if (typeNorm === "structure") {
             structure.height = (qty != null && qty > 0) ? String(qty) : (structure.height || productName || "");
             if (productName && !structure.material) structure.material = productName;
+            structure_items.push({
+                product_name: productName,
+                quantity: qty,
+                measurement_unit_name: unit,
+                product_make_name: makeName,
+                product_make_id: makeId,
+            });
+        } else if (typeNorm === "accessories") {
+            accessories_items.push({
+                product_name: productName,
+                quantity: qty,
+                measurement_unit_name: unit,
+                product_make_name: makeName,
+                product_make_id: makeId,
+            });
         } else if (typeNorm === "ac_cable") {
             cables.ac_cable_make = makeName || cables.ac_cable_make;
             cables.ac_cable_qty = (qty > 0 ? String(qty) : cables.ac_cable_qty) || "";
             if (productName) cables.ac_cable_description = productName;
+            cables_ac_items.push({
+                product_name: productName,
+                quantity: qty,
+                measurement_unit_name: unit,
+                product_make_name: makeName,
+                product_make_id: makeId,
+            });
         } else if (typeNorm === "dc_cable") {
             cables.dc_cable_make = makeName || cables.dc_cable_make;
             cables.dc_cable_qty = (qty > 0 ? String(qty) : cables.dc_cable_qty) || "";
             if (productName) cables.dc_cable_description = productName;
+            cables_dc_items.push({
+                product_name: productName,
+                quantity: qty,
+                measurement_unit_name: unit,
+                product_make_name: makeName,
+                product_make_id: makeId,
+            });
         } else if (typeNorm === "earthing") {
             cables.earthing_make = makeName || cables.earthing_make;
             cables.earthing_qty = (qty > 0 ? String(qty) : cables.earthing_qty) || "";
             cables.earthing_description = productName || cables.earthing_description;
             if (productName && !balance_of_system.earthing) balance_of_system.earthing = productName;
+            cables_earthing_items.push({
+                product_name: productName,
+                quantity: qty,
+                measurement_unit_name: unit,
+                product_make_name: makeName,
+                product_make_id: makeId,
+            });
         } else if (typeNorm === "la" || typeNorm === "lightening_arrestor" || typeNorm === "lightning_arrestor") {
             cables.la_make = makeName || cables.la_make;
             cables.la_qty = (qty > 0 ? String(qty) : cables.la_qty) || "";
             cables.la_description = productName || cables.la_description;
             balance_of_system.lightening_arrestor = productName || makeName || balance_of_system.lightening_arrestor;
+            cables_la_items.push({
+                product_name: productName,
+                quantity: qty,
+                measurement_unit_name: unit,
+                product_make_name: makeName,
+                product_make_id: makeId,
+            });
         } else if (typeNorm === "acdb") {
             balance_of_system.acdb = productName || makeName || balance_of_system.acdb;
         } else if (typeNorm === "dcdb") {
@@ -1100,6 +1150,26 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
     hybrid_inverter.make_logos = await getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient);
     battery.make_logos = await getMakeLogos([...new Set(batteryMakeIds)], productMakesMap, bucketClient);
 
+    const resolveMakeLogosForItems = async (items) => {
+        return Promise.all(
+            items.map(async (item) => {
+                const make_logos = item.product_make_id != null && !Number.isNaN(parseInt(item.product_make_id, 10))
+                    ? await getMakeLogos([parseInt(item.product_make_id, 10)], productMakesMap, bucketClient)
+                    : [];
+                return { ...item, make_logos };
+            })
+        );
+    };
+
+    const [structureItemsWithLogos, accessoriesItemsWithLogos, cablesAcWithLogos, cablesDcWithLogos, cablesLaWithLogos, cablesEarthingWithLogos] = await Promise.all([
+        resolveMakeLogosForItems(structure_items),
+        resolveMakeLogosForItems(accessories_items),
+        resolveMakeLogosForItems(cables_ac_items),
+        resolveMakeLogosForItems(cables_dc_items),
+        resolveMakeLogosForItems(cables_la_items),
+        resolveMakeLogosForItems(cables_earthing_items),
+    ]);
+
     return {
         panel,
         inverter,
@@ -1108,6 +1178,12 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
         cables,
         structure,
         balance_of_system,
+        structure_items: structureItemsWithLogos,
+        accessories_items: accessoriesItemsWithLogos,
+        cables_ac_items: cablesAcWithLogos,
+        cables_dc_items: cablesDcWithLogos,
+        cables_la_items: cablesLaWithLogos,
+        cables_earthing_items: cablesEarthingWithLogos,
     };
 };
 
@@ -1247,12 +1323,23 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         miscellaneous: quotation.mis_description || "",
     };
 
+    const normalizedBomSnapshotForTable =
+        Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0
+            ? normalizeBomSnapshotForDisplay(quotation.bom_snapshot)
+            : null;
+
+    let structure_items = [];
+    let accessories_items = [];
+    let cables_ac_items = [];
+    let cables_dc_items = [];
+    let cables_la_items = [];
+    let cables_earthing_items = [];
+
     // When quotation has bom_snapshot, derive section data from it so section-based BOM page is populated.
     // Snapshot data should drive the BOM composition (size, qty, make, etc.) but we KEEP warranty fields
     // from the quotation form (since BOM lines typically don't carry warranty info).
-    if (Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0) {
-        const normalizedSnapshot = normalizeBomSnapshotForDisplay(quotation.bom_snapshot);
-        const derived = await deriveBomSectionsFromSnapshot(normalizedSnapshot, productMakesMap, bucketClient);
+    if (Array.isArray(normalizedBomSnapshotForTable) && normalizedBomSnapshotForTable.length > 0) {
+        const derived = await deriveBomSectionsFromSnapshot(normalizedBomSnapshotForTable, productMakesMap, bucketClient);
         if (derived) {
             panel = {
                 ...panel,
@@ -1291,8 +1378,16 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
                 ...balance_of_system,
                 ...derived.balance_of_system,
             };
+            structure_items = derived.structure_items || [];
+            accessories_items = derived.accessories_items || [];
+            cables_ac_items = derived.cables_ac_items || [];
+            cables_dc_items = derived.cables_dc_items || [];
+            cables_la_items = derived.cables_la_items || [];
+            cables_earthing_items = derived.cables_earthing_items || [];
         }
     }
+
+    const hasCablesItems = cables_ac_items.length > 0 || cables_dc_items.length > 0 || cables_la_items.length > 0 || cables_earthing_items.length > 0;
 
     return {
         // Quotation details
@@ -1386,6 +1481,12 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         cables,
         structure,
         balance_of_system,
+        structure_items,
+        accessories_items,
+        cables_ac_items,
+        cables_dc_items,
+        cables_la_items,
+        cables_earthing_items,
 
         // Only show BOM sections when qty > 0 (optional products hidden)
         bom_show_panel: (parseFloat(panel.quantity) || 0) > 0,
@@ -1393,13 +1494,16 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         bom_show_hybrid_inverter: (parseFloat(hybrid_inverter.quantity) || 0) > 0,
         bom_show_battery: (parseFloat(battery.quantity) || 0) > 0,
         bom_show_cables:
+            hasCablesItems ||
             (parseFloat(cables.ac_cable_qty) || 0) > 0 ||
             (parseFloat(cables.dc_cable_qty) || 0) > 0 ||
             (parseFloat(cables.earthing_qty) || 0) > 0 ||
             (parseFloat(cables.la_qty) || 0) > 0,
         bom_show_structure:
+            structure_items.length > 0 ||
             (parseFloat(structure.height) || 0) > 0 ||
             (structure.material != null && String(structure.material).trim() !== ""),
+        bom_show_accessories: accessories_items.length > 0,
         bom_show_balance_of_system:
             Boolean(
                 (balance_of_system.acdb != null && String(balance_of_system.acdb).trim() !== "") ||
@@ -1409,8 +1513,9 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
                 (balance_of_system.miscellaneous != null && String(balance_of_system.miscellaneous).trim() !== "")
             ),
 
-        // BOM page always uses section-based layout; never pass bom_snapshot so table is never rendered
-        bom_snapshot: null,
+        // BOM table: include ALL items from bom_snapshot (duplicates included).
+        // Template will render this in the Bill Of Material page.
+        bom_snapshot_table: normalizedBomSnapshotForTable || [],
 
         // Savings and Payback data
         savings: {
