@@ -204,6 +204,10 @@ const Order = sequelize.define(
             type: DataTypes.BIGINT,
             allowNull: true,
         },
+        project_price_id: {
+            type: DataTypes.BIGINT,
+            allowNull: true,
+        },
 
         // Document uploads
         electricity_bill: {
