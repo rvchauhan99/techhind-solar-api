@@ -159,6 +159,14 @@ const escapeSearchForLike = (s) => {
         .replace(/'/g, "''");
 };
 
+/** Literal for "outstanding amount > 0": (project_cost - discount) - SUM(payment_amount) > 0 */
+const getPaymentOutstandingLiteral = (models) =>
+    models.sequelize.literal(
+        `(("Order".project_cost - COALESCE("Order".discount, 0)) - ` +
+            `(SELECT COALESCE(SUM(payment_amount), 0) FROM order_payment_details ` +
+            `WHERE order_payment_details.order_id = "Order".id AND order_payment_details.deleted_at IS NULL) > 0)`
+    );
+
 const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
     const where = { deleted_at: null };
 
@@ -178,8 +186,10 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         current_stage_key,
     } = filters || {};
 
-    if (status) {
-        if (Array.isArray(status)) {
+    if (status && status !== "all") {
+        if (status === "active") {
+            where.status = { [Op.notIn]: ["completed", "cancelled"] };
+        } else if (Array.isArray(status)) {
             where.status = { [Op.in]: status };
         } else {
             where.status = status;
@@ -220,7 +230,16 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
     }
 
     if (current_stage_key != null && String(current_stage_key).trim() !== "") {
-        where.current_stage_key = String(current_stage_key).trim();
+        const key = String(current_stage_key).trim();
+        if (key === "payment_outstanding") {
+            where.status = "completed";
+            where.current_stage_key = "order_completed";
+            const outstandingLiteral = getPaymentOutstandingLiteral(models);
+            if (!where[Op.and]) where[Op.and] = [];
+            where[Op.and].push(outstandingLiteral);
+        } else {
+            where.current_stage_key = key;
+        }
     }
 
     if (order_date_from || order_date_to) {
@@ -296,8 +315,12 @@ const listOrders = async ({
 
     const where = { deleted_at: null };
 
-    if (status) {
-        where.status = status;
+    if (status && status !== "all") {
+        if (status === "active") {
+            where.status = { [Op.notIn]: ["completed", "cancelled"] };
+        } else {
+            where.status = status;
+        }
     }
 
     if (handled_by != null && String(handled_by).trim() !== "") {
@@ -334,7 +357,16 @@ const listOrders = async ({
     }
 
     if (current_stage_key != null && String(current_stage_key).trim() !== "") {
-        where.current_stage_key = String(current_stage_key).trim();
+        const key = String(current_stage_key).trim();
+        if (key === "payment_outstanding") {
+            where.status = "completed";
+            where.current_stage_key = "order_completed";
+            const outstandingLiteral = getPaymentOutstandingLiteral(models);
+            if (!where[Op.and]) where[Op.and] = [];
+            where[Op.and].push(outstandingLiteral);
+        } else {
+            where.current_stage_key = key;
+        }
     }
 
     if (order_date_from || order_date_to) {
@@ -576,6 +608,65 @@ const getOrdersDashboardKpis = async ({ filters = {}, enforced_handled_by_ids } 
         raw: true,
     });
 
+    const baseWhere = { ...where };
+    delete baseWhere.status;
+    const whereActive = { ...baseWhere, status: { [Op.notIn]: ["completed", "cancelled"] } };
+    const [activeRow] = await Order.findAll({
+        where: whereActive,
+        attributes: [
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
+                    0
+                ),
+                "total_capacity_kw",
+            ],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
+                    0
+                ),
+                "total_project_cost",
+            ],
+        ],
+        raw: true,
+    });
+
+    const whereCompleted = { ...baseWhere, status: "completed" };
+    const [completedRow] = await Order.findAll({
+        where: whereCompleted,
+        attributes: [
+            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
+                    0
+                ),
+                "total_capacity_kw",
+            ],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
+                    0
+                ),
+                "total_project_cost",
+            ],
+        ],
+        raw: true,
+    });
+
+    const redFlagWhere = { ...whereCompleted, current_stage_key: "order_completed" };
+    const redFlagLiteral = getPaymentOutstandingLiteral(models);
+    redFlagWhere[Op.and] = Array.isArray(redFlagWhere[Op.and])
+        ? [...redFlagWhere[Op.and], redFlagLiteral]
+        : [redFlagLiteral];
+    const redFlagCount = await Order.count({ where: redFlagWhere });
+
     const byStatus = await Order.findAll({
         where,
         attributes: [
@@ -622,6 +713,17 @@ const getOrdersDashboardKpis = async ({ filters = {}, enforced_handled_by_ids } 
             total_capacity_kw: Number(totalsRow?.total_capacity_kw || 0),
             total_project_cost: Number(totalsRow?.total_project_cost || 0),
         },
+        active: {
+            total_orders: Number(activeRow?.total_orders || 0),
+            total_capacity_kw: Number(activeRow?.total_capacity_kw || 0),
+            total_project_cost: Number(activeRow?.total_project_cost || 0),
+        },
+        completed: {
+            total_orders: Number(completedRow?.total_orders || 0),
+            total_capacity_kw: Number(completedRow?.total_capacity_kw || 0),
+            total_project_cost: Number(completedRow?.total_project_cost || 0),
+        },
+        red_flag_payment_outstanding: Number(redFlagCount || 0),
         by_status: byStatus.map((row) => ({
             status: row.status,
             count: Number(row.count || 0),
@@ -651,6 +753,22 @@ const getOrdersDashboardPipeline = async ({ filters = {}, enforced_handled_by_id
         attributes: [
             "current_stage_key",
             [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
+                    0
+                ),
+                "total_capacity_kw",
+            ],
+            [
+                models.sequelize.fn(
+                    "COALESCE",
+                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
+                    0
+                ),
+                "total_project_cost",
+            ],
         ],
         group: ["current_stage_key"],
         raw: true,
@@ -670,6 +788,8 @@ const getOrdersDashboardPipeline = async ({ filters = {}, enforced_handled_by_id
         by_stage: byStage.map((row) => ({
             current_stage_key: row.current_stage_key,
             count: Number(row.count || 0),
+            total_capacity_kw: Number(row.total_capacity_kw || 0),
+            total_project_cost: Number(row.total_project_cost || 0),
         })),
         by_delivery_status: byDeliveryStatus.map((row) => ({
             delivery_status: row.delivery_status,
