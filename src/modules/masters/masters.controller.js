@@ -292,4 +292,52 @@ const getFileUrl = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = { masterList, create, list, getById, update, remove, getReferenceOptions, getAppConstants, downloadSample, uploadData, getDefaultState, getDefaultBranch, getFileUrl };
+const removeFile = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { model, field } = req.query;
+  const recordId = parseInt(id, 10);
+
+  if (isNaN(recordId)) {
+    return responseHandler.sendError(res, 'Invalid record ID', 400);
+  }
+  if (!model) {
+    return responseHandler.sendError(res, 'Model parameter is required', 400);
+  }
+
+  const mastersConfig = require('../../common/utils/masters.json');
+  const masterConfig = mastersConfig.find(m => m.model_name === model) || {};
+  const fileUploadFields = masterConfig.file_upload_fields || [];
+
+  if (!fileUploadFields.length) {
+    return responseHandler.sendError(res, 'No file upload fields configured for this master', 400);
+  }
+
+  const fieldName = field && fileUploadFields.includes(field) ? field : fileUploadFields[0];
+  const existing = await masterService.getMasterById({ model, id: recordId });
+
+  const pathOrKey = existing?.[fieldName];
+  if (!pathOrKey) {
+    // Idempotent: nothing to remove
+    return responseHandler.sendSuccess(res, existing, 'No file to remove', 200);
+  }
+
+  if (!String(pathOrKey).startsWith('/')) {
+    try {
+      await bucketService.deleteFile(pathOrKey);
+    } catch (error) {
+      console.error('Error deleting file from bucket:', error);
+      throw new AppError(FILE_UNAVAILABLE_MESSAGE, 503);
+    }
+  }
+
+  const updated = await masterService.updateMaster({
+    model,
+    id: recordId,
+    updates: { [fieldName]: null },
+    userId: req.user?.id,
+  });
+
+  return responseHandler.sendSuccess(res, updated, 'File removed', 200);
+});
+
+module.exports = { masterList, create, list, getById, update, remove, getReferenceOptions, getAppConstants, downloadSample, uploadData, getDefaultState, getDefaultBranch, getFileUrl, removeFile };

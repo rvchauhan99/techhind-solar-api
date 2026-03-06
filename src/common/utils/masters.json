@@ -201,8 +201,7 @@
         "model_name": "product_make.model",
         "required_fields": [
             "product_type_id",
-            "name",
-            "logo"
+            "name"
         ],
         "file_upload_fields": [
             "logo"
