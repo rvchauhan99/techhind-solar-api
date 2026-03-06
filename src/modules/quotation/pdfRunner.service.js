@@ -15,12 +15,17 @@ const CHILD_TIMEOUT_MS = Math.max(15_000, parseInt(process.env.PDF_CHILD_TIMEOUT
 const HEARTBEAT_MS = Math.max(5000, parseInt(process.env.PDF_JOB_RUNNER_HEARTBEAT_MS || "30000", 10));
 const CLEANUP_EVERY_MS = Math.max(60_000, parseInt(process.env.PDF_JOB_CLEANUP_INTERVAL_MS || "900000", 10));
 const RECOVERY_INTERVAL_MS = Math.max(10_000, parseInt(process.env.PDF_JOB_RECOVERY_INTERVAL_MS || "15000", 10));
+const USE_PERSISTENT_WORKER = process.env.PDF_JOB_USE_PERSISTENT_WORKER !== "false";
+const WORKER_RESTART_MS = Math.max(5000, parseInt(process.env.PDF_WORKER_RESTART_DELAY_MS || "10000", 10));
 
 let _started = false;
 let _timer = null;
 let _heartbeatTimer = null;
 let _activeChildren = 0;
 const _activeChildProcs = new Set();
+let _worker = null;
+let _workerReady = false;
+let _workerRestartTimeout = null;
 let _lastTenantCache = { ts: 0, items: [] };
 let _tickInProgress = false;
 let _lastCleanupAt = 0;
@@ -63,6 +68,46 @@ async function listTenantExecutors() {
   return [];
 }
 
+function spawnWorker() {
+  if (_worker) return;
+  const workerPath = path.join(__dirname, "pdfWorker.entry.js");
+  _worker = fork(workerPath, [], {
+    stdio: ["pipe", "pipe", "pipe", "ipc"],
+  });
+  _workerReady = false;
+
+  _worker.on("message", (msg) => {
+    if (msg && msg.type === "ready") {
+      _workerReady = true;
+      console.info("[PDF_RUNNER] persistent worker ready");
+    }
+    if (msg && msg.type === "done") {
+      _activeChildren -= 1;
+      const elapsed = msg.errorMessage ? " failed" : " completed";
+      console.info(
+        `[PDF_RUNNER] job id=${msg.jobId} tenant=${msg.tenantId}${elapsed}` +
+          (msg.errorMessage ? ` error=${msg.errorMessage}` : "")
+      );
+    }
+  });
+
+  _worker.on("exit", (code, signal) => {
+    _worker = null;
+    _workerReady = false;
+    console.warn(`[PDF_RUNNER] persistent worker exited code=${code} signal=${signal}`);
+    if (_started && USE_PERSISTENT_WORKER) {
+      _workerRestartTimeout = setTimeout(() => {
+        _workerRestartTimeout = null;
+        spawnWorker();
+      }, WORKER_RESTART_MS);
+    }
+  });
+
+  _worker.on("error", (err) => {
+    console.error("[PDF_RUNNER] persistent worker error:", err.message);
+  });
+}
+
 function runJobInChild({ tenantId, jobId }) {
   return new Promise((resolve, reject) => {
     const childPath = path.join(__dirname, "pdfChild.entry.js");
@@ -100,6 +145,39 @@ function runJobInChild({ tenantId, jobId }) {
       reject(err);
     });
   });
+}
+
+function runJob({ tenantId, jobId, ex, job }) {
+  const startedAt = Date.now();
+  if (USE_PERSISTENT_WORKER && _worker && _workerReady) {
+    _activeChildren += 1;
+    _worker.send({ type: "job", tenantId, jobId });
+    return;
+  }
+  runJobInChild({ tenantId, jobId })
+    .then(() => {
+      const elapsedMs = Date.now() - startedAt;
+      console.info(
+        `[PDF_RUNNER] completed job id=${job.id} tenant=${ex.tenantId} elapsedMs=${elapsedMs}`
+      );
+    })
+    .catch(async (err) => {
+      const elapsedMs = Date.now() - startedAt;
+      console.warn(
+        `[PDF_RUNNER] failed job id=${job.id} tenant=${ex.tenantId} elapsedMs=${elapsedMs} error=${err.message}`
+      );
+      try {
+        const models = getModelsForSequelize(ex.sequelize);
+        if (models) {
+          await pdfJobService.markJobFailedForModels(models, { jobId: job.id, errorMessage: err.message });
+        }
+      } catch (_) {
+        // ignore secondary failure
+      }
+    })
+    .finally(() => {
+      _activeChildren -= 1;
+    });
 }
 
 async function tickOnce() {
@@ -167,29 +245,7 @@ async function tickOnce() {
         `[PDF_RUNNER] claimed job id=${job.id} tenant=${ex.tenantId} attempt=${job.attempts}/${job.max_attempts}`
       );
 
-      _activeChildren += 1;
-      const startedAt = Date.now();
-      runJobInChild({ tenantId: ex.tenantId, jobId: job.id })
-        .then(() => {
-          const elapsedMs = Date.now() - startedAt;
-          console.info(
-            `[PDF_RUNNER] completed job id=${job.id} tenant=${ex.tenantId} elapsedMs=${elapsedMs}`
-          );
-        })
-        .catch(async (err) => {
-          const elapsedMs = Date.now() - startedAt;
-          console.warn(
-            `[PDF_RUNNER] failed job id=${job.id} tenant=${ex.tenantId} elapsedMs=${elapsedMs} error=${err.message}`
-          );
-          try {
-            await pdfJobService.markJobFailedForModels(models, { jobId: job.id, errorMessage: err.message });
-          } catch (_) {
-            // ignore secondary failure
-          }
-        })
-        .finally(() => {
-          _activeChildren -= 1;
-        });
+      runJob({ tenantId: ex.tenantId, jobId: job.id, ex, job });
     }
   } finally {
     _tickInProgress = false;
@@ -199,6 +255,9 @@ async function tickOnce() {
 function startRunner() {
   if (!RUNNER_ENABLED || _started) return;
   _started = true;
+  if (USE_PERSISTENT_WORKER) {
+    spawnWorker();
+  }
   _timer = setInterval(() => {
     tickOnce().catch((err) => {
       console.error("[PDF_RUNNER] tick error:", err.message);
@@ -206,17 +265,30 @@ function startRunner() {
   }, POLL_MS);
   _heartbeatTimer = setInterval(() => {
     console.info(
-      `[PDF_RUNNER] heartbeat started=${_started} activeChildren=${_activeChildren} pollMs=${POLL_MS} maxConcurrency=${MAX_CONCURRENCY}`
+      `[PDF_RUNNER] heartbeat started=${_started} activeChildren=${_activeChildren} pollMs=${POLL_MS} maxConcurrency=${MAX_CONCURRENCY} worker=${USE_PERSISTENT_WORKER ? (_workerReady ? "ready" : "starting") : "off"}`
     );
   }, HEARTBEAT_MS);
   console.info(
-    `[PDF_RUNNER] started poll=${POLL_MS}ms maxConcurrency=${MAX_CONCURRENCY} childTimeoutMs=${CHILD_TIMEOUT_MS} heartbeatMs=${HEARTBEAT_MS}`
+    `[PDF_RUNNER] started poll=${POLL_MS}ms maxConcurrency=${MAX_CONCURRENCY} childTimeoutMs=${CHILD_TIMEOUT_MS} heartbeatMs=${HEARTBEAT_MS} persistentWorker=${USE_PERSISTENT_WORKER}`
   );
 }
 
 function stopRunner() {
   if (_timer) clearInterval(_timer);
   if (_heartbeatTimer) clearInterval(_heartbeatTimer);
+  if (_workerRestartTimeout) {
+    clearTimeout(_workerRestartTimeout);
+    _workerRestartTimeout = null;
+  }
+  if (_worker) {
+    try {
+      _worker.kill("SIGTERM");
+    } catch (_) {
+      // ignore
+    }
+    _worker = null;
+    _workerReady = false;
+  }
   _timer = null;
   _heartbeatTimer = null;
   for (const child of _activeChildProcs) {
@@ -236,6 +308,8 @@ function getRunnerStatus() {
     pollMs: POLL_MS,
     maxConcurrency: MAX_CONCURRENCY,
     activeChildren: _activeChildren,
+    persistentWorker: USE_PERSISTENT_WORKER,
+    workerReady: _workerReady,
   };
 }
 

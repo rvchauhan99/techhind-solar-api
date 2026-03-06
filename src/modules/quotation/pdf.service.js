@@ -42,6 +42,9 @@ function releasePdfRenderSlot() {
 // URL image fetch guards (prevent hang/OOM from slow or huge responses)
 const PDF_IMAGE_FETCH_TIMEOUT_MS = Math.max(1000, parseInt(process.env.PDF_IMAGE_FETCH_TIMEOUT_MS || "15000", 10));
 const PDF_IMAGE_FETCH_MAX_BYTES = Math.max(1024 * 100, parseInt(process.env.PDF_IMAGE_FETCH_MAX_BYTES || "5242880", 10)); // default 5MB
+const PDF_IMAGE_MAX_BYTES_BEFORE_RESIZE = parseInt(process.env.PDF_IMAGE_MAX_BYTES_BEFORE_RESIZE || "200000", 10); // 200KB; above this, resize/compress
+const PDF_IMAGE_RESIZE_MAX_WIDTH = Math.max(400, parseInt(process.env.PDF_IMAGE_RESIZE_MAX_WIDTH || "1200", 10));
+const PDF_IMAGE_JPEG_QUALITY = Math.max(50, Math.min(100, parseInt(process.env.PDF_IMAGE_JPEG_QUALITY || "80", 10)));
 
 // In-memory cache for public URL image fetches (tenant-agnostic; key = URL). Reduces repeated fetches across PDFs.
 const URL_IMAGE_CACHE_MAX = 100;
@@ -262,6 +265,40 @@ const fileToDataUrl = (filePath, mimeType = "image/jpeg", warnIfMissing = true) 
 };
 
 /**
+ * If buffer is over threshold, resize (max width) and compress to JPEG to reduce HTML size and memory.
+ * Skips SVG and small images. On failure (e.g. sharp not installed or corrupt image), returns original.
+ * @param {Buffer} buf - Image buffer
+ * @param {string} contentType - MIME type
+ * @returns {Promise<{ buffer: Buffer, contentType: string }>}
+ */
+async function compressImageIfLarge(buf, contentType) {
+    if (!Buffer.isBuffer(buf) || buf.length <= PDF_IMAGE_MAX_BYTES_BEFORE_RESIZE) {
+        return { buffer: buf, contentType };
+    }
+    const ct = (contentType || "").toLowerCase();
+    if (ct.includes("svg") || ct.includes("gif")) {
+        return { buffer: buf, contentType };
+    }
+    try {
+        const sharp = require("sharp");
+        const pipeline = sharp(buf);
+        const meta = await pipeline.metadata();
+        const width = meta.width || 0;
+        const needResize = width > PDF_IMAGE_RESIZE_MAX_WIDTH;
+        const out = needResize
+            ? pipeline.resize(PDF_IMAGE_RESIZE_MAX_WIDTH, null, { withoutEnlargement: true })
+            : pipeline;
+        const jpegBuf = await out.jpeg({ quality: PDF_IMAGE_JPEG_QUALITY }).toBuffer();
+        return { buffer: jpegBuf, contentType: "image/jpeg" };
+    } catch (err) {
+        if (process.env.NODE_ENV !== "test") {
+            console.warn("[PDF] Image resize skipped:", err.message || err);
+        }
+        return { buffer: buf, contentType };
+    }
+}
+
+/**
  * Resolve path to base64 data URL: bucket key, legacy /uploads/ path (→ bucket first), or full URL (cached).
  * Avoids local filesystem for /uploads/ and missing files; uses bucket or public URL.
  * @param {string} pathOrKey - Bucket key (no leading /), legacy path (e.g. /uploads/logo.png), or http(s) URL
@@ -323,8 +360,9 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
                     reject(err);
                 });
             });
-            const base64 = buf.toString("base64");
-            const dataUrl = `data:${resolvedType};base64,${base64}`;
+            const { buffer: outBuf, contentType: outType } = await compressImageIfLarge(buf, resolvedType);
+            const base64 = outBuf.toString("base64");
+            const dataUrl = `data:${outType};base64,${base64}`;
             setCachedUrlImage(pathOrKey, dataUrl);
             return dataUrl;
         } catch (err) {
@@ -346,14 +384,16 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
                     : await bucketService.getObject(bucketKey);
                 const body = result.body;
                 const contentType = result.contentType || mimeType;
-                const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
-                return `data:${contentType};base64,${base64}`;
+                const buf = Buffer.isBuffer(body) ? body : Buffer.from(body);
+                const { buffer: outBuf, contentType: outType } = await compressImageIfLarge(buf, contentType);
+                const base64 = outBuf.toString("base64");
+                return `data:${outType};base64,${base64}`;
             } catch (e) {
                 return null;
             }
         };
         let dataUrl = await tryFetch(bucketClient);
-        if (!dataUrl && bucketClient) dataUrl = await tryFetch(null);
+        // No fallback to default bucket when tenant bucketClient is set (tenant isolation)
         if (dataUrl && options.tenantId != null) {
             setImageDataUrl(options.tenantId, pathOrKey, dataUrl);
         }
@@ -372,18 +412,16 @@ const pathToDataUrl = async (pathOrKey, mimeType = "image/jpeg", bucketClient, o
                 : await bucketService.getObject(pathOrKey);
             const body = result.body;
             const contentType = result.contentType || mimeType;
-            const base64 = Buffer.isBuffer(body) ? body.toString("base64") : Buffer.from(body).toString("base64");
-            return `data:${contentType};base64,${base64}`;
+            const buf = Buffer.isBuffer(body) ? body : Buffer.from(body);
+            const { buffer: outBuf, contentType: outType } = await compressImageIfLarge(buf, contentType);
+            const base64 = outBuf.toString("base64");
+            return `data:${outType};base64,${base64}`;
         } catch (e) {
             return null;
         }
     };
     let dataUrl = await tryFetch(bucketClient);
-    if (!dataUrl && bucketClient) {
-        try {
-            dataUrl = await tryFetch(null);
-        } catch (_) { /* ignore */ }
-    }
+    // No fallback to default bucket when tenant bucketClient is set (tenant isolation)
     if (!dataUrl) {
         if (shouldLogMissingBucketKey(pathOrKey)) {
             console.warn(`Error reading from bucket: ${pathOrKey}`);
@@ -792,6 +830,7 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
                 timeout: 60000,
             });
 
+            puppeteerService.recordRender();
             return pdfBuffer;
         } finally {
             if (page) {
@@ -965,13 +1004,17 @@ const getMakeNames = (makeIds, productMakesMap) => {
 };
 
 /**
- * Get make logos as base64 data URLs from IDs array (supports bucket key or legacy path)
+ * Get make logos as base64 data URLs from IDs array (supports bucket key or legacy path).
+ * When tenantId is passed, results are cached in pdfImageCache for reuse across PDFs.
+ * When logoCache (Map<path, Promise<dataUrl>>) is passed, same logo path is only fetched once per PDF.
  * @param {Array|null} makeIds - Array of ProductMake IDs
  * @param {Map} productMakesMap - Map of ID to {name, logo}
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
+ * @param {string|number|null} [tenantId] - Optional tenant ID for pdfImageCache (caches make logos)
+ * @param {Map<string, Promise<string>>} [logoCache] - Optional per-request cache: logo path -> Promise<dataUrl> (dedupes fetches within one PDF)
  * @returns {Promise<Array>} Array of objects with name and logoDataUrl
  */
-const getMakeLogos = async (makeIds, productMakesMap, bucketClient) => {
+const getMakeLogos = async (makeIds, productMakesMap, bucketClient, tenantId = null, logoCache = null) => {
     if (!makeIds || !Array.isArray(makeIds) || makeIds.length === 0) {
         return [];
     }
@@ -979,11 +1022,17 @@ const getMakeLogos = async (makeIds, productMakesMap, bucketClient) => {
         .map(id => ({ id, make: productMakesMap.get(parseInt(id)) }))
         .filter(e => e.make && e.make.logo);
 
+    const pathToDataUrlOpts = tenantId != null ? { tenantId } : {};
     const results = await Promise.all(
         entries.map(async ({ make }) => {
             const ext = path.extname(make.logo).toLowerCase();
             const mimeType = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
-            const logoDataUrl = await pathToDataUrl(make.logo, mimeType, bucketClient);
+            let promise = logoCache && logoCache.get(make.logo);
+            if (!promise) {
+                promise = pathToDataUrl(make.logo, mimeType, bucketClient, pathToDataUrlOpts);
+                if (logoCache) logoCache.set(make.logo, promise);
+            }
+            const logoDataUrl = await promise;
             return logoDataUrl ? { name: make.name, logo: logoDataUrl } : null;
         })
     );
@@ -999,9 +1048,11 @@ const normType = (s) => (s || "").toLowerCase().replace(/\s+/g, "_").replace(/-/
  * @param {Array} normalizedBomSnapshot - Array of flat BOM lines (product_type_name, product_make_name, capacity, quantity, etc.)
  * @param {Map} productMakesMap - Map of ProductMake ID to { name, logo }
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
+ * @param {string|number|null} [tenantId] - Optional tenant ID for make-logo cache
+ * @param {Map<string, Promise<string>>} [logoCache] - Optional per-request logo path -> Promise<dataUrl> (dedupes within one PDF)
  * @returns {Promise<Object>} Section objects: panel, inverter, hybrid_inverter, battery, cables, structure, balance_of_system
  */
-const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakesMap, bucketClient) => {
+const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakesMap, bucketClient, tenantId = null, logoCache = null) => {
     if (!Array.isArray(normalizedBomSnapshot) || normalizedBomSnapshot.length === 0) {
         return null;
     }
@@ -1145,10 +1196,10 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
         }
     }
 
-    panel.make_logos = await getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient);
-    inverter.make_logos = await getMakeLogos([...new Set(inverterMakeIds)], productMakesMap, bucketClient);
-    hybrid_inverter.make_logos = await getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient);
-    battery.make_logos = await getMakeLogos([...new Set(batteryMakeIds)], productMakesMap, bucketClient);
+    panel.make_logos = await getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
+    inverter.make_logos = await getMakeLogos([...new Set(inverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
+    hybrid_inverter.make_logos = await getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
+    battery.make_logos = await getMakeLogos([...new Set(batteryMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
 
     const resolveMakeLogosForItems = async (items) => {
         return Promise.all(
@@ -1194,9 +1245,11 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
  * @param {Object} bankAccount - Bank account details
  * @param {Map} productMakesMap - Map of ProductMake ID to name
  * @param {{ s3: object, bucketName: string }} [bucketClient] - Optional tenant bucket client
+ * @param {string|number|null} [tenantId] - Optional tenant ID for make-logo and image cache
  * @returns {Promise<Object>} Formatted data for PDF templates
  */
-const prepareQuotationData = async (quotation, company, bankAccount, productMakesMap = new Map(), bucketClient) => {
+const prepareQuotationData = async (quotation, company, bankAccount, productMakesMap = new Map(), bucketClient, tenantId = null) => {
+    const logoCache = new Map();
     // Calculate derived values
     const projectCapacity = parseFloat(quotation.project_capacity) || 0;
     const pricePerKw = parseFloat(quotation.price_per_kw) || 0;
@@ -1257,12 +1310,12 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const annualSavings = Math.round(yearlyGeneration * pricePerUnit);
     const paybackPeriod = annualSavings > 0 ? +(finalCost / annualSavings).toFixed(1) : 0;
 
-    // Build BOM section data from quotation flat fields
+    // Build BOM section data from quotation flat fields (logoCache dedupes same logo across sections within this PDF)
     const [panelLogos, inverterLogos, hybridInverterLogos, batteryLogos] = await Promise.all([
-        getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient),
-        getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient),
-        getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient),
-        getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient),
+        getMakeLogos(quotation.panel_make_ids, productMakesMap, bucketClient, tenantId, logoCache),
+        getMakeLogos(quotation.inverter_make_ids, productMakesMap, bucketClient, tenantId, logoCache),
+        getMakeLogos(quotation.hybrid_inverter_make_ids, productMakesMap, bucketClient, tenantId, logoCache),
+        getMakeLogos(quotation.battery_make_ids, productMakesMap, bucketClient, tenantId, logoCache),
     ]);
 
     let panel = {
@@ -1338,8 +1391,9 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     // When quotation has bom_snapshot, derive section data from it so section-based BOM page is populated.
     // Snapshot data should drive the BOM composition (size, qty, make, etc.) but we KEEP warranty fields
     // from the quotation form (since BOM lines typically don't carry warranty info).
-    if (Array.isArray(normalizedBomSnapshotForTable) && normalizedBomSnapshotForTable.length > 0) {
-        const derived = await deriveBomSectionsFromSnapshot(normalizedBomSnapshotForTable, productMakesMap, bucketClient);
+    if (Array.isArray(quotation.bom_snapshot) && quotation.bom_snapshot.length > 0) {
+        const normalizedSnapshot = normalizeBomSnapshotForDisplay(quotation.bom_snapshot);
+        const derived = await deriveBomSectionsFromSnapshot(normalizedSnapshot, productMakesMap, bucketClient, tenantId, logoCache);
         if (derived) {
             panel = {
                 ...panel,

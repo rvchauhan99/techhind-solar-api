@@ -143,8 +143,9 @@ const create = asyncHandler(async (req, res) => {
   // Handle file uploads - upload to bucket (private), store keys in payload
   if (req.files) {
     try {
+      const bucketClient = bucketService.getBucketForRequest(req);
       const uploadOne = async (file) => {
-        const result = await bucketService.uploadFile(file, { prefix: "site-visits", acl: "private" });
+        const result = await bucketService.uploadFile(file, { prefix: "site-visits", acl: "private" }, bucketClient);
         return result.path;
       };
       if (req.files.visit_photo && req.files.visit_photo[0]) {
@@ -302,7 +303,8 @@ const getDocumentUrl = asyncHandler(async (req, res) => {
     return responseHandler.sendError(res, "Invalid path for site visit documents", 400);
   }
   try {
-    const url = await bucketService.getSignedUrl(key, 3600);
+    const bucketClient = bucketService.getBucketForRequest(req);
+    const url = await bucketService.getSignedUrl(key, 3600, bucketClient);
     return responseHandler.sendSuccess(
       res,
       { url, expires_in: 3600 },

@@ -9,6 +9,7 @@ const bucketService = require("../../common/services/bucket.service.js");
 const pdfService = require("./pdf.service.js");
 const { getImageCacheStats } = require("./pdfImageCache.service.js");
 const path = require("path");
+const { Op } = require("sequelize");
 
 const PDF_WARMUP_ENABLED = process.env.PDF_WARMUP_ENABLED === "true";
 const PDF_WARMUP_MAX_TENANTS = Math.max(1, parseInt(process.env.PDF_WARMUP_MAX_TENANTS || "5", 10));
@@ -51,9 +52,7 @@ async function fetchObjectDataUrl(bucketKey, mimeType, bucketClient) {
     };
 
     let dataUrl = await tryFetch(bucketClient);
-    if (!dataUrl && bucketClient) {
-        dataUrl = await tryFetch(null);
-    }
+    // No fallback to default bucket when tenant bucketClient is set (tenant isolation)
     return dataUrl;
 }
 
@@ -89,9 +88,9 @@ async function warmupTemplateAssetCache() {
 
                 const tenantSequelize = await dbPoolManager.getPool(tenantId, config);
                 const models = getModelsForSequelize(tenantSequelize);
-                if (!models || !models.QuotationTemplate || !models.QuotationTemplateConfig || !models.Company) continue;
+                if (!models || !models.QuotationTemplate || !models.QuotationTemplateConfig || !models.Company || !models.ProductMake) continue;
 
-                const { QuotationTemplate, QuotationTemplateConfig, Company } = models;
+                const { QuotationTemplate, QuotationTemplateConfig, Company, ProductMake } = models;
                 const templates = await QuotationTemplate.findAll({
                     where: { deleted_at: null },
                     include: [{ model: QuotationTemplateConfig, as: "config", required: false }],
@@ -124,6 +123,15 @@ async function warmupTemplateAssetCache() {
                             keys.add(companyObj[field]);
                         }
                     });
+                }
+
+                const makes = await ProductMake.findAll({
+                    where: { deleted_at: null, logo: { [Op.ne]: null } },
+                    attributes: ["logo"],
+                });
+                for (const make of makes) {
+                    const logoPath = make.logo || (make.toJSON && make.toJSON().logo);
+                    if (logoPath && isBucketResolvablePath(logoPath)) keys.add(logoPath);
                 }
 
                 const bucketClient = await bucketClientFactory.getBucketClient(tenantId, config);
