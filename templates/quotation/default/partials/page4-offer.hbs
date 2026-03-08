@@ -24,17 +24,19 @@
         </thead>
         <tbody>
             <tr>
-                <td>Per kW Rate *</td>
+                <td>Per kW Rate {{#if gst_percent}}*{{/if}}</td>
                 <td>{{formatCurrency price_per_kw}}</td>
             </tr>
             <tr>
-                <td>Rooftop ON-Grid Solar Power Plant System *</td>
+                <td>Rooftop ON-Grid Solar Power Plant System {{#if gst_percent}}*{{/if}}</td>
                 <td>{{formatCurrency system_cost}}</td>
             </tr>
+            {{#if gst_percent}}
             <tr>
                 <td>GST @ {{gst_percent}} %</td>
                 <td>{{formatCurrency gst_amount}}</td>
             </tr>
+            {{/if}}
             <tr>
                 <td>Net-Metering Cost</td>
                 <td>{{#if net_metering_cost}}{{formatCurrency net_metering_cost}}{{else}}As Actual{{/if}}</td>
@@ -58,7 +60,9 @@
         </tbody>
     </table>
 
+    {{#if gst_percent}}
     <p class="gst-note">(*) Including GST</p>
+    {{/if}}
 
     <!-- Payment Terms -->
     <div class="payment-terms">
@@ -92,10 +96,10 @@
         </div>
         <div class="qr-section">
             <div>
-            <img src="{{upiLogoImage}}" alt="BHIM UPI" class="upi-logo" />
+                <img src="{{upiLogoImage}}" alt="BHIM UPI" class="upi-logo" />
             </div>
             <div>
-            <img src="{{qrCodeImage}}" alt="UPI QR Code" class="qr-code" />
+                <img src="{{qrCodeImage}}" alt="UPI QR Code" class="qr-code" />
             </div>
         </div>
     </div>
