@@ -1165,7 +1165,7 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
                 product_make_name: makeName,
                 product_make_id: makeId,
             });
-        } else if (typeNorm === "earthing") {
+        } else if (typeNorm === "earthing_cable") {
             cables.earthing_make = makeName || cables.earthing_make;
             cables.earthing_qty = (qty > 0 ? String(qty) : cables.earthing_qty) || "";
             cables.earthing_description = productName || cables.earthing_description;
@@ -1177,7 +1177,7 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
                 product_make_name: makeName,
                 product_make_id: makeId,
             });
-        } else if (typeNorm === "la" || typeNorm === "lightening_arrestor" || typeNorm === "lightning_arrestor") {
+        } else if (typeNorm === "la_cable") {
             cables.la_make = makeName || cables.la_make;
             cables.la_qty = (qty > 0 ? String(qty) : cables.la_qty) || "";
             cables.la_description = productName || cables.la_description;
@@ -1195,7 +1195,6 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
             balance_of_system.dcdb = productName || makeName || balance_of_system.dcdb;
         }
     }
-
     panel.make_logos = await getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
     inverter.make_logos = await getMakeLogos([...new Set(inverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
     hybrid_inverter.make_logos = await getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
@@ -1502,8 +1501,8 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         // Pricing
         price_per_kw: pricePerKw,
         system_cost: systemCost,
-        gst_percent: gstPercent,
-        gst_amount: gstAmount,
+        gst_percent: gstPercent > 0 ? gstPercent : null,
+        gst_amount: gstAmount > 0 ? gstAmount : null,
         net_metering_cost: netMeteringCost,
         geda_amount: gedaAmount,
         grand_total: grandTotal,
