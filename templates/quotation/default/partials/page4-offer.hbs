@@ -24,11 +24,11 @@
         </thead>
         <tbody>
             <tr>
-                <td>Per kW Rate {{#if gst_percent}}*{{/if}}</td>
+                <td>Per kW Rate {{#unless gst_percent}}*{{/unless}}</td>
                 <td>{{formatCurrency price_per_kw}}</td>
             </tr>
             <tr>
-                <td>Rooftop ON-Grid Solar Power Plant System {{#if gst_percent}}*{{/if}}</td>
+                <td>Rooftop ON-Grid Solar Power Plant System {{#unless gst_percent}}*{{/unless}}</td>
                 <td>{{formatCurrency system_cost}}</td>
             </tr>
             {{#if gst_percent}}
@@ -39,12 +39,22 @@
             {{/if}}
             <tr>
                 <td>Net-Metering Cost</td>
-                <td>{{#if net_metering_cost}}{{formatCurrency net_metering_cost}}{{else}}As Actual{{/if}}</td>
+                {{#if (isNumber net_metering_cost_display)}}
+                <td style="text-align:right; white-space:nowrap;">{{formatCurrency net_metering_cost_display}}</td>
+                {{else}}
+                <td style="text-align:right; white-space:nowrap; font-size:9px;">{{formatCurrency net_metering_cost_display}}</td>
+                {{/if}}
             </tr>
             <tr>
                 <td>GEDA Application Amount</td>
                 <td>{{formatCurrency geda_amount}}</td>
             </tr>
+            {{#if has_discount}}
+            <tr>
+                <td>{{discount_label}}</td>
+                <td>- {{formatCurrency discount_value}}</td>
+            </tr>
+            {{/if}}
             <tr class="total-row">
                 <td><strong>Grand Total Cost Of The Project</strong></td>
                 <td><strong>{{formatCurrency grand_total}}</strong></td>
@@ -60,9 +70,9 @@
         </tbody>
     </table>
 
-    {{#if gst_percent}}
-    <p class="gst-note">(*) Including GST</p>
-    {{/if}}
+    {{#unless gst_percent}}
+    <p class="gst-note">(*) GST extra (as applicable)</p>
+    {{/unless}}
 
     <!-- Payment Terms -->
     <div class="payment-terms">

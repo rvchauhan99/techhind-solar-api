@@ -305,15 +305,19 @@ const createAboutPage = (data) => {
  * Page 4: Commercial Offer Page
  */
 const createOfferPage = (data) => {
+    const netMeteringDisplay = data.net_metering_cost_display ?? (data.net_metering_cost ? data.net_metering_cost : "As Actual Paid by Customer");
+    const isNetMeteringText = typeof netMeteringDisplay === "string";
+    const star = data.gst_percent ? "" : " *";
+
     const priceTableBody = [
         [
             { text: "Description", style: "tableHeader", alignment: "left" },
             { text: "Amount (INR)", style: "tableHeader", alignment: "right" },
         ],
-        [{ text: "Per kW Rate *", style: "tableCell" }, { text: formatCurrency(data.price_per_kw), style: "tableCell", alignment: "right" }],
-        [{ text: "Rooftop ON-Grid Solar Power Plant System *", style: "tableCell" }, { text: formatCurrency(data.system_cost), style: "tableCell", alignment: "right" }],
-        [{ text: `GST @ ${data.gst_percent} %`, style: "tableCell" }, { text: formatCurrency(data.gst_amount), style: "tableCell", alignment: "right" }],
-        [{ text: "Net-Metering Cost", style: "tableCell" }, { text: data.net_metering_cost ? formatCurrency(data.net_metering_cost) : "As Actual", style: "tableCell", alignment: "right" }],
+        [{ text: `Per kW Rate${star}`, style: "tableCell" }, { text: formatCurrency(data.price_per_kw), style: "tableCell", alignment: "right" }],
+        [{ text: `Rooftop ON-Grid Solar Power Plant System${star}`, style: "tableCell" }, { text: formatCurrency(data.system_cost), style: "tableCell", alignment: "right" }],
+        ...(data.gst_percent ? [[{ text: `GST @ ${data.gst_percent} %`, style: "tableCell" }, { text: formatCurrency(data.gst_amount), style: "tableCell", alignment: "right" }]] : []),
+        [{ text: "Net-Metering Cost", style: "tableCell" }, { text: formatCurrency(netMeteringDisplay), style: "tableCell", alignment: "right", noWrap: true, fontSize: isNetMeteringText ? 8 : undefined }],
         [{ text: "GEDA Application Amount", style: "tableCell" }, { text: formatCurrency(data.geda_amount), style: "tableCell", alignment: "right" }],
         [
             { text: "Grand Total Cost Of The Project", style: "tableCell", bold: true, fillColor: COLORS.lightGray },
@@ -325,6 +329,14 @@ const createOfferPage = (data) => {
             { text: formatCurrency(data.final_cost), style: "tableCell", bold: true, alignment: "right", fillColor: COLORS.orange, color: COLORS.white },
         ],
     ];
+
+    if (data.has_discount) {
+        const discountInsertIdx = data.gst_percent ? 6 : 5;
+        priceTableBody.splice(discountInsertIdx, 0, [
+            { text: data.discount_label || "Discount (-)", style: "tableCell" },
+            { text: `- ${formatCurrency(data.discount_value)}`, style: "tableCell", alignment: "right" },
+        ]);
+    }
 
     const paymentTermsList = (data.payment_terms || ["Full payment before system delivery"]).map((term, idx) => ({
         text: `${idx + 1}. ${term}`,
