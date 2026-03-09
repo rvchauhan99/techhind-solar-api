@@ -473,7 +473,6 @@ const getPermissionForRoleAndModuleOnSequelize = async (
   }
   const perm = Array.isArray(permRows) ? permRows[0] : permRows;
   if (!perm) {
-    console.warn("[rbac] Missing role-module mapping", { roleId: roleIdNum, moduleId, moduleRoute, moduleKey });
     return null;
   }
   return perm;
@@ -585,12 +584,6 @@ const getPermissionForRoleAndModule = async (
   }
 
   if (!permission) {
-    console.warn("[rbac] Missing role-module mapping", {
-      roleId: roleIdNum,
-      moduleId: moduleId ?? null,
-      moduleRoute: moduleRoute || null,
-      moduleKey: moduleKey || null,
-    });
     return null;
   }
 
@@ -618,6 +611,12 @@ const assertModulePermission = async (
   );
 
   if (!permission) {
+    console.warn("[rbac] Missing role-module mapping", {
+      roleId: Number(roleId) || null,
+      moduleId: moduleId ?? null,
+      moduleRoute: moduleRoute || null,
+      moduleKey: moduleKey || null,
+    });
     throw new AppError(
       "Forbidden: module access not assigned to role",
       RESPONSE_STATUS_CODES.FORBIDDEN

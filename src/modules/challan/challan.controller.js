@@ -11,7 +11,7 @@ const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCac
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 
 /** Parent modules that authorize challan access (same as mount in routes). Resolve listing criteria from first matching. */
-const CHALLAN_PARENT_MODULE_ROUTES = ["/confirm-orders", "/order", "/closed-orders"];
+const CHALLAN_PARENT_MODULE_ROUTES = ["/delivery-challans", "/confirm-orders", "/order", "/closed-orders"];
 
 const resolveDeliveryChallanVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
