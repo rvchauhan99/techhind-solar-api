@@ -82,12 +82,13 @@ const REFERENCE_PRODUCT_CONSUMER_ROUTES = [
 const REFERENCE_SUPPLIER_CONSUMER_ROUTES = ["/supplier", "/purchase-orders", "/po-inwards"];
 
 const REFERENCE_COMPANY_CONSUMER_ROUTES = [
+  "/confirm-orders",
+  "/closed-orders",
+  "/order",
   "/company",
   "/company-profile",
   "/purchase-orders",
   "/po-inwards",
-  "/confirm-orders",
-  "/closed-orders",
   "/stock-adjustments",
   "/stock-transfers",
   "/reports/serialized-inventory",
@@ -97,6 +98,23 @@ const REFERENCE_COMPANY_CONSUMER_ROUTES = [
   "/b2b-sales-orders",
   "/b2b-shipments",
   "/b2b-invoices",
+];
+
+/**
+ * Module routes that may call stock/inventory APIs (stocks page, stock-adjustments, stock-transfers,
+ * b2b-shipments, delivery-challans/order flows). Used with requireModulePermissionAnyByMethod so
+ * strict validation applies only to the full /stocks page (frontend); other pages can use stock APIs.
+ */
+const STOCK_API_CONSUMER_ROUTES = [
+  "/stocks",
+  "/stock-adjustments",
+  "/stock-transfers",
+  "/b2b-shipments",
+  "/order",
+  "/confirm-orders",
+  "/closed-orders",
+  "/fabrication-installation",
+  "/delivery-challans",
 ];
 
 /**
@@ -326,5 +344,6 @@ module.exports = {
   REFERENCE_PRODUCT_CONSUMER_ROUTES,
   REFERENCE_SUPPLIER_CONSUMER_ROUTES,
   REFERENCE_COMPANY_CONSUMER_ROUTES,
+  STOCK_API_CONSUMER_ROUTES,
 };
 

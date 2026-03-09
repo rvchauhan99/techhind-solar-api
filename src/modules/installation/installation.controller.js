@@ -13,7 +13,7 @@ const getByOrderId = asyncHandler(async (req, res) => {
     if (!order) {
         return responseHandler.sendError(res, "Order not found", 404);
     }
-    const context = await resolveOrderVisibilityContext(req);
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
     assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
     const installation = await installationService.getByOrderId(orderId);
     if (!installation) {
@@ -28,7 +28,7 @@ const createOrUpdate = asyncHandler(async (req, res) => {
     if (!order) {
         return responseHandler.sendError(res, "Order not found", 404);
     }
-    const context = await resolveOrderVisibilityContext(req);
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
     assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
     const payload = { ...req.body };
     const result = await installationService.createOrUpdate(orderId, payload, {

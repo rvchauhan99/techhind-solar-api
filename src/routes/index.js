@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const db = require("../models/index.js");
 const { requireAuthWithTenant } = require("../common/middlewares/auth.js");
-const { requireModulePermissionByMethod, requireModulePermissionAnyByMethod } = require("../common/middlewares/modulePermission.js");
+const { requireModulePermissionByMethod, requireModulePermissionAnyByMethod, STOCK_API_CONSUMER_ROUTES } = require("../common/middlewares/modulePermission.js");
 const authRoutes = require("../modules/auth/auth.routes.js");
 const moduleMasterRoutes = require("../modules/moduleMaster/moduleMaster.routes.js");
 const roleMasterRoutes = require("../modules/roleMaster/roleMaster.routes.js");
@@ -73,7 +73,7 @@ router.use("/site-visit", requireAuthWithTenant, requireModulePermissionByMethod
 router.use("/site-survey", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/site-survey" }), siteSurveyRoutes);
 router.use("/followup", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/followup" }), followupRoutes);
 router.use("/inquiry-documents", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/inquiry" }), inquiryDocumentsRoutes);
-router.use("/order-documents", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/order" }), orderDocumentsRoutes);
+router.use("/order-documents", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders", "/fabrication-installation"] }), orderDocumentsRoutes);
 router.use("/product", requireAuthWithTenant, productRoutes);
 router.use("/bill-of-material", requireAuthWithTenant, billOfMaterialRoutes);
 router.use("/project-price", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/project-price" }), projectPriceRoutes);
@@ -81,11 +81,11 @@ router.use("/quotation", requireAuthWithTenant, requireModulePermissionByMethod(
 router.use("/supplier", requireAuthWithTenant, supplierRoutes);
 router.use("/purchase-orders", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/purchase-orders" }), purchaseOrderRoutes);
 router.use("/po-inwards", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/po-inwards" }), poInwardRoutes);
-router.use("/stocks", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stocks" }), stockRoutes);
+router.use("/stocks", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: STOCK_API_CONSUMER_ROUTES }), stockRoutes);
 router.use("/inventory-ledger", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/inventory-ledger" }), inventoryLedgerRoutes);
 router.use("/stock-transfers", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stock-transfers" }), stockTransferRoutes);
 router.use("/stock-adjustments", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stock-adjustments" }), stockAdjustmentRoutes);
-router.use("/reports/serialized-inventory", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/serialized-inventory" }), serializedInventoryReportRoutes);
+router.use("/reports/serialized-inventory", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/reports/serialized-inventory", "/closed-orders", "/order", "/confirm-orders"] }), serializedInventoryReportRoutes);
 router.use("/reports/deliveries", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/reports/deliveries" }), deliveryReportRoutes);
 router.use("/billing", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/billing" }), billingRoutes);
 router.use("/admin", adminRoutes);
@@ -99,7 +99,7 @@ router.use("/home", homeRoutes);
 router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
 router.use("/marketing-leads", marketingLeadRoutes);
-router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), challanRoutes);
+router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders", "/delivery-challans"] }), challanRoutes);
 router.use("/order-payments", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), orderPaymentsRoutes);
 
 router.use("/b2b-clients", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-clients" }), b2bClientsRoutes);
