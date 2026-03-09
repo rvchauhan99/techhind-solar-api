@@ -222,6 +222,17 @@ handlebars.registerHelper("add", function (a, b) {
     return (Number(a) || 0) + (Number(b) || 0);
 });
 
+handlebars.registerHelper("isNumber", function (value) {
+    if (value === null || value === undefined || value === "") return false;
+    if (typeof value === "number") return Number.isFinite(value);
+    const raw = String(value).trim();
+    if (!raw) return false;
+    const cleaned = raw.replace(/,/g, "").replace(/[^\d.-]/g, "").trim();
+    if (!cleaned) return false;
+    const n = parseFloat(cleaned);
+    return Number.isFinite(n);
+});
+
 handlebars.registerHelper("formatYears", function (value) {
     if (value === null || value === undefined || value === "") {
         return "";
@@ -1267,14 +1278,29 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const pricePerKw = parseFloat(quotation.price_per_kw) || 0;
     const systemCost = projectCapacity * pricePerKw;
     const gstPercent = parseFloat(quotation.gst_rate) || 0;
-    const gstAmount = systemCost * (gstPercent / 100);
     const gedaAmount = parseFloat(quotation.state_government_amount) || 0;
-    const netMeteringCost = parseFloat(quotation.netmeter_amount) || 0;
-    const grandTotal = systemCost + gstAmount + gedaAmount + netMeteringCost;
+    const netMeteringCostValue = parseMoney(quotation.netmeter_amount);
+    const netMeteringCostDisplay =
+        netMeteringCostValue > 0 ? netMeteringCostValue : "As Actual Paid By The Customer";
+
+    const discountValue = parseMoney(quotation.discount);
+    const discountType = (quotation.discount_type != null ? String(quotation.discount_type) : "").trim();
+    const hasDiscount = discountValue > 0;
+    const isBeforeTax = hasDiscount && discountType.toLowerCase() === "before tax";
+
+    // GST base depends on discount type.
+    const gstBaseSystemCost = isBeforeTax ? Math.max(0, systemCost - discountValue) : systemCost;
+    const gstAmount = gstBaseSystemCost * (gstPercent / 100);
+
+    const grandTotalBeforeAfterTaxDiscount = gstBaseSystemCost + gstAmount + gedaAmount + netMeteringCostValue;
+    const grandTotal = hasDiscount && !isBeforeTax
+        ? Math.max(0, grandTotalBeforeAfterTaxDiscount - discountValue)
+        : grandTotalBeforeAfterTaxDiscount;
+
     const subsidyAmount = parseMoney(quotation.subsidy_amount);
     const stateSubsidyAmount = parseMoney(quotation.state_subsidy_amount);
     const totalSubsidy = subsidyAmount + stateSubsidyAmount;
-    const finalCost = parseFloat(quotation.effective_cost) || (grandTotal - totalSubsidy);
+    const finalCost = grandTotal - totalSubsidy;
 
     // Use graph fields from quotation for savings calculations
     const pricePerUnit = parseFloat(quotation.graph_price_per_unit) || 0; // Default Rs. 8/unit
@@ -1516,13 +1542,20 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         system_cost: systemCost,
         gst_percent: gstPercent > 0 ? gstPercent : null,
         gst_amount: gstAmount > 0 ? gstAmount : null,
-        net_metering_cost: netMeteringCost,
+        net_metering_cost: netMeteringCostValue,
+        net_metering_cost_display: netMeteringCostDisplay,
         geda_amount: gedaAmount,
         grand_total: grandTotal,
         subsidy_amount: subsidyAmount,
         state_subsidy_amount: stateSubsidyAmount,
         total_subsidy_amount: totalSubsidy,
         final_cost: finalCost,
+        has_discount: hasDiscount,
+        discount_type: discountType || null,
+        discount_value: hasDiscount ? discountValue : 0,
+        discount_label: hasDiscount
+            ? (discountType ? `Discount (${discountType}) (-)` : "Discount (-)")
+            : null,
 
         // Payment terms
         payment_terms: quotation.payment_terms || [
