@@ -8,6 +8,9 @@ const { runWithContext, setContextValue } = require("../../common/utils/requestC
 const { getModelsForSequelize } = require("../tenant/tenantModels.js");
 const bucketClientFactory = require("../tenant/bucketClientFactory.js");
 
+/** Bump when PDF content/template logic changes so cache is invalidated and new PDFs use updated code. */
+const PDF_CONTENT_VERSION = "2";
+
 function buildVersionKey({ quotation, template, company, bankAccount }) {
   const configUpdatedAt =
     template && template.config && template.config.updated_at
@@ -19,6 +22,7 @@ function buildVersionKey({ quotation, template, company, bankAccount }) {
     configUpdatedAt,
     company && company.updated_at ? new Date(company.updated_at).toISOString() : "",
     bankAccount && bankAccount.updated_at ? new Date(bankAccount.updated_at).toISOString() : "",
+    PDF_CONTENT_VERSION,
   ];
   return versionParts.join("|");
 }

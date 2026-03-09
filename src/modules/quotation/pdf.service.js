@@ -197,15 +197,15 @@ const getTemplateDir = (templateKey) => path.join(TEMPLATE_BASE, templateKey || 
  */
 handlebars.registerHelper("formatCurrency", function (value) {
     if (value === null || value === undefined || value === "") {
-        return "0.00";
+        return "0";
     }
     const num = parseFloat(value);
     if (isNaN(num)) {
         return value; // Return as-is if not a number (e.g., "As Actual")
     }
-    return num.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
+    return Math.round(num).toLocaleString("en-IN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
     });
 });
 
@@ -906,8 +906,8 @@ const renderQuotationPDFLightweight = async (quotationData) => {
         doc.on("error", reject);
 
         const money = (n) => {
-            const v = Number(n || 0);
-            return `INR ${v.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+            const v = Number(n != null && Number.isFinite(n) ? n : 0);
+            return `INR ${Math.round(v).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
         };
 
         doc.fontSize(16).text("Quotation", { align: "left" });
@@ -1193,7 +1193,6 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
             cables.earthing_make = makeName || cables.earthing_make;
             cables.earthing_qty = (qty > 0 ? String(qty) : cables.earthing_qty) || "";
             cables.earthing_description = productName || cables.earthing_description;
-            if (productName && !balance_of_system.earthing) balance_of_system.earthing = productName;
             cables_earthing_items.push({
                 product_name: productName,
                 quantity: qty,
@@ -1205,7 +1204,6 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
             cables.la_make = makeName || cables.la_make;
             cables.la_qty = (qty > 0 ? String(qty) : cables.la_qty) || "";
             cables.la_description = productName || cables.la_description;
-            balance_of_system.lightening_arrestor = productName || makeName || balance_of_system.lightening_arrestor;
             cables_la_items.push({
                 product_name: productName,
                 quantity: qty,
@@ -1217,6 +1215,14 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
             balance_of_system.acdb = productName || makeName || balance_of_system.acdb;
         } else if (typeNorm === "dcdb") {
             balance_of_system.dcdb = productName || makeName || balance_of_system.dcdb;
+        } else if (typeNorm === "earthing") {
+            balance_of_system.earthing = productName || makeName || balance_of_system.earthing;
+        } else if (typeNorm === "la") {
+            balance_of_system.lightening_arrestor = productName || makeName || balance_of_system.lightening_arrestor;
+        } else if (typeNorm === "earthing_kit") {
+            balance_of_system.earthing = productName || makeName || balance_of_system.earthing;
+        } else if (typeNorm === "lightning_arrester" || typeNorm === "lightening_arrestor") {
+            balance_of_system.lightening_arrestor = productName || makeName || balance_of_system.lightening_arrestor;
         }
     }
     panel.make_logos = await getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
@@ -1271,36 +1277,45 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
  * @param {string|number|null} [tenantId] - Optional tenant ID for make-logo and image cache
  * @returns {Promise<Object>} Formatted data for PDF templates
  */
+const roundMoney = (n) => (n != null && Number.isFinite(n)) ? Math.round(n) : 0;
+
 const prepareQuotationData = async (quotation, company, bankAccount, productMakesMap = new Map(), bucketClient, tenantId = null) => {
     const logoCache = new Map();
-    // Calculate derived values
+    // Calculate derived values - use form values for first two rows so PDF matches quotation form
     const projectCapacity = parseFloat(quotation.project_capacity) || 0;
-    const pricePerKw = parseFloat(quotation.price_per_kw) || 0;
-    const systemCost = projectCapacity * pricePerKw;
+    const pricePerKwRaw = parseFloat(quotation.price_per_kw) || 0;
+    const totalProjectValue = parseMoney(quotation.total_project_value);
+    const systemCost =
+        totalProjectValue > 0 ? totalProjectValue : Math.round(projectCapacity * pricePerKwRaw);
+    const pricePerKw = roundMoney(pricePerKwRaw);
+    const systemCostRounded = roundMoney(systemCost);
+
     const gstPercent = parseFloat(quotation.gst_rate) || 0;
-    const gedaAmount = parseFloat(quotation.state_government_amount) || 0;
+    const gedaAmount = roundMoney(parseFloat(quotation.state_government_amount) || 0);
     const netMeteringCostValue = parseMoney(quotation.netmeter_amount);
     const netMeteringCostDisplay =
-        netMeteringCostValue > 0 ? netMeteringCostValue : "As Actual Paid By The Customer";
+        netMeteringCostValue > 0 ? roundMoney(netMeteringCostValue) : "As Actual To Be Paid By The Customer";
 
-    const discountValue = parseMoney(quotation.discount);
+    const discountValueRaw = parseMoney(quotation.discount);
+    const discountValue = roundMoney(discountValueRaw);
     const discountType = (quotation.discount_type != null ? String(quotation.discount_type) : "").trim();
     const hasDiscount = discountValue > 0;
     const isBeforeTax = hasDiscount && discountType.toLowerCase() === "before tax";
 
-    // GST base depends on discount type.
-    const gstBaseSystemCost = isBeforeTax ? Math.max(0, systemCost - discountValue) : systemCost;
-    const gstAmount = gstBaseSystemCost * (gstPercent / 100);
+    // GST base depends on discount type (use rounded system cost for consistency)
+    const gstBaseSystemCost = isBeforeTax ? Math.max(0, systemCostRounded - discountValue) : systemCostRounded;
+    const gstAmount = roundMoney(gstBaseSystemCost * (gstPercent / 100));
 
-    const grandTotalBeforeAfterTaxDiscount = gstBaseSystemCost + gstAmount + gedaAmount + netMeteringCostValue;
-    const grandTotal = hasDiscount && !isBeforeTax
+    const netMeteringForTotal = typeof netMeteringCostDisplay === "number" ? netMeteringCostDisplay : roundMoney(netMeteringCostValue);
+    const grandTotalBeforeAfterTaxDiscount = gstBaseSystemCost + gstAmount + gedaAmount + netMeteringForTotal;
+    const grandTotal = roundMoney(hasDiscount && !isBeforeTax
         ? Math.max(0, grandTotalBeforeAfterTaxDiscount - discountValue)
-        : grandTotalBeforeAfterTaxDiscount;
+        : grandTotalBeforeAfterTaxDiscount);
 
-    const subsidyAmount = parseMoney(quotation.subsidy_amount);
-    const stateSubsidyAmount = parseMoney(quotation.state_subsidy_amount);
+    const subsidyAmount = roundMoney(parseMoney(quotation.subsidy_amount));
+    const stateSubsidyAmount = roundMoney(parseMoney(quotation.state_subsidy_amount));
     const totalSubsidy = subsidyAmount + stateSubsidyAmount;
-    const finalCost = grandTotal - totalSubsidy;
+    const finalCost = roundMoney(grandTotal - totalSubsidy);
 
     // Use graph fields from quotation for savings calculations
     const pricePerUnit = parseFloat(quotation.graph_price_per_unit) || 0; // Default Rs. 8/unit
@@ -1469,6 +1484,8 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
             balance_of_system = {
                 ...balance_of_system,
                 ...derived.balance_of_system,
+                earthing: (derived.balance_of_system.earthing && String(derived.balance_of_system.earthing).trim()) ? derived.balance_of_system.earthing : balance_of_system.earthing,
+                lightening_arrestor: (derived.balance_of_system.lightening_arrestor && String(derived.balance_of_system.lightening_arrestor).trim()) ? derived.balance_of_system.lightening_arrestor : balance_of_system.lightening_arrestor,
             };
             structure_items = derived.structure_items || [];
             accessories_items = derived.accessories_items || [];
@@ -1537,9 +1554,9 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         companyFooterPath: (company?.footer != null && String(company.footer).trim() !== "") ? String(company.footer).trim() : null,
         companyStampPath: (company?.stamp != null && String(company.stamp).trim() !== "") ? String(company.stamp).trim() : null,
 
-        // Pricing
+        // Pricing (first two rows match form: price per kW and total project value; all amounts rounded, no decimals)
         price_per_kw: pricePerKw,
-        system_cost: systemCost,
+        system_cost: systemCostRounded,
         gst_percent: gstPercent > 0 ? gstPercent : null,
         gst_amount: gstAmount > 0 ? gstAmount : null,
         net_metering_cost: netMeteringCostValue,

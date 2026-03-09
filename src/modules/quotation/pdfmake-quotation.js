@@ -62,14 +62,14 @@ const getDefaultStyles = () => ({
     },
 });
 
-// Helper to format currency
+// Helper to format currency (rounded, no decimal points)
 const formatCurrency = (value) => {
-    if (value === null || value === undefined || value === "") return "0.00";
+    if (value === null || value === undefined || value === "") return "0";
     const num = parseFloat(value);
     if (isNaN(num)) return value;
-    return num.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
+    return Math.round(num).toLocaleString("en-IN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
     });
 };
 
@@ -384,7 +384,7 @@ const createOfferPage = (data) => {
             },
             margin: [0, 0, 0, 10],
         },
-        { text: "(*) Including GST", style: "label", italics: true, margin: [0, 0, 0, 20] },
+        ...(data.gst_percent ? [] : [{ text: "(*) Including GST", style: "label", italics: true, margin: [0, 0, 0, 20] }]),
         { text: "Payment Terms", style: "subheader", margin: [0, 0, 0, 10] },
         ...paymentTermsList,
         { canvas: [{ type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 0.5, lineColor: "#ddd" }], margin: [0, 15, 0, 15] },
