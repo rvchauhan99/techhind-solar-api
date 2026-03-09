@@ -3,13 +3,17 @@ const controller = require("./companyMaster.controller.js");
 const { requireAuthWithTenant } = require("../../common/middlewares/auth.js");
 const {
   requireModulePermission,
-  requireOpenedModuleReadPermission,
+  requireModulePermissionAny,
+  REFERENCE_COMPANY_CONSUMER_ROUTES,
 } = require("../../common/middlewares/modulePermission.js");
 const uploadMemory = require("../../common/middlewares/uploadMemory.js");
 
 const router = Router();
 
-const refRead = requireOpenedModuleReadPermission({ fallbackModuleRoute: "/company-profile" });
+const refRead = requireModulePermissionAny({
+  moduleRoutes: REFERENCE_COMPANY_CONSUMER_ROUTES,
+  action: "read",
+});
 // Use moduleKey so company profile permission works regardless of module.route (e.g. /company or /company-profile)
 const company = (action) => requireModulePermission({ moduleKey: "company_profile", action });
 

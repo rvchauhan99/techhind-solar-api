@@ -15,6 +15,8 @@ const {
   resetPassword,
 } = require("./auth.controller.js");
 const { validateAccessToken, requireAuthWithTenant } = require("../../common/middlewares/auth.js");
+const { tenantContextForPublicAuthMiddleware } = require("../tenant/tenantContext.middleware.js");
+const { tenantTransactionMiddleware } = require("../tenant/tenantTransaction.middleware.js");
 
 const router = Router();
 
@@ -30,9 +32,9 @@ router.post("/2fa/generate", ...requireAuthWithTenant, generateTwoFactor);
 router.post("/2fa/enable", ...requireAuthWithTenant, enableTwoFactor);
 router.post("/2fa/disable", ...requireAuthWithTenant, disableTwoFactor);
 
-// Password Reset Routes (Public - no auth required)
-router.post("/forgot-password", sendPasswordResetOtp);
-router.post("/verify-reset-otp", verifyPasswordResetOtp);
-router.post("/reset-password", resetPassword);
+// Password Reset Routes (Public - no auth; tenant from body/header/subdomain)
+router.post("/forgot-password", tenantContextForPublicAuthMiddleware, tenantTransactionMiddleware, sendPasswordResetOtp);
+router.post("/verify-reset-otp", tenantContextForPublicAuthMiddleware, tenantTransactionMiddleware, verifyPasswordResetOtp);
+router.post("/reset-password", tenantContextForPublicAuthMiddleware, tenantTransactionMiddleware, resetPassword);
 
 module.exports = router;

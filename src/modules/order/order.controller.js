@@ -12,15 +12,13 @@ const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCac
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 const { resolveOrderVisibilityContext } = require("./orderVisibilityContext.js");
 
+const ORDER_PAGE_MODULE_ROUTES = ["/order", "/confirm-orders", "/closed-orders", "/fabrication-installation"];
+
 const resolveFabricationInstallationVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
     const userId = Number(req.user?.id);
-    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
-        {
-            roleId,
-            moduleRoute: "/fabrication-installation",
-            moduleKey: "fabrication_installation",
-        },
+    const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModuleAny(
+        { roleId, moduleRoutes: ORDER_PAGE_MODULE_ROUTES },
         req.transaction
     );
 
@@ -318,7 +316,7 @@ const getById = asyncHandler(async (req, res) => {
     if (!item) {
         return responseHandler.sendError(res, "Order not found", 404);
     }
-    const context = await resolveOrderVisibilityContext(req);
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
     assertRecordVisibleByListingCriteria(item, context, { handledByField: "handled_by" });
     return responseHandler.sendSuccess(res, item, "Order fetched", 200);
 });
@@ -329,7 +327,7 @@ const generatePDF = asyncHandler(async (req, res) => {
     if (!order) {
         return responseHandler.sendError(res, "Order not found", 404);
     }
-    const context = await resolveOrderVisibilityContext(req);
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
     assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
 
     const { Company, CompanyBankAccount } = getTenantModels();
@@ -379,7 +377,7 @@ const update = asyncHandler(async (req, res) => {
     if (!existing) {
         return responseHandler.sendError(res, "Order not found", 404);
     }
-    const context = await resolveOrderVisibilityContext(req);
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
     assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
     const payload = { ...req.body };
 
@@ -425,7 +423,7 @@ const remove = asyncHandler(async (req, res) => {
     if (!existing) {
         return responseHandler.sendError(res, "Order not found", 404);
     }
-    const context = await resolveOrderVisibilityContext(req);
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
     assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
     await orderService.deleteOrder({
         id,
