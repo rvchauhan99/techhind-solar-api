@@ -319,7 +319,7 @@ const createOfferPage = (data) => {
             { text: "Grand Total Cost Of The Project", style: "tableCell", bold: true, fillColor: COLORS.lightGray },
             { text: formatCurrency(data.grand_total), style: "tableCell", bold: true, alignment: "right", fillColor: COLORS.lightGray },
         ],
-        [{ text: "MNRE & State Subsidy", style: "tableCell" }, { text: formatCurrency(data.state_subsidy_amount), style: "tableCell", alignment: "right" }],
+        [{ text: "MNRE & State Subsidy", style: "tableCell" }, { text: formatCurrency(data.total_subsidy_amount ?? (Number(data.subsidy_amount || 0) + Number(data.state_subsidy_amount || 0))), style: "tableCell", alignment: "right" }],
         [
             { text: "Final Effective Cost to Customer After Subsidy", style: "tableCell", bold: true, fillColor: COLORS.orange, color: COLORS.white },
             { text: formatCurrency(data.final_cost), style: "tableCell", bold: true, alignment: "right", fillColor: COLORS.orange, color: COLORS.white },

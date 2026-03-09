@@ -418,7 +418,7 @@ const updateUserToken = async (
   return result;
 };
 
-const generateTwoFactorSecret = async (user_id, transaction = null) => {
+const generateTwoFactorSecret = async (user_id, transaction = null, issuer = "SolarSystem") => {
   const { User } = getTenantModels();
   const user = await User.findByPk(user_id, { transaction });
   if (!user) throw new AppError("User not found", 404);
@@ -428,7 +428,8 @@ const generateTwoFactorSecret = async (user_id, transaction = null) => {
   // Usually we save it but don't enable it yet.
   await user.update({ two_factor_secret: secret }, { transaction });
 
-  const otpauth = authenticator.keyuri(user.email, "SolarSystem", secret);
+  const label = String(issuer || "SolarSystem").trim() || "SolarSystem";
+  const otpauth = authenticator.keyuri(user.email, label, secret);
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
 
   return { secret, qrCodeUrl };
@@ -470,8 +471,9 @@ const disableTwoFactor = async (user_id, transaction = null) => {
 
 /**
  * Generate 2FA secret on tenant DB (shared mode).
+ * @param {string} [issuer] - Issuer label shown in authenticator app (e.g. subdomain host like gs.techhind.in)
  */
-const generateTwoFactorSecretOnSequelize = async (tenantSequelize, user_id) => {
+const generateTwoFactorSecretOnSequelize = async (tenantSequelize, user_id, issuer = "SolarSystem") => {
   const rows = await tenantSequelize.query(
     "SELECT id, email FROM users WHERE id = :id LIMIT 1",
     { replacements: { id: user_id }, type: tenantSequelize.QueryTypes.SELECT }
@@ -484,7 +486,8 @@ const generateTwoFactorSecretOnSequelize = async (tenantSequelize, user_id) => {
     "UPDATE users SET two_factor_secret = :secret, updated_at = NOW() WHERE id = :id",
     { replacements: { secret, id: user_id } }
   );
-  const otpauth = authenticator.keyuri(row.email, "SolarSystem", secret);
+  const label = String(issuer || "SolarSystem").trim() || "SolarSystem";
+  const otpauth = authenticator.keyuri(row.email, label, secret);
   const qrCodeUrl = await qrcode.toDataURL(otpauth);
   return { secret, qrCodeUrl };
 };
