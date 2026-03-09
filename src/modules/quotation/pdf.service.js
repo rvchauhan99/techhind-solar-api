@@ -16,6 +16,19 @@ const {
 const TEMPLATE_BASE = path.join(__dirname, "../../../templates/quotation");
 const PUBLIC_DIR = path.join(__dirname, "../../../public");
 
+function parseMoney(value) {
+    if (value == null) return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const raw = String(value).trim();
+    if (!raw) return 0;
+
+    // Handle common formats like "78,000", "₹ 78,000.00", "INR 78000".
+    const cleaned = raw.replace(/,/g, "").replace(/[^\d.-]/g, "").trim();
+    if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return 0;
+    const n = parseFloat(cleaned);
+    return Number.isFinite(n) ? n : 0;
+}
+
 // Concurrency limit for PDF page renders (prevents Chromium OOM under burst traffic)
 const PDF_RENDER_MAX_CONCURRENCY = Math.max(1, parseInt(process.env.PDF_RENDER_MAX_CONCURRENCY || "2", 10));
 const pdfRenderSemaphore = { active: 0, queue: [] };
@@ -1258,8 +1271,8 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const gedaAmount = parseFloat(quotation.state_government_amount) || 0;
     const netMeteringCost = parseFloat(quotation.netmeter_amount) || 0;
     const grandTotal = systemCost + gstAmount + gedaAmount + netMeteringCost;
-    const subsidyAmount = parseFloat(quotation.subsidy_amount) || 0;
-    const stateSubsidyAmount = parseFloat(quotation.state_subsidy_amount) || 0;
+    const subsidyAmount = parseMoney(quotation.subsidy_amount);
+    const stateSubsidyAmount = parseMoney(quotation.state_subsidy_amount);
     const totalSubsidy = subsidyAmount + stateSubsidyAmount;
     const finalCost = parseFloat(quotation.effective_cost) || (grandTotal - totalSubsidy);
 
@@ -1506,7 +1519,9 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         net_metering_cost: netMeteringCost,
         geda_amount: gedaAmount,
         grand_total: grandTotal,
+        subsidy_amount: subsidyAmount,
         state_subsidy_amount: stateSubsidyAmount,
+        total_subsidy_amount: totalSubsidy,
         final_cost: finalCost,
 
         // Payment terms

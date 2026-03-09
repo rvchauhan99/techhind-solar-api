@@ -201,9 +201,17 @@ const verifyTwoFactor = asyncHandler(async (req, res) => {
 });
 
 const generateTwoFactor = asyncHandler(async (req, res) => {
+  const issuer =
+    req.body?.issuer?.trim() ||
+    req.get?.("X-2FA-Issuer")?.trim() ||
+    (req.tenant?.tenant_key && process.env.APP_DOMAIN
+      ? `${req.tenant.tenant_key}.${process.env.APP_DOMAIN.replace(/^\.|\.$/g, "")}`.trim()
+      : null) ||
+    process.env.APP_2FA_ISSUER?.trim() ||
+    "SolarSystem";
   const { secret, qrCodeUrl } = req.tenant?.sequelize
-    ? await authService.generateTwoFactorSecretOnSequelize(req.tenant.sequelize, req.user.id)
-    : await authService.generateTwoFactorSecret(req.user.id, req.transaction);
+    ? await authService.generateTwoFactorSecretOnSequelize(req.tenant.sequelize, req.user.id, issuer)
+    : await authService.generateTwoFactorSecret(req.user.id, req.transaction, issuer);
   responseHandler.sendSuccess(res, { secret, qrCodeUrl }, "2FA Secret Generated");
 });
 
