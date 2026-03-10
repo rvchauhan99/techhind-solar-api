@@ -1,0 +1,338 @@
+{
+    "info": {
+        "name": "TechHind Solar API - Fabrication & Installation",
+        "description": "Postman collection covering all APIs related to completing the fabrication and installation processes, separated by tabs.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Fabrication",
+            "item": [
+                {
+                    "name": "Listing: Pending Fabrication",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/fabrication-installation?page=1&limit=10&tab=pending_fabrication",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                "fabrication-installation"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "tab",
+                                    "value": "pending_fabrication"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Listing: Completed Fabrication (Last 15 days)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/fabrication-installation?page=1&limit=10&tab=completed_fabrication_15d",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                "fabrication-installation"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "tab",
+                                    "value": "completed_fabrication_15d"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Fabrication Details",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/:id/fabrication",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                ":id",
+                                "fabrication"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{orderId}}"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create/Update Fabrication",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"status\": \"completed\",\n  \"remarks\": \"Fabrication is complete\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/:id/fabrication",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                ":id",
+                                "fabrication"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{orderId}}"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Installation",
+            "item": [
+                {
+                    "name": "Listing: Pending Installation",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/fabrication-installation?page=1&limit=10&tab=pending_installation",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                "fabrication-installation"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "tab",
+                                    "value": "pending_installation"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Listing: Completed Installation (Last 15 days)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/fabrication-installation?page=1&limit=10&tab=completed_installation_15d",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                "fabrication-installation"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "tab",
+                                    "value": "completed_installation_15d"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Installation Details",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/:id/installation",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                ":id",
+                                "installation"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{orderId}}"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create/Update Installation",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"status\": \"completed\",\n  \"remarks\": \"Installation is complete\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/order/:id/installation",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "order",
+                                ":id",
+                                "installation"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "{{orderId}}"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    "pm.request.headers.add({key: 'x-tenant-id', value: pm.collectionVariables.get('tenant_key')});",
+                    "pm.request.headers.add({key: 'x-tenant-key', value: pm.collectionVariables.get('tenant_key')});"
+                ],
+                "packages": {}
+            }
+        }
+    ],
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "http://localhost:5000",
+            "type": "string"
+        },
+        {
+            "key": "accessToken",
+            "value": "YOUR_ACCESS_TOKEN",
+            "type": "string"
+        },
+        {
+            "key": "tenant_key",
+            "value": "demo",
+            "type": "string"
+        },
+        {
+            "key": "orderId",
+            "value": "1",
+            "type": "string"
+        }
+    ]
+}
