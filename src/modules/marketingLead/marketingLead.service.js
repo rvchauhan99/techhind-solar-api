@@ -13,6 +13,15 @@ const normalizeLike = (s) => {
   return str ? `%${str}%` : null;
 };
 
+/** Normalize optional date from payload: invalid/empty/"Invalid date" -> null; valid date -> Date or ISO string for DB */
+const normalizeOptionalDate = (value) => {
+  if (value == null || value === "") return null;
+  const str = String(value).trim();
+  if (str === "" || str.toLowerCase() === "invalid date") return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 const buildLeadWhere = ({
   status,
   not_status,
@@ -432,12 +441,15 @@ const updateLead = async ({ id, payload, transaction } = {}) => {
     status: payload.status ?? lead.status,
     status_reason: payload.status_reason ?? lead.status_reason,
     last_call_outcome: payload.last_call_outcome ?? lead.last_call_outcome,
-    last_called_at: payload.last_called_at ?? lead.last_called_at,
-    next_follow_up_at: payload.next_follow_up_at ?? lead.next_follow_up_at,
+    last_called_at:
+      "last_called_at" in payload ? normalizeOptionalDate(payload.last_called_at) : lead.last_called_at,
+    next_follow_up_at:
+      "next_follow_up_at" in payload ? normalizeOptionalDate(payload.next_follow_up_at) : lead.next_follow_up_at,
     priority: payload.priority ?? lead.priority,
     lead_score: payload.lead_score ?? lead.lead_score,
     converted_inquiry_id: payload.converted_inquiry_id ?? lead.converted_inquiry_id,
-    converted_at: payload.converted_at ?? lead.converted_at,
+    converted_at:
+      "converted_at" in payload ? normalizeOptionalDate(payload.converted_at) : lead.converted_at,
     remarks: payload.remarks ?? lead.remarks,
     tags: payload.tags ?? lead.tags,
     duplicate_group_key: payload.duplicate_group_key ?? lead.duplicate_group_key,
