@@ -150,7 +150,7 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 const getReferenceOptions = asyncHandler(async (req, res) => {
-  const { model, status, status_in, q, limit, id } = req.query;
+  const { model, status, status_in, q, limit, id, ...extraFilters } = req.query;
   if (!model) {
     return responseHandler.sendError(res, 'Model parameter is required', 400);
   }
@@ -161,6 +161,7 @@ const getReferenceOptions = asyncHandler(async (req, res) => {
     q: q || undefined,
     limit: limit != null && limit !== '' ? limit : undefined,
     id: id || undefined,
+    filters: extraFilters,
   }, req);
   return responseHandler.sendSuccess(res, options, 'Reference options fetched', 200);
 });
