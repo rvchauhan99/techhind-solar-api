@@ -23,7 +23,7 @@
   "predefine_document.model": { "displayField": "page_name", "orderBy": "page_name" },
   "product_type.model": { "displayField": "name", "orderBy": "display_order" },
   "project_scheme.model": { "displayField": "name", "orderBy": "name" },
-  "reason.model": { "displayField": "name", "orderBy": "name" },
+  "reason.model": { "displayField": "reason", "orderBy": "reason" },
   "task_planner_category.model": { "displayField": "name", "orderBy": "name" },
   "whatsapp_template.model": { "displayField": "template_key", "orderBy": "template_key" },
 
