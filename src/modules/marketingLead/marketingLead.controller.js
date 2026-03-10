@@ -75,6 +75,15 @@ const list = asyncHandler(async (req, res) => {
   const nextFollowUpFromDate = normalizeDateRangeValue(next_follow_up_from, { endOfDay: false });
   const nextFollowUpToDate = normalizeDateRangeValue(next_follow_up_to, { endOfDay: true });
 
+  const parsedNotStatus =
+    not_status == null || not_status === ""
+      ? undefined
+      : Array.isArray(not_status)
+        ? not_status
+        : typeof not_status === "string"
+          ? not_status.split(",").map((v) => v.trim()).filter(Boolean)
+          : [not_status];
+
   const { enforcedAssignedToIds } = await resolveMarketingLeadVisibilityContext(req);
   const result = await marketingLeadService.listLeads({
     page: parseInt(page),
@@ -83,7 +92,7 @@ const list = asyncHandler(async (req, res) => {
     sortBy,
     sortOrder,
     status,
-    not_status,
+    not_status: parsedNotStatus?.length ? parsedNotStatus : undefined,
     assigned_to,
     branch_id,
     inquiry_source_id,
