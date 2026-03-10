@@ -6,23 +6,23 @@ const { buildStringCond, buildNumberCond, buildDateCond } = require("../../commo
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const generateQuoteNumber = async () => {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const year = String(now.getFullYear()).slice(-2);
-  const mmyy = `${month}${year}`;
   const models = getTenantModels();
   // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
   const rows = await models.sequelize.query(
-    `SELECT quote_no FROM b2b_sales_quotes WHERE quote_no LIKE :pattern AND deleted_at IS NULL ORDER BY quote_no DESC LIMIT 1`,
-    { replacements: { pattern: `SQ-${mmyy}%` }, type: QueryTypes.SELECT }
+    `SELECT quote_no
+     FROM b2b_sales_quotes
+     WHERE quote_no LIKE :pattern AND deleted_at IS NULL
+     ORDER BY LENGTH(quote_no) DESC, quote_no DESC
+     LIMIT 1`,
+    { replacements: { pattern: `QT%` }, type: QueryTypes.SELECT }
   );
   let seq = 1;
   if (Array.isArray(rows) && rows.length > 0 && rows[0].quote_no) {
-    const last = rows[0].quote_no;
-    const lastSeq = parseInt(last.slice(-4), 10);
+    const last = String(rows[0].quote_no || "");
+    const lastSeq = parseInt(last.replace(/^QT/i, "").replace(/[^0-9]/g, ""), 10);
     if (!Number.isNaN(lastSeq)) seq = lastSeq + 1;
   }
-  return `SQ-${mmyy}${String(seq).padStart(4, "0")}`;
+  return `QT${String(seq).padStart(2, "0")}`;
 };
 
 const listQuotes = async ({
