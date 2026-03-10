@@ -6,23 +6,23 @@ const { buildStringCond, buildNumberCond, buildDateCond } = require("../../commo
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const generateOrderNumber = async () => {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const year = String(now.getFullYear()).slice(-2);
-  const mmyy = `${month}${year}`;
   const models = getTenantModels();
   // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
   const rows = await models.sequelize.query(
-    `SELECT order_no FROM b2b_sales_orders WHERE order_no LIKE :pattern AND deleted_at IS NULL ORDER BY order_no DESC LIMIT 1`,
-    { replacements: { pattern: `SO-${mmyy}%` }, type: QueryTypes.SELECT }
+    `SELECT order_no
+     FROM b2b_sales_orders
+     WHERE order_no LIKE :pattern AND deleted_at IS NULL
+     ORDER BY LENGTH(order_no) DESC, order_no DESC
+     LIMIT 1`,
+    { replacements: { pattern: `SO%` }, type: QueryTypes.SELECT }
   );
   let seq = 1;
   if (Array.isArray(rows) && rows.length > 0 && rows[0].order_no) {
-    const last = rows[0].order_no;
-    const lastSeq = parseInt(last.slice(-4), 10);
+    const last = String(rows[0].order_no || "");
+    const lastSeq = parseInt(last.replace(/^SO/i, "").replace(/[^0-9]/g, ""), 10);
     if (!Number.isNaN(lastSeq)) seq = lastSeq + 1;
   }
-  return `SO-${mmyy}${String(seq).padStart(4, "0")}`;
+  return `SO${String(seq).padStart(2, "0")}`;
 };
 
 const listOrders = async ({
