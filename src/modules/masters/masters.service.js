@@ -832,7 +832,7 @@ const updateMaster = async ({ model, id, updates, userId } = {}, req) => {
  * @param {Object} params - { model, status, q, limit, id } - status optional; q search term (optional); limit max results (optional, default 20 when q present); id optional single id to fetch one option
  * @returns {Array} - Array of { id, label, value, ... } objects
  */
-const getReferenceOptions = async ({ model, status, status_in, q = null, limit = null, id: idParam = null } = {}, req) => {
+const getReferenceOptions = async ({ model, status, status_in, q = null, limit = null, id: idParam = null, filters = null } = {}, req) => {
     if (!model) {
         throw new AppError('Model name is required', RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
@@ -866,6 +866,31 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
     const parsedId = idParam != null && idParam !== '' ? (Number(idParam) || idParam) : null;
     if (parsedId != null) {
         where.id = parsedId;
+    }
+
+    // Apply extra filters (passed as query params) when the model has those columns.
+    // Example: /masters/reference-options?model=reason.model&reason_type=payment_rejection&is_active=true
+    if (filters && typeof filters === 'object') {
+        for (const [key, rawVal] of Object.entries(filters)) {
+            if (!key || rawVal == null || rawVal === '') continue;
+            if (!modelAttributes[key]) continue;
+            if (['deleted_at'].includes(key)) continue;
+
+            const attrTypeKey = modelAttributes[key]?.type?.key || '';
+            if (attrTypeKey === 'BOOLEAN') {
+                const s = String(rawVal).toLowerCase().trim();
+                if (s === 'true' || s === '1' || s === 'yes') where[key] = true;
+                else if (s === 'false' || s === '0' || s === 'no') where[key] = false;
+                continue;
+            }
+            if (['INTEGER', 'BIGINT', 'FLOAT', 'DOUBLE', 'DECIMAL'].includes(attrTypeKey)) {
+                const n = Number(rawVal);
+                if (!Number.isNaN(n)) where[key] = n;
+                continue;
+            }
+            // Default: string-ish exact match (case-insensitive for Postgres)
+            where[key] = { [Op.iLike]: String(rawVal).trim() };
+        }
     }
 
     // Search: when q is provided, filter by display field and other searchable string fields
