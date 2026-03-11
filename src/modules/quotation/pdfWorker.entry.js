@@ -11,34 +11,10 @@ const { initializeRegistryConnection } = require("../../config/registryDb.js");
 const { getDialectOptions } = require("../../config/dbSsl.js");
 const { isAuditLogsEnabled } = require("../../config/auditLogs.js");
 
-/** Worker uses a one-off Sequelize with pool max 1 per job to avoid exhausting Postgres connection slots. */
-const CHILD_POOL_CONFIG = { max: 1, min: 0 };
+const dbPoolManager = require("../tenant/dbPoolManager.js");
 
-function resolveTenantSequelize(tenantId) {
-  if (tenantId === "default") {
-    const mainConfig = require("../../config/sequelize.config.js");
-    return new Sequelize({
-      ...mainConfig,
-      pool: CHILD_POOL_CONFIG,
-    });
-  }
-
-  return initializeRegistryConnection().then(() =>
-    tenantRegistryService.getTenantById(tenantId).then((config) => {
-      if (!config) throw new Error(`Tenant not found: ${tenantId}`);
-      const { db_host, db_port, db_name, db_user, db_password } = config;
-      if (!db_host || !db_name || !db_user) throw new Error("Tenant DB config incomplete");
-      const isProduction = process.env.NODE_ENV === "production";
-      return new Sequelize(db_name, db_user, db_password || undefined, {
-        host: db_host,
-        port: db_port || 5432,
-        dialect: "postgres",
-        logging: isAuditLogsEnabled() ? (sql) => console.log(`[DB:worker/${db_name}]`, sql) : false,
-        pool: CHILD_POOL_CONFIG,
-        dialectOptions: isProduction ? getDialectOptions(true) : {},
-      });
-    })
-  );
+async function resolveTenantSequelize(tenantId) {
+  return dbPoolManager.getPool(tenantId);
 }
 
 const jobQueue = [];
@@ -105,11 +81,21 @@ async function runOneJob(tenantId, jobId) {
         errorMessage: (err && err.message) || String(err),
       });
       return { success: false, errorMessage: (err && err.message) || String(err) };
+    } finally {
+      // Background worker reuses pools; do not close tenantSequelize here.
     }
-  } finally {
-    await tenantSequelize.close();
+  } catch (err) {
+    return { success: false, errorMessage: (err && err.message) || String(err) };
   }
 }
+
+async function shutdown() {
+  console.info("[PDF_WORKER_ENTRY] Shutting down, closing all tenant pools...");
+  await dbPoolManager.closeAllPools();
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 process.on("message", (msg) => {
   if (msg && msg.type === "job" && msg.tenantId != null && msg.jobId != null) {
