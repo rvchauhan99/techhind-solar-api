@@ -158,7 +158,7 @@ const updateFollowup = async (id, payload, transaction = null) => {
       {
         model: Inquiry,
         as: "inquiry",
-        attributes: ["id", "date_of_inquiry", "status"],
+        attributes: ["id", "date_of_inquiry", "status", "handled_by"],
         required: false,
       },
       {
@@ -171,7 +171,11 @@ const updateFollowup = async (id, payload, transaction = null) => {
     transaction,
   });
 
-  return updatedFollowup.toJSON();
+  const result = updatedFollowup.toJSON();
+  if (result.inquiry) {
+    result.inquiry_handled_by = result.inquiry.handled_by;
+  }
+  return result;
 };
 
 const deleteFollowup = async (id, transaction = null) => {
@@ -199,7 +203,7 @@ const getFollowupById = async (id, transaction = null) => {
       {
         model: Inquiry,
         as: "inquiry",
-        attributes: ["id", "date_of_inquiry", "status"],
+        attributes: ["id", "date_of_inquiry", "status", "handled_by"],
         required: false,
       },
       {
@@ -216,7 +220,11 @@ const getFollowupById = async (id, transaction = null) => {
     throw new AppError("Followup not found", RESPONSE_STATUS_CODES.NOT_FOUND);
   }
 
-  return followup.toJSON();
+  const result = followup.toJSON();
+  if (result.inquiry) {
+    result.inquiry_handled_by = result.inquiry.handled_by;
+  }
+  return result;
 };
 
 const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}, transaction = null) => {
@@ -321,6 +329,14 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     }
   }
 
+  if (Array.isArray(filters.enforced_handled_by_ids)) {
+    if (filters.enforced_handled_by_ids.length === 0) {
+      inquiryWhere.handled_by = { [Op.in]: [-1] };
+    } else {
+      inquiryWhere.handled_by = { [Op.in]: filters.enforced_handled_by_ids };
+    }
+  }
+
   // Note: We don't apply search at database level for inquiries when q is provided
   // because we need to search across both inquiry and followup fields after flattening.
   // This ensures we can find inquiries that match via their followups even if the inquiry itself doesn't match.
@@ -364,6 +380,7 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
       "estimated_cost",
       "channel_partner",
       "remarks",
+      "handled_by",
     ],
   };
 
@@ -442,6 +459,7 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
       estimated_cost: inquiry.estimated_cost || null,
       channel_partner: inquiry.channel_partner || null,
       inquiry_remarks: inquiry.remarks || null,
+      inquiry_handled_by: inquiry.handled_by || null,
     };
 
     return result;
