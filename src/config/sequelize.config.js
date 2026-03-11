@@ -43,8 +43,8 @@ const defaultMax = nodeEnv === "development" ? 2 : 5;
 const pool = {
   max: Number.isFinite(poolMax) ? poolMax : defaultMax,
   min: Number.isFinite(poolMin) ? poolMin : 0,
-  acquire: parseInt(process.env.DB_POOL_ACQUIRE, 10) || 2000,
-  idle: parseInt(process.env.DB_POOL_IDLE, 10) || 30000,
+  acquire: parseInt(process.env.DB_POOL_ACQUIRE, 10) || 30000,
+  idle: parseInt(process.env.DB_POOL_IDLE, 10) || 10000,
   evict: parseInt(process.env.DB_POOL_EVICT, 10) || 1000,
 };
 
