@@ -37,8 +37,8 @@ function getRegistrySequelize() {
     pool: {
       max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
       min: 0,
-      acquire: 2000,
-      idle: 30000,
+      acquire: 30000,
+      idle: 10000,
     },
   });
   return registrySequelize;
@@ -94,8 +94,8 @@ async function initializeRegistryConnection() {
       pool: {
         max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
         min: 0,
-        acquire: 2000,
-        idle: 30000,
+        acquire: 30000,
+        idle: 10000,
       },
     });
     await sequelize.authenticate();

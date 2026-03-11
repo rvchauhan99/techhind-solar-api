@@ -13,8 +13,8 @@ const poolCache = new Map();
 const defaultPoolConfig = {
   max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
   min: parseInt(process.env.DB_POOL_MIN, 10) || 0,
-  acquire: 2000,
-  idle: 30000,
+  acquire: 30000,
+  idle: 10000,
 };
 
 /**
