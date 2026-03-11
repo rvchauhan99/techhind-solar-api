@@ -3,6 +3,7 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const { INQUIRY_STATUS } = require("../../common/utils/constants.js");
 const notificationService = require("../notification/notification.service.js");
 
@@ -535,7 +536,19 @@ const createInquiry = async ({ payload, transaction } = {}) => {
     }
 
     // 3) Create Inquiry linked to that customer
+    // Try to generate Inquiry number from Serial Master
+    let serialInquiryNumber = null;
+    try {
+      const serialResult = await serialMasterService.generateSerialByCode("CUSTOMERINQUIRY", { transaction: t });
+      if (serialResult && serialResult.status) {
+        serialInquiryNumber = serialResult.result;
+      }
+    } catch (err) {
+      console.warn("Failed to generate Customer Inquiry number from serial master:", err.message);
+    }
+
     const data = {
+      inquiry_number: serialInquiryNumber || undefined, // Fallback to model hook if null
       inquiry_source_id: payload.inquiry_source_id || null,
       customer_id: customer.id,
       date_of_inquiry: payload.date_of_inquiry || null,

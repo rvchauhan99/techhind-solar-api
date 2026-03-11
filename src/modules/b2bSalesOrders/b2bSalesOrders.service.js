@@ -4,6 +4,7 @@ const ExcelJS = require("exceljs");
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildNumberCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 
 const generateOrderNumber = async () => {
   const models = getTenantModels();
@@ -186,7 +187,18 @@ const createOrder = async ({ payload, user_id, transaction }) => {
     err.statusCode = 400;
     throw err;
   }
-  header.order_no = await generateOrderNumber();
+  // Try to generate Order number from Serial Master
+  let serialOrderNumber = null;
+  try {
+    const serialResult = await serialMasterService.generateSerialByCode("B2BSALESORDER", { transaction });
+    if (serialResult && serialResult.status) {
+      serialOrderNumber = serialResult.result;
+    }
+  } catch (err) {
+    console.warn("Failed to generate B2B Sales Order number from serial master:", err.message);
+  }
+
+  header.order_no = serialOrderNumber || await generateOrderNumber();
   if (!header.order_date) header.order_date = new Date().toISOString().slice(0, 10);
   const { items: computedItems, subtotal_amount, total_gst_amount, grand_total } = computeTotals(items);
   header.subtotal_amount = subtotal_amount;
@@ -252,7 +264,7 @@ const createFromQuote = async ({ quoteId, payloadOverride, user_id, transaction 
     quote_id: quoteId,
     payment_terms: quote.payment_terms,
     delivery_terms: quote.delivery_terms,
-    order_no: await generateOrderNumber(),
+    order_no: null,
     order_date: new Date().toISOString().slice(0, 10),
     subtotal_amount,
     total_gst_amount,
@@ -261,6 +273,19 @@ const createFromQuote = async ({ quoteId, payloadOverride, user_id, transaction 
     status: "DRAFT",
     ...(payloadOverride || {}),
   };
+
+  // Try to generate Order number from Serial Master
+  let serialOrderNumberGen = null;
+  try {
+    const serialResult = await serialMasterService.generateSerialByCode("B2BSALESORDER", { transaction });
+    if (serialResult && serialResult.status) {
+      serialOrderNumberGen = serialResult.result;
+    }
+  } catch (err) {
+    console.warn("Failed to generate B2B Sales Order number from serial master:", err.message);
+  }
+
+  header.order_no = header.order_no || serialOrderNumberGen || await generateOrderNumber();
 
   const order = await B2BSalesOrder.create(header, { transaction });
   await B2BSalesOrderItem.bulkCreate(

@@ -3,6 +3,7 @@
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const stockService = require("../stock/stock.service.js");
 const inventoryLedgerService = require("../inventoryLedger/inventoryLedger.service.js");
 const { TRANSACTION_TYPE, MOVEMENT_TYPE, SERIAL_STATUS } = require("../../common/utils/constants.js");
@@ -210,7 +211,18 @@ const createShipment = async ({ payload, user_id, transaction }) => {
     }
   }
 
-  if (!header.shipment_no) header.shipment_no = await generateShipmentNumber();
+  // Try to generate Shipment number from Serial Master
+  let serialShipmentNumber = null;
+  try {
+    const serialResult = await serialMasterService.generateSerialByCode("B2BSHIPMENT", { transaction });
+    if (serialResult && serialResult.status) {
+      serialShipmentNumber = serialResult.result;
+    }
+  } catch (err) {
+    console.warn("Failed to generate B2B Shipment number from serial master:", err.message);
+  }
+
+  if (!header.shipment_no) header.shipment_no = serialShipmentNumber || await generateShipmentNumber();
   header.shipment_date = header.shipment_date || new Date().toISOString().slice(0, 10);
   header.client_id = order.client_id;
   header.ship_to_id = order.ship_to_id;
