@@ -73,6 +73,8 @@ module.exports = (db) => {
     B2BInvoiceItem,
     MarketingLead,
     MarketingLeadFollowUp,
+    SerialMaster,
+    SerialMasterDetail,
   } = db;
 
   // User ↔ Role
@@ -910,6 +912,12 @@ module.exports = (db) => {
   if (B2BInvoice && User) {
     B2BInvoice.belongsTo(User, { foreignKey: "created_by", as: "createdBy" });
     User.hasMany(B2BInvoice, { foreignKey: "created_by", as: "b2bInvoices" });
+  }
+
+  // SerialMaster ↔ SerialMasterDetail (One-to-Many)
+  if (SerialMaster && SerialMasterDetail) {
+    SerialMaster.hasMany(SerialMasterDetail, { foreignKey: "serial_master_id", as: "details" });
+    SerialMasterDetail.belongsTo(SerialMaster, { foreignKey: "serial_master_id", as: "serialMaster" });
   }
 
   const ensureAuditAssociations = (Model) => {
