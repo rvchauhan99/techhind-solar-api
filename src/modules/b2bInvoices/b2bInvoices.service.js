@@ -3,6 +3,7 @@
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildNumberCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 
 const generateInvoiceNumber = async () => {
   const models = getTenantModels();
@@ -241,9 +242,20 @@ const createFromShipment = async ({ shipmentId, user_id, transaction }) => {
   const roundOff = 0;
   const grandTotal = round2(taxableAmount + totalGstAmount + roundOff);
 
+  // Try to generate Invoice number from Serial Master
+  let serialInvoiceNumber = null;
+  try {
+    const serialResult = await serialMasterService.generateSerialByCode("B2BINVOICE", { transaction });
+    if (serialResult && serialResult.status) {
+      serialInvoiceNumber = serialResult.result;
+    }
+  } catch (err) {
+    console.warn("Failed to generate B2B Invoice number from serial master:", err.message);
+  }
+
   const invoice = await B2BInvoice.create(
     {
-      invoice_no: await generateInvoiceNumber(),
+      invoice_no: serialInvoiceNumber || await generateInvoiceNumber(),
       invoice_date: new Date().toISOString().slice(0, 10),
       b2b_shipment_id: shipmentId,
       b2b_sales_order_id: shipment.b2b_sales_order_id || null,
