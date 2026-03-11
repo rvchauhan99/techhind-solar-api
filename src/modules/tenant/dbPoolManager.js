@@ -13,8 +13,8 @@ const poolCache = new Map();
 const defaultPoolConfig = {
   max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
   min: parseInt(process.env.DB_POOL_MIN, 10) || 0,
-  acquire: 30000,
-  idle: 10000,
+  acquire: 2000,
+  idle: 30000,
 };
 
 /**
@@ -92,7 +92,7 @@ function getOrCreateTenantPool(tenantId, config) {
 function clearPool(tenantId) {
   const sequelize = poolCache.get(tenantId);
   if (sequelize && typeof sequelize.close === "function") {
-    sequelize.close().catch(() => {});
+    sequelize.close().catch(() => { });
   }
   poolCache.delete(tenantId);
 }
@@ -106,7 +106,7 @@ async function closeAllPools() {
   const closePromises = [];
   for (const [tenantId, sequelize] of poolCache) {
     if (sequelize && typeof sequelize.close === "function") {
-      closePromises.push(sequelize.close().catch(() => {}));
+      closePromises.push(sequelize.close().catch(() => { }));
     }
   }
   poolCache.clear();

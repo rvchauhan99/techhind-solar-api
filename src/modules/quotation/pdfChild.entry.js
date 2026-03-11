@@ -17,44 +17,15 @@ function parseArg(name) {
   return match ? match.slice(key.length) : null;
 }
 
-/** Child uses a one-off Sequelize with pool max 1 to avoid exhausting Postgres connection slots. */
-const CHILD_POOL_CONFIG = { max: 1, min: 0 };
+const dbPoolManager = require("../tenant/dbPoolManager.js");
 
 /**
- * Create a one-off Sequelize for the child's lifecycle (single connection). Uses main app DB for default tenant,
- * or tenant DB from registry for shared mode. Caller must call sequelize.close() when done.
+ * Get Sequelize instance for the child's lifecycle. Uses common pool manager.
  * @param {string} tenantId
  * @returns {Promise<Sequelize>}
  */
 async function resolveTenantSequelize(tenantId) {
-  if (tenantId === "default") {
-    const mainConfig = require("../../config/sequelize.config.js");
-    return new Sequelize({
-      ...mainConfig,
-      pool: CHILD_POOL_CONFIG,
-    });
-  }
-
-  await initializeRegistryConnection();
-  const config = await tenantRegistryService.getTenantById(tenantId);
-  if (!config) {
-    throw new Error(`Tenant not found: ${tenantId}`);
-  }
-  const { db_host, db_port, db_name, db_user, db_password } = config;
-  if (!db_host || !db_name || !db_user) {
-    throw new Error("Tenant DB config incomplete");
-  }
-  const isProduction = process.env.NODE_ENV === "production";
-  return new Sequelize(db_name, db_user, db_password || undefined, {
-    host: db_host,
-    port: db_port || 5432,
-    dialect: "postgres",
-    logging: isAuditLogsEnabled()
-      ? (sql) => console.log(`[DB:child/${db_name}]`, sql)
-      : false,
-    pool: CHILD_POOL_CONFIG,
-    dialectOptions: isProduction ? getDialectOptions(true) : {},
-  });
+  return dbPoolManager.getPool(tenantId);
 }
 
 async function main() {
@@ -91,9 +62,12 @@ async function main() {
         errorMessage: err.message,
       });
       throw err;
+    } finally {
+      // Child process reuses pools; do not close tenantSequelize here.
+      // Connection will naturally close on process exit or manager shutdown.
     }
-  } finally {
-    await tenantSequelize.close();
+  } catch (err) {
+    throw err;
   }
 }
 

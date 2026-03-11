@@ -37,8 +37,8 @@ function getRegistrySequelize() {
     pool: {
       max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
       min: 0,
-      acquire: 30000,
-      idle: 10000,
+      acquire: 2000,
+      idle: 30000,
     },
   });
   return registrySequelize;
@@ -64,6 +64,18 @@ async function initializeRegistryConnection() {
     registryAvailable = false;
     return false;
   }
+
+  // Reuse existing connection if authenticated
+  if (registrySequelize) {
+    try {
+      await registrySequelize.authenticate();
+      registryAvailable = true;
+      return true;
+    } catch (err) {
+      // If authentication fails, proceed to recreate it
+    }
+  }
+
   try {
     const isProduction = process.env.NODE_ENV === "production";
     const dialectOptions = isProduction ? getDialectOptions(true) : {};
@@ -82,8 +94,8 @@ async function initializeRegistryConnection() {
       pool: {
         max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
         min: 0,
-        acquire: 30000,
-        idle: 10000,
+        acquire: 2000,
+        idle: 30000,
       },
     });
     await sequelize.authenticate();
