@@ -4,7 +4,7 @@ const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
-const { QUOTATION_STATUS } = require("../../common/utils/constants.js");
+const { QUOTATION_STATUS, INQUIRY_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { buildBomSnapshotFromProjectPrice, sortBomSnapshotByProductTypeDisplayOrder } = require("../../common/utils/bomFromProjectPrice.js");
 
