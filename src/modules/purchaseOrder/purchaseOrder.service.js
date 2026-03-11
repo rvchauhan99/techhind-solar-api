@@ -282,7 +282,7 @@ const getPurchaseOrderById = async ({ id } = {}) => {
   if (!po) return null;
 
   const poData = po.toJSON();
-  
+
   // Normalize tracking_type and ensure serial_required consistency; add order/received/returned/remaining qty
   if (poData.items && Array.isArray(poData.items)) {
     poData.items = poData.items.map((item) => {
@@ -317,6 +317,8 @@ const getPurchaseOrderById = async ({ id } = {}) => {
 
   return poData;
 };
+
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 
 const calculatePOTotals = (items) => {
   let totalQuantity = 0;
@@ -372,7 +374,19 @@ const createPurchaseOrder = async ({ payload, transaction } = {}) => {
     // Calculate totals
     const totals = calculatePOTotals(items);
 
+    // Try to generate PO number from Serial Master
+    let po_number = null;
+    try {
+      const serialResult = await serialMasterService.generateSerialByCode("PO", { transaction: t });
+      if (serialResult && serialResult.status) {
+        po_number = serialResult.result;
+      }
+    } catch (err) {
+      console.warn("Failed to generate PO number from serial master:", err.message);
+    }
+
     const purchaseOrderData = {
+      po_number, // If null, fallback logic in model beforeCreate will be used
       po_date: poData.po_date,
       due_date: poData.due_date,
       supplier_id: poData.supplier_id,

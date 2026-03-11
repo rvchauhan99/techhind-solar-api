@@ -3,6 +3,7 @@
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const notificationService = require("../notification/notification.service.js");
@@ -357,9 +358,21 @@ const createLead = async ({ payload, transaction } = {}) => {
     throw new AppError("customer_name and mobile_number are required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
+  // Try to generate Lead number from Serial Master
+  let serialLeadNumber = null;
+  try {
+    const serialResult = await serialMasterService.generateSerialByCode("CUSTOMERLEAD", { transaction });
+    if (serialResult && serialResult.status) {
+      serialLeadNumber = serialResult.result;
+    }
+  } catch (err) {
+    console.warn("Failed to generate Customer Lead number from serial master:", err.message);
+  }
+
   const lead = await MarketingLead.create(
     {
       customer_name: payload.customer_name,
+      lead_number: serialLeadNumber || undefined, // Fallback to model hook if null
       mobile_number: payload.mobile_number,
       alternate_mobile_number: payload.alternate_mobile_number || null,
       phone_no: payload.phone_no || null,

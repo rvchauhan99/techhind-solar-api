@@ -8,6 +8,7 @@ const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const { buildBomSnapshotFromProjectPrice } = require("../../common/utils/bomFromProjectPrice.js");
 const notificationService = require("../notification/notification.service.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -163,8 +164,8 @@ const escapeSearchForLike = (s) => {
 const getPaymentOutstandingLiteral = (models) =>
     models.sequelize.literal(
         `(("Order".project_cost - COALESCE("Order".discount, 0)) - ` +
-            `(SELECT COALESCE(SUM(payment_amount), 0) FROM order_payment_details ` +
-            `WHERE order_payment_details.order_id = "Order".id AND order_payment_details.deleted_at IS NULL) > 0)`
+        `(SELECT COALESCE(SUM(payment_amount), 0) FROM order_payment_details ` +
+        `WHERE order_payment_details.order_id = "Order".id AND order_payment_details.deleted_at IS NULL) > 0)`
     );
 
 const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
@@ -1236,10 +1237,21 @@ const createOrder = async ({ payload, transaction } = {}) => {
             }
         }
 
+        // Try to generate Order number from Serial Master
+        let serialOrderNumber = null;
+        try {
+            const serialResult = await serialMasterService.generateSerialByCode("CUSTOMERORDER", { transaction: t });
+            if (serialResult && serialResult.status) {
+                serialOrderNumber = serialResult.result;
+            }
+        } catch (err) {
+            console.warn("Failed to generate Order number from serial master:", err.message);
+        }
+
         // 2) Create Order (allow order_number from payload for migration/import)
         const orderData = {
-            ...(payload.order_number || orderNumberFromInquiry
-                ? { order_number: payload.order_number || orderNumberFromInquiry }
+            ...(payload.order_number || serialOrderNumber || orderNumberFromInquiry
+                ? { order_number: payload.order_number || serialOrderNumber || orderNumberFromInquiry }
                 : {}),
             status: payload.status || "pending",
             inquiry_id: payload.inquiry_id || null,
@@ -1627,7 +1639,7 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                         action_label: "Open Order",
                     });
                 });
-            }).catch(() => {});
+            }).catch(() => { });
         }
         const newFabricatorId = fabricatorId ?? previousFabricatorId;
         const newInstallerId = installerId ?? previousInstallerId;

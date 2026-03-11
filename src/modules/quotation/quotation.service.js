@@ -3,7 +3,8 @@
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
-const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
+const { QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { buildBomSnapshotFromProjectPrice, sortBomSnapshotByProductTypeDisplayOrder } = require("../../common/utils/bomFromProjectPrice.js");
 
@@ -486,8 +487,20 @@ const createQuotation = async ({ payload, transaction } = {}) => {
             }
         }
 
-        // Generate quotation_number based on inquiry
-        if (inquiryNumber) {
+        // Generate quotation_number
+        let serialQuotationNumber = null;
+        try {
+            const serialResult = await serialMasterService.generateSerialByCode("CUSTOMERQUOTE", { transaction: t });
+            if (serialResult && serialResult.status) {
+                serialQuotationNumber = serialResult.result;
+            }
+        } catch (err) {
+            console.warn("Failed to generate Customer Quote number from serial master:", err.message);
+        }
+
+        if (serialQuotationNumber) {
+            created.quotation_number = serialQuotationNumber;
+        } else if (inquiryNumber) {
             created.quotation_number = `${inquiryNumber}/${quotationCount + 1}`;
         }
 

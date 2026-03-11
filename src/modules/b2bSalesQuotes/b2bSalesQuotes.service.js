@@ -4,6 +4,7 @@ const ExcelJS = require("exceljs");
 const { Op, QueryTypes } = require("sequelize");
 const { buildStringCond, buildNumberCond, buildDateCond } = require("../../common/utils/columnFilterBuilders.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const serialMasterService = require("../serialMaster/serialMaster.service.js");
 
 const generateQuoteNumber = async () => {
   const models = getTenantModels();
@@ -164,7 +165,18 @@ const createQuote = async ({ payload, user_id, transaction }) => {
     err.statusCode = 400;
     throw err;
   }
-  header.quote_no = await generateQuoteNumber();
+  // Try to generate Quote number from Serial Master
+  let serialQuoteNumber = null;
+  try {
+    const serialResult = await serialMasterService.generateSerialByCode("B2BSALESQUOTE", { transaction });
+    if (serialResult && serialResult.status) {
+      serialQuoteNumber = serialResult.result;
+    }
+  } catch (err) {
+    console.warn("Failed to generate B2B Sales Quote number from serial master:", err.message);
+  }
+
+  header.quote_no = serialQuoteNumber || await generateQuoteNumber();
   const { items: computedItems, subtotal_amount, total_gst_amount, grand_total } = computeTotals(items);
   header.subtotal_amount = subtotal_amount;
   header.total_gst_amount = total_gst_amount;
