@@ -23,17 +23,24 @@ async function getBucketClientForTenant(tenantId) {
  * @returns {Promise<{ artifactKey: string, size: number }>}
  */
 async function processPdfJob(jobData) {
+    const startAt = Date.now();
     const { quotationData, renderOptions = {}, artifactKey, tenantId } = jobData || {};
     if (!quotationData) throw new Error("quotationData is required");
     if (!artifactKey) throw new Error("artifactKey is required");
 
+    const bucketClientAt = Date.now();
     const bucketClient = await getBucketClientForTenant(tenantId);
+    const bucketClientTime = Date.now() - bucketClientAt;
+
+    const genStartAt = Date.now();
     const pdfBuffer = await pdfService.generateQuotationPDF(quotationData, {
         ...renderOptions,
         bucketClient,
     });
+    const genTime = Date.now() - genStartAt;
 
     const originalname = path.basename(artifactKey) || `quotation-${Date.now()}.pdf`;
+    const uploadStartAt = Date.now();
     await bucketService.uploadFile(
         {
             buffer: pdfBuffer,
@@ -48,6 +55,10 @@ async function processPdfJob(jobData) {
         },
         bucketClient
     );
+    const uploadTime = Date.now() - uploadStartAt;
+
+    const totalTime = Date.now() - startAt;
+    console.info(`[PDF_PROCESSOR] quotationId=${renderOptions.quotationId} totalTime=${totalTime}ms (bucketClient=${bucketClientTime}ms, gen=${genTime}ms, upload=${uploadTime}ms)`);
 
     return { artifactKey, size: pdfBuffer.length };
 }

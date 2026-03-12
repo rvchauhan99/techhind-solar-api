@@ -115,6 +115,7 @@ async function getBucketClientForTenant(tenantId) {
  * Uses tenant sequelize explicitly so this is usable from child processes.
  */
 async function buildPdfGenerationContext({ tenantId, tenantSequelize, quotationId }) {
+  const startAt = Date.now();
   const models = getModelsForSequelize(tenantSequelize);
   const bucketClient = await getBucketClientForTenant(tenantId);
 
@@ -138,6 +139,9 @@ async function buildPdfGenerationContext({ tenantId, tenantSequelize, quotationI
     bucketClient,
     tenantId
   );
+
+  const buildTime = Date.now() - startAt;
+  console.info(`[PDF_TIMING][DATA_PREP] quotationId=${quotationId} time=${buildTime}ms`);
 
   return {
     quotation,
@@ -169,7 +173,12 @@ async function generateAndStoreArtifact({ tenantId, tenantSequelize, quotationId
     throw err;
   }
 
+  const renderStartAt = Date.now();
   const pdfBuffer = await pdfService.generateQuotationPDF(ctx.pdfData, ctx.renderOptions);
+  const renderTime = Date.now() - renderStartAt;
+  console.info(`[PDF_TIMING][RENDER] quotationId=${quotationId} time=${renderTime}ms size=${pdfBuffer.length}bytes`);
+
+  const uploadStartAt = Date.now();
   const bucketClient = ctx.renderOptions.bucketClient;
   await bucketService.uploadFile(
     {
@@ -185,6 +194,8 @@ async function generateAndStoreArtifact({ tenantId, tenantSequelize, quotationId
     },
     bucketClient
   );
+  const uploadTime = Date.now() - uploadStartAt;
+  console.info(`[PDF_TIMING][UPLOAD] quotationId=${quotationId} time=${uploadTime}ms`);
 
   return { ...ctx, artifactKey, size: pdfBuffer.length };
 }

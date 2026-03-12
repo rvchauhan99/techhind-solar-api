@@ -821,19 +821,25 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
 
     await acquirePdfRenderSlot();
     const doRenderAttempt = async () => {
+        const attemptStartAt = Date.now();
         let page = null;
         try {
+            const htmlStartAt = Date.now();
             const html = await buildHtmlDocument(quotationData, bucketClient, { templateKey, templateConfig, tenantId: options.tenantId });
+            const htmlTime = Date.now() - htmlStartAt;
 
+            const browserStartAt = Date.now();
             const browser = await puppeteerService.getBrowser();
+            const browserTime = Date.now() - browserStartAt;
+
+            const pageStartAt = Date.now();
             page = await browser.newPage();
+            const pageTime = Date.now() - pageStartAt;
 
             // Limit page memory: intercept and block third-party requests (none expected in self-contained HTML)
             await page.setRequestInterception(true);
             page.on("request", (req) => {
                 const type = req.resourceType();
-                // Allow: document, stylesheet, image, font (needed for inline PDF content)
-                // Block: xhr, fetch, websocket, media (not needed; reduces memory)
                 if (["xhr", "fetch", "websocket", "media", "other"].includes(type)) {
                     req.abort();
                 } else {
@@ -841,11 +847,14 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
                 }
             });
 
+            const contentStartAt = Date.now();
             await page.setContent(html, {
                 waitUntil: "domcontentloaded",
                 timeout: 60000,
             });
+            const contentTime = Date.now() - contentStartAt;
 
+            const pdfStartAt = Date.now();
             const pdfBuffer = await page.pdf({
                 format: "A4",
                 printBackground: true,
@@ -853,6 +862,10 @@ const renderQuotationPDF = async (quotationData, options = {}) => {
                 margin: { top: "0", right: "0", bottom: "0", left: "0" },
                 timeout: 60000,
             });
+            const pdfTime = Date.now() - pdfStartAt;
+
+            const totalAttemptTime = Date.now() - attemptStartAt;
+            console.info(`[PDF_RENDER][ATTEMPT] quotationId=${options.quotationId || "unknown"} total=${totalAttemptTime}ms (html=${htmlTime}ms, browser=${browserTime}ms, page=${pageTime}ms, content=${contentTime}ms, pdf=${pdfTime}ms)`);
 
             puppeteerService.recordRender();
             return pdfBuffer;
