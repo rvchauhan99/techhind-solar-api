@@ -126,11 +126,16 @@ const listInquiries = async ({
   }
 
   if (search) {
-    where[Op.or] = [
-      { inquiry_number: { [Op.iLike]: `%${search}%` } },
-      { reference_from: { [Op.iLike]: `%${search}%` } },
-      { remarks: { [Op.iLike]: `%${search}%` } },
-    ];
+    const searchPat = `%${search}%`;
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push({
+      [Op.or]: [
+        { inquiry_number: { [Op.iLike]: searchPat } },
+        { reference_from: { [Op.iLike]: searchPat } },
+        { remarks: { [Op.iLike]: searchPat } },
+        models.sequelize.literal(`EXISTS (SELECT 1 FROM customers WHERE customers.id = "Inquiry".customer_id AND (customers.customer_name ILIKE '${searchPat}' OR customers.mobile_number ILIKE '${searchPat}'))`)
+      ]
+    });
   }
 
   const customerWhere = {};
