@@ -87,9 +87,16 @@ async function main() {
 }
 
 main()
-  .then(() => process.exit(0))
-  .catch((err) => {
+  .then(async () => {
+    await dbPoolManager.closeAllPools();
+    process.exit(0);
+  })
+  .catch(async (err) => {
     console.error("[PDF_CHILD] failed:", err.message);
-    process.exit(1);
+    try {
+      await dbPoolManager.closeAllPools();
+    } finally {
+      process.exit(1);
+    }
   });
 

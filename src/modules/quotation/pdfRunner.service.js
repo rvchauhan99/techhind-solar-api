@@ -17,6 +17,9 @@ const CLEANUP_EVERY_MS = Math.max(60_000, parseInt(process.env.PDF_JOB_CLEANUP_I
 const RECOVERY_INTERVAL_MS = Math.max(10_000, parseInt(process.env.PDF_JOB_RECOVERY_INTERVAL_MS || "15000", 10));
 const USE_PERSISTENT_WORKER = process.env.PDF_JOB_USE_PERSISTENT_WORKER !== "false";
 const WORKER_RESTART_MS = Math.max(5000, parseInt(process.env.PDF_WORKER_RESTART_DELAY_MS || "10000", 10));
+// WARNING: Runner is started inside the API process by default. Evicting pools here can disrupt live requests.
+// Keep disabled unless the runner runs in a separate dedicated process.
+const RUNNER_CAN_EVICT_TENANT_POOLS = process.env.PDF_RUNNER_CAN_EVICT_TENANT_POOLS === "true";
 
 let _started = false;
 let _timer = null;
@@ -236,6 +239,9 @@ async function tickOnce() {
       if (!job) {
         // No jobs found: back off this tenant for a while so the pool can evict
         _tenantBackoff.set(ex.tenantId, nowMs);
+        if (RUNNER_CAN_EVICT_TENANT_POOLS) {
+          dbPoolManager.clearPool(ex.tenantId);
+        }
         continue;
       }
 
