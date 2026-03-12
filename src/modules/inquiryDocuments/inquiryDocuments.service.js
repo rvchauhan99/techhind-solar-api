@@ -4,6 +4,7 @@ const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const bucketService = require("../../common/services/bucket.service.js");
 
 const createInquiryDocument = async (payload, transaction = null, req = null) => {
   const models = getTenantModels(req);
@@ -54,10 +55,21 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
     });
 
     if (existingDoc) {
-      throw new AppError(
-        `A document of type "${payload.doc_type}" already exists for this inquiry. Multiple documents of this type are not allowed.`,
-        RESPONSE_STATUS_CODES.BAD_REQUEST
-      );
+      // Replace existing document: delete old bucket object (best-effort) and soft-delete DB row.
+      try {
+        if (req) {
+          const bucketClient = bucketService.getBucketForRequest(req);
+          const oldKey = existingDoc.document_path;
+          if (oldKey && !String(oldKey).startsWith("/")) {
+            await bucketService.deleteFileWithClient(bucketClient, oldKey);
+          }
+        }
+      } catch (err) {
+        console.error("Error deleting old inquiry document from bucket:", err);
+        // Continue replacement even if bucket deletion fails.
+      }
+
+      await existingDoc.destroy({ transaction });
     }
   }
 
