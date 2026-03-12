@@ -31,16 +31,18 @@ let _tickInProgress = false;
 let _lastCleanupAt = 0;
 let _tenantCursor = 0;
 let _lastRecoveryAtPerTenant = {};
+const _tenantBackoff = new Map(); // tenantId -> lastCheckedAt
 let _cleanupTenantIndex = 0;
+
+const IDLE_TENANT_CHECK_INTERVAL_MS = 60_000; // Only check empty tenants once a minute
 
 async function listTenantExecutors() {
   // Independent/dedicated mode: no registry URL → single executor for the app DB (DATABASE_URL / DB_*).
   if (!process.env.TENANT_REGISTRY_DB_URL) {
-    const seq = await dbPoolManager.getPool("default");
-    return [{ tenantId: "default", sequelize: seq }];
+    return [{ tenantId: "default", isShared: false }];
   }
 
-  // Multi-tenant mode: registry URL set → poll all tenant DBs so runner sees jobs the API wrote.
+  // Multi-tenant mode: registry URL set → poll all tenant metadata.
   try {
     if (!isRegistryAvailable()) await initializeRegistryConnection();
     const now = Date.now();
@@ -48,21 +50,12 @@ async function listTenantExecutors() {
       return _lastTenantCache.items;
     }
     const tenants = await tenantRegistryService.getActiveTenantsForMigrations({ sharedOnly: false });
-    const items = [];
-    for (const t of tenants) {
-      try {
-        const sequelize = await dbPoolManager.getPool(t.id);
-        items.push({ tenantId: t.id, sequelize });
-      } catch (err) {
-        // Ignore one-tenant failure and continue polling others.
-      }
-    }
-    if (items.length > 0) {
-      _lastTenantCache = { ts: now, items };
-      return items;
-    }
+    const items = tenants.map(t => ({ tenantId: t.id, isShared: true }));
+    
+    _lastTenantCache = { ts: now, items };
+    return items;
   } catch (err) {
-    // Registry or tenant list failed; do not fall back to main DB (it may be registry and lack quotation_pdf_jobs).
+    // Registry or tenant list failed.
   }
 
   return [];
@@ -194,58 +187,58 @@ async function tickOnce() {
     if (executors.length > 0) {
       _tenantCursor = (_tenantCursor + 1) % executors.length;
     }
+
     for (const ex of fairExecutors) {
       if (_activeChildren >= MAX_CONCURRENCY) break;
-      const models = getModelsForSequelize(ex.sequelize);
-      if (!models || !models.QuotationPdfJob) continue;
 
+      // Optimization: Skip tenants that were recently checked and found empty
       const nowMs = Date.now();
+      const lastChecked = _tenantBackoff.get(ex.tenantId) || 0;
+      if (nowMs - lastChecked < IDLE_TENANT_CHECK_INTERVAL_MS) {
+        continue;
+      }
+
+      let sequelize;
+      try {
+        sequelize = await dbPoolManager.getPool(ex.tenantId);
+      } catch (poolErr) {
+        // Skip this tenant if we can't get a connection right now
+        continue;
+      }
+
+      const models = getModelsForSequelize(sequelize);
+      if (!models || !models.QuotationPdfJob) {
+        _tenantBackoff.set(ex.tenantId, nowMs);
+        continue;
+      }
+
       const lastRecovery = _lastRecoveryAtPerTenant[ex.tenantId] || 0;
       if (nowMs - lastRecovery >= RECOVERY_INTERVAL_MS) {
         try {
           _lastRecoveryAtPerTenant[ex.tenantId] = nowMs;
-          const recovered = await pdfJobService.recoverStuckProcessingJobsForModels(models, {
+          await pdfJobService.recoverStuckProcessingJobsForModels(models, {
             runnerId: String(process.pid),
           });
-          if (recovered.scanned > 0) {
-            console.warn(
-              `[PDF_RUNNER] recovered stuck jobs tenant=${ex.tenantId} scanned=${recovered.scanned} requeued=${recovered.requeued} failed=${recovered.failed} staleMs=${recovered.processingStaleMs}`
-            );
-          }
         } catch (recoveryErr) {
-          console.error(
-            `[PDF_RUNNER] stuck-job recovery failed tenant=${ex.tenantId}: ${recoveryErr.message}`
-          );
-        }
-      }
-
-      const cleanupDue = nowMs - _lastCleanupAt >= CLEANUP_EVERY_MS;
-      const executorIndex = executors.findIndex((e) => e.tenantId === ex.tenantId);
-      const isCleanupTenantThisTick =
-        cleanupDue && executorIndex === (_cleanupTenantIndex % Math.max(1, executors.length));
-      if (isCleanupTenantThisTick) {
-        try {
-          const cleanup = await pdfJobService.cleanupOldJobsForModels(models);
-          if ((cleanup.failedDeleted || 0) > 0 || (cleanup.completedDeleted || 0) > 0) {
-            console.info(
-              `[PDF_RUNNER] cleanup tenant=${ex.tenantId} failedDeleted=${cleanup.failedDeleted} completedDeleted=${cleanup.completedDeleted}`
-            );
-          }
-        } catch (cleanupErr) {
-          console.error(`[PDF_RUNNER] cleanup failed tenant=${ex.tenantId}: ${cleanupErr.message}`);
-        } finally {
-          _lastCleanupAt = nowMs;
-          _cleanupTenantIndex += 1;
+          // ignore
         }
       }
 
       const job = await pdfJobService.claimNextPendingJobForModels(models, { runnerId: String(process.pid) });
-      if (!job) continue;
+      if (!job) {
+        // No jobs found: back off this tenant for a while so the pool can evict
+        _tenantBackoff.set(ex.tenantId, nowMs);
+        continue;
+      }
+
+      // Job found: reset backoff so we can check for more jobs in the next tick
+      _tenantBackoff.delete(ex.tenantId);
+      
       console.info(
         `[PDF_RUNNER] claimed job id=${job.id} tenant=${ex.tenantId} attempt=${job.attempts}/${job.max_attempts}`
       );
 
-      runJob({ tenantId: ex.tenantId, jobId: job.id, ex, job });
+      runJob({ tenantId: ex.tenantId, jobId: job.id, ex: { ...ex, sequelize }, job });
     }
   } finally {
     _tickInProgress = false;
