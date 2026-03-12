@@ -20,6 +20,13 @@ async function resolveTenantSequelize(tenantId) {
 const jobQueue = [];
 let processing = false;
 
+// Initialize registry connection at startup
+initializeRegistryConnection().then(() => {
+  console.info("[PDF_WORKER_ENTRY] Registry initialized");
+}).catch(err => {
+  console.error("[PDF_WORKER_ENTRY] Registry initialization failed:", err.message);
+});
+
 function processNext() {
   if (processing || jobQueue.length === 0) return;
   const { tenantId, jobId } = jobQueue.shift();
