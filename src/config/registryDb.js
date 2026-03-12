@@ -10,6 +10,14 @@ let registrySequelize = null;
 /** @type {boolean|null} null = not yet checked, true = healthy, false = configured but unreachable */
 let registryAvailable = null;
 
+function getRegistryPoolMax() {
+  const fromEnv = parseInt(process.env.REGISTRY_DB_POOL_MAX, 10);
+  if (Number.isFinite(fromEnv)) return fromEnv;
+  // Production-safe default for managed Postgres plans with low connection limits (e.g. DO 22).
+  // Registry DB is lightly used (tenant metadata), so keep this small unless you have budget.
+  return process.env.NODE_ENV === "production" ? 1 : 5;
+}
+
 /**
  * Get Sequelize instance for Tenant Registry DB.
  * Returns null if TENANT_REGISTRY_DB_URL is not set (dedicated/single-tenant mode).
@@ -35,7 +43,7 @@ function getRegistrySequelize() {
     logging: isAuditLogsEnabled() ? (sql) => console.log(`[DB:registry/${registryDbName}]`, sql) : false,
     dialectOptions,
     pool: {
-      max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
+      max: getRegistryPoolMax(),
       min: 0,
       acquire: 30000,
       idle: 10000,
@@ -92,7 +100,7 @@ async function initializeRegistryConnection() {
       logging: isAuditLogsEnabled() ? (sql) => console.log(`[DB:registry/${registryDbName}]`, sql) : false,
       dialectOptions,
       pool: {
-        max: parseInt(process.env.REGISTRY_DB_POOL_MAX, 10) || 5,
+        max: getRegistryPoolMax(),
         min: 0,
         acquire: 30000,
         idle: 10000,

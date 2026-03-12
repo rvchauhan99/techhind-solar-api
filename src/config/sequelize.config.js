@@ -37,11 +37,16 @@ const params = getDbConnectionParams();
 // Keep pool small for managed Postgres (e.g. Aiven) – limited non-superuser connection slots.
 // In development use smaller pool so nodemon restarts don't exhaust connection slots when cloud + local share the same DB.
 const nodeEnv = process.env.NODE_ENV || "development";
-const poolMax = parseInt(process.env.DB_POOL_MAX, 10);
+const mainPoolMax = parseInt(process.env.MAIN_DB_POOL_MAX, 10);
+const poolMax = parseInt(process.env.DB_POOL_MAX, 10); // backward compatible
 const poolMin = parseInt(process.env.DB_POOL_MIN, 10);
 const defaultMax = nodeEnv === "development" ? 2 : 5;
 const pool = {
-  max: Number.isFinite(poolMax) ? poolMax : defaultMax,
+  max: Number.isFinite(mainPoolMax)
+    ? mainPoolMax
+    : Number.isFinite(poolMax)
+      ? poolMax
+      : defaultMax,
   min: Number.isFinite(poolMin) ? poolMin : 0,
   acquire: parseInt(process.env.DB_POOL_ACQUIRE, 10) || 30000,
   idle: parseInt(process.env.DB_POOL_IDLE, 10) || 10000,

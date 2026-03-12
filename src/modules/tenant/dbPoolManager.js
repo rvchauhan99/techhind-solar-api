@@ -12,7 +12,10 @@ const lastUsedCache = new Map();
 
 // Aggressive pool settings for managed DB stability
 const defaultPoolConfig = {
-  max: parseInt(process.env.DB_POOL_MAX, 10) || 2, // Shrink to 2 connections per tenant by default
+  max:
+    parseInt(process.env.TENANT_DB_POOL_MAX, 10) || // preferred for multi-tenant deployments
+    parseInt(process.env.DB_POOL_MAX, 10) || // backward compatible
+    2, // Shrink to 2 connections per tenant by default
   min: 0,
   acquire: 30000,
   idle: 10000,

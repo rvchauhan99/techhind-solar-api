@@ -78,13 +78,25 @@ Set these for the API process.
 | **NODE_ENV** | Yes in production | e.g. `production` |
 | **PORT** | No | Server port (default 9090) |
 | **FRONTEND_URL** | Recommended | Allowed origin for CORS |
-| **DB_POOL_MAX** | No | Max connections per pool for main and per-tenant DBs (default 5). Keep low on managed Postgres. |
+| **MAIN_DB_POOL_MAX** | No | Max connections for the main DB pool (preferred). If not set, falls back to `DB_POOL_MAX`. |
+| **TENANT_DB_POOL_MAX** | No | Max connections per-tenant DB pool in shared mode (preferred). If not set, falls back to `DB_POOL_MAX`. |
+| **DB_POOL_MAX** | No | Backward compatible max connections setting (used if MAIN_/TENANT_ not set). |
 | **DB_POOL_MIN** | No | Min connections per pool (default 0). |
-| **REGISTRY_DB_POOL_MAX** | No | Max connections for the Registry DB pool (default 5). |
+| **REGISTRY_DB_POOL_MAX** | No | Max connections for the Registry DB pool (default: 1 in production, 5 in dev). |
+| **DB_GLOBAL_TENANT_POOL_LIMIT** | No | Max number of tenant pools kept resident in-memory at once (LRU eviction). Default 10; lower this on low-connection plans. |
 
 \* Or use **DATABASE_URL** if your config supports it. Tenant databases are **not** configured via these; they come from the Registry.
 
-**Connection limits:** Total connections ≈ main pool + Registry pool + (per-tenant pool × active tenants). Managed Postgres (e.g. Aiven) reserves some slots for superuser; the rest are shared. Use small pool values (e.g. `DB_POOL_MAX=3`, `REGISTRY_DB_POOL_MAX=3`) to avoid "remaining connection slots reserved for roles with the SUPERUSER attribute".
+**Connection limits:** Total connections ≈ main pool + registry pool + (per-tenant pool × resident tenant pools) + (PDF worker/child pools).
+Managed Postgres (DigitalOcean, Aiven, etc.) reserves some slots for superuser; the rest are shared. Use small pool values and a low `DB_GLOBAL_TENANT_POOL_LIMIT` to avoid \"remaining connection slots are reserved for roles with the SUPERUSER attribute\".
+
+**DigitalOcean 22 baseline (single API instance; registry + tenant DBs on same cluster):**
+
+- `MAIN_DB_POOL_MAX=2`
+- `REGISTRY_DB_POOL_MAX=1`
+- `TENANT_DB_POOL_MAX=1`
+- `DB_GLOBAL_TENANT_POOL_LIMIT=6`
+- `PDF_JOB_MAX_CONCURRENCY=1` (and keep `PDF_JOB_USE_PERSISTENT_WORKER=true`)
 
 Add **BREVO_*** (or other email), **BUCKET_*** (if you use a default bucket), and any other vars from `.env.example` as needed.
 

@@ -89,7 +89,9 @@ async function runOneJob(tenantId, jobId) {
       });
       return { success: false, errorMessage: (err && err.message) || String(err) };
     } finally {
-      // Background worker reuses pools; do not close tenantSequelize here.
+      // This worker runs in its own process and can build up idle connections across tenants.
+      // Release the tenant pool after each job to stay within low connection budgets.
+      dbPoolManager.clearPool(tenantId);
     }
   } catch (err) {
     return { success: false, errorMessage: (err && err.message) || String(err) };
