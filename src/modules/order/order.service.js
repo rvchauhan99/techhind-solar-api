@@ -420,9 +420,24 @@ const listOrders = async ({
             { reference_from: { [Op.iLike]: searchPat } },
             { application_no: { [Op.iLike]: searchPat } },
             { guvnl_no: { [Op.iLike]: searchPat } },
-            models.sequelize.literal(`(SELECT 1 FROM customers WHERE customers.id = "Order".customer_id AND (customers.customer_name ILIKE :searchPat OR customers.mobile_number ILIKE :searchPat) LIMIT 1)`),
-            models.sequelize.literal(`(SELECT 1 FROM company_branches WHERE company_branches.id = "Order".branch_id AND company_branches.name ILIKE :searchPat LIMIT 1)`),
-            models.sequelize.literal(`(SELECT 1 FROM inquiry_sources WHERE inquiry_sources.id = "Order".inquiry_source_id AND inquiry_sources.source_name ILIKE :searchPat LIMIT 1)`),
+            models.sequelize.literal(`EXISTS (
+                SELECT 1
+                FROM customers
+                WHERE customers.id = "Order".customer_id
+                  AND (customers.customer_name ILIKE :searchPat OR customers.mobile_number ILIKE :searchPat)
+            )`),
+            models.sequelize.literal(`EXISTS (
+                SELECT 1
+                FROM company_branches
+                WHERE company_branches.id = "Order".branch_id
+                  AND company_branches.name ILIKE :searchPat
+            )`),
+            models.sequelize.literal(`EXISTS (
+                SELECT 1
+                FROM inquiry_sources
+                WHERE inquiry_sources.id = "Order".inquiry_source_id
+                  AND inquiry_sources.source_name ILIKE :searchPat
+            )`),
         ];
         const searchOr = { [Op.or]: searchOrConditions };
         where[Op.and] = where[Op.and] ? [...where[Op.and], searchOr] : [searchOr];
