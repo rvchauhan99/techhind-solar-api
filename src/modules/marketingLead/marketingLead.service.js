@@ -37,6 +37,9 @@ const buildLeadWhere = ({
   last_called_to,
   next_follow_up_from,
   next_follow_up_to,
+  customer_name,
+  mobile_number,
+  lead_number,
   enforced_assigned_to_ids: enforcedAssignedToIds,
 }) => {
   const where = { deleted_at: null };
@@ -92,6 +95,15 @@ const buildLeadWhere = ({
     if (next_follow_up_from) where.next_follow_up_at[Op.gte] = next_follow_up_from;
     if (next_follow_up_to) where.next_follow_up_at[Op.lte] = next_follow_up_to;
   }
+  if (customer_name) {
+    where.customer_name = { [Op.iLike]: normalizeLike(customer_name) };
+  }
+  if (mobile_number) {
+    where.mobile_number = { [Op.iLike]: normalizeLike(mobile_number) };
+  }
+  if (lead_number) {
+    where.lead_number = { [Op.iLike]: normalizeLike(lead_number) };
+  }
   return where;
 };
 
@@ -114,6 +126,9 @@ const listLeads = async ({
   last_called_to,
   next_follow_up_from,
   next_follow_up_to,
+  customer_name,
+  mobile_number,
+  lead_number,
   enforced_assigned_to_ids,
 } = {}) => {
   const models = getTenantModels();
@@ -142,6 +157,9 @@ const listLeads = async ({
     last_called_to,
     next_follow_up_from,
     next_follow_up_to,
+    customer_name,
+    mobile_number,
+    lead_number,
     enforced_assigned_to_ids,
   });
 

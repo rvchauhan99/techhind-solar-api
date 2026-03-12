@@ -1393,6 +1393,11 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
         const previousSubsidyClaimCompletedAt = order.subsidy_claim_completed_at;
         const previousSubsidyDisbursedCompletedAt = order.subsidy_disbursed_completed_at;
 
+        const normalizeNullableId = (value, existing) => {
+            if (value === "") return null;
+            return value ?? existing;
+        };
+
         // Planner activity log: when bom_snapshot is updated, compute diff and append entries
         let plannerActivityLogUpdate = undefined;
         if (payload.bom_snapshot != null && Array.isArray(payload.bom_snapshot)) {
@@ -1486,8 +1491,8 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 order_type_id: payload.order_type_id ?? order.order_type_id,
                 discom_id: payload.discom_id ?? order.discom_id,
                 consumer_no: payload.consumer_no ?? order.consumer_no,
-                division_id: payload.division_id ?? order.division_id,
-                sub_division_id: payload.sub_division_id ?? order.sub_division_id,
+                division_id: normalizeNullableId(payload.division_id, order.division_id),
+                sub_division_id: normalizeNullableId(payload.sub_division_id, order.sub_division_id),
                 circle: payload.circle ?? order.circle,
                 demand_load: payload.demand_load ?? order.demand_load,
                 date_of_registration_gov: payload.date_of_registration_gov ?? order.date_of_registration_gov,
