@@ -8,14 +8,32 @@ const { isAuditLogsEnabled } = require("../../config/auditLogs.js");
 const defaultSequelize = require("../../config/db.js");
 
 const poolCache = new Map();
+const lastUsedCache = new Map();
 
-// Match main DB pool limits to avoid exhausting managed Postgres connection slots
+// Move to 0 min connections to ensure inactive pools fully release slots
 const defaultPoolConfig = {
   max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
-  min: parseInt(process.env.DB_POOL_MIN, 10) || 0,
+  min: 0,
   acquire: 30000,
   idle: 10000,
+  evict: 60000, // Evict idle connections from within the pool every minute
 };
+
+const EVICTION_TTL_MS = Math.max(
+  60_000,
+  parseInt(process.env.DB_TENANT_POOL_EVICTION_TTL_MS || "600000", 10) // 10 minutes default
+);
+
+// Run eviction check every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [tenantId, lastUsed] of lastUsedCache) {
+    if (now - lastUsed > EVICTION_TTL_MS) {
+      console.info(`[DB_POOL_MANAGER] Evicting idle pool for tenant=${tenantId} (idle for ${Math.round((now - lastUsed) / 1000)}s)`);
+      clearPool(tenantId);
+    }
+  }
+}, 60_000).unref();
 
 /**
  * Check if app is in shared (multi-tenant) mode (Registry DB configured and reachable).
@@ -38,6 +56,8 @@ async function getPool(tenantId, tenantConfig) {
   if (!isSharedMode()) {
     return defaultSequelize;
   }
+
+  lastUsedCache.set(tenantId, Date.now());
 
   if (tenantConfig && tenantConfig.id === tenantId) {
     return getOrCreateTenantPool(tenantId, tenantConfig);
@@ -95,6 +115,7 @@ function clearPool(tenantId) {
     sequelize.close().catch(() => { });
   }
   poolCache.delete(tenantId);
+  lastUsedCache.delete(tenantId);
 }
 
 /**
@@ -110,6 +131,7 @@ async function closeAllPools() {
     }
   }
   poolCache.clear();
+  lastUsedCache.clear();
   await Promise.all(closePromises);
 }
 
