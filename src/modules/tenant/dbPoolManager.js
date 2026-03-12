@@ -10,21 +10,23 @@ const defaultSequelize = require("../../config/db.js");
 const poolCache = new Map();
 const lastUsedCache = new Map();
 
-// Move to 0 min connections to ensure inactive pools fully release slots
+// Aggressive pool settings for managed DB stability
 const defaultPoolConfig = {
-  max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
+  max: parseInt(process.env.DB_POOL_MAX, 10) || 2, // Shrink to 2 connections per tenant by default
   min: 0,
   acquire: 30000,
   idle: 10000,
-  evict: 60000, // Evict idle connections from within the pool every minute
+  evict: 30000, // Evict idle connections from within the pool every 30s
 };
 
 const EVICTION_TTL_MS = Math.max(
-  60_000,
-  parseInt(process.env.DB_TENANT_POOL_EVICTION_TTL_MS || "600000", 10) // 10 minutes default
+  30_000,
+  parseInt(process.env.DB_TENANT_POOL_EVICTION_TTL_MS || "120000", 10) // 2 minutes default
 );
 
-// Run eviction check every minute
+const GLOBAL_POOL_LIMIT = parseInt(process.env.DB_GLOBAL_TENANT_POOL_LIMIT || "10", 10);
+
+// Run eviction check every 30 seconds
 setInterval(() => {
   const now = Date.now();
   for (const [tenantId, lastUsed] of lastUsedCache) {
@@ -33,7 +35,27 @@ setInterval(() => {
       clearPool(tenantId);
     }
   }
-}, 60_000).unref();
+}, 30_000).unref();
+
+function enforceGlobalLimitForPools() {
+  if (poolCache.size < GLOBAL_POOL_LIMIT) return;
+
+  // Find the Least Recently Used (LRU) tenant
+  let lruTenantId = null;
+  let oldestUsed = Infinity;
+
+  for (const [tenantId, lastUsed] of lastUsedCache) {
+    if (lastUsed < oldestUsed) {
+      oldestUsed = lastUsed;
+      lruTenantId = tenantId;
+    }
+  }
+
+  if (lruTenantId) {
+    console.warn(`[DB_POOL_MANAGER] Global pool limit (${GLOBAL_POOL_LIMIT}) reached. Force evicting oldest pool: tenant=${lruTenantId}`);
+    clearPool(lruTenantId);
+  }
+}
 
 /**
  * Check if app is in shared (multi-tenant) mode (Registry DB configured and reachable).
@@ -81,6 +103,9 @@ async function getPool(tenantId, tenantConfig) {
 function getOrCreateTenantPool(tenantId, config) {
   const cached = poolCache.get(tenantId);
   if (cached) return cached;
+
+  // Enforce global slot limit before creating a new pool
+  enforceGlobalLimitForPools();
 
   const { db_host, db_port, db_name, db_user, db_password } = config;
   if (!db_host || !db_name || !db_user) {

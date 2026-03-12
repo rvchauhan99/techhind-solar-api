@@ -1,11 +1,8 @@
-"use strict";
+const onFinished = require("on-finished");
 
 /**
  * Runs after tenantContextMiddleware. For mutating methods, creates a transaction
- * from req.tenant.sequelize and sets req.transaction (replacing any default one).
- * Wraps res.json/send/end so the transaction is committed on success (needed in shared mode
- * where global transactionMiddleware does not run; in dedicated mode global middleware commits first).
- * Call after requireAuthWithTenant so req.tenant exists.
+ * from req.tenant.sequelize. Ensures robust commit on success and rollback on any failure.
  */
 async function tenantTransactionMiddleware(req, res, next) {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
@@ -15,43 +12,43 @@ async function tenantTransactionMiddleware(req, res, next) {
     return next();
   }
 
+  let transaction = null;
   try {
+    // If a transaction somehow already exists, clean it up
     if (req.transaction && !req.transaction.finished) {
       await req.transaction.rollback().catch(() => {});
     }
-    const transaction = await req.tenant.sequelize.transaction({ timeout: 30000 });
+
+    transaction = await req.tenant.sequelize.transaction({ timeout: 30000 });
     req.transaction = transaction;
 
-    const originalSend = res.send;
-    const originalJson = res.json;
-    const originalEnd = res.end;
-
-    const commitReqTransaction = async () => {
+    // Use on-finished to ensure cleanup regardless of how the request ends
+    onFinished(res, async (err) => {
       const t = req.transaction;
-      if (t && !t.finished && !res.headersSent && res.statusCode < 400) {
+      if (!t || t.finished) return;
+
+      // Determine if we should commit or rollback
+      // statusCode < 400 and no error means success
+      if (!err && res.statusCode < 400) {
         try {
           await t.commit();
-        } catch (err) {
-          console.error("Tenant transaction commit failed:", err);
+        } catch (commitErr) {
+          console.error("[TENANT_TRANSACTION] Commit failed:", commitErr.message);
+        }
+      } else {
+        try {
+          await t.rollback();
+        } catch (rollbackErr) {
+          console.error("[TENANT_TRANSACTION] Rollback failed:", rollbackErr.message);
         }
       }
-    };
-
-    res.send = async function (...args) {
-      await commitReqTransaction();
-      return originalSend.apply(this, args);
-    };
-    res.json = async function (...args) {
-      await commitReqTransaction();
-      return originalJson.apply(this, args);
-    };
-    res.end = async function (...args) {
-      await commitReqTransaction();
-      return originalEnd.apply(this, args);
-    };
+    });
 
     return next();
   } catch (err) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback().catch(() => {});
+    }
     next(err);
   }
 }

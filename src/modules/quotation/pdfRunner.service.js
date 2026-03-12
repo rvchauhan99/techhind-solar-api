@@ -34,7 +34,8 @@ let _lastRecoveryAtPerTenant = {};
 const _tenantBackoff = new Map(); // tenantId -> lastCheckedAt
 let _cleanupTenantIndex = 0;
 
-const IDLE_TENANT_CHECK_INTERVAL_MS = 60_000; // Only check empty tenants once a minute
+const IDLE_TENANT_CHECK_INTERVAL_MS = 10_000; // Only check empty tenants every 10s (reduced from 1min)
+const TICK_MAX_TENANTS = 5; // Max tenants to check in one tick to prevent head-of-line blocking
 
 async function listTenantExecutors() {
   // Independent/dedicated mode: no registry URL → single executor for the app DB (DATABASE_URL / DB_*).
@@ -65,7 +66,7 @@ function spawnWorker() {
   if (_worker) return;
   const workerPath = path.join(__dirname, "pdfWorker.entry.js");
   _worker = fork(workerPath, [], {
-    stdio: ["pipe", "pipe", "pipe", "ipc"],
+    stdio: "inherit",
   });
   _workerReady = false;
 
@@ -188,8 +189,11 @@ async function tickOnce() {
       _tenantCursor = (_tenantCursor + 1) % executors.length;
     }
 
+    let checkedCount = 0;
     for (const ex of fairExecutors) {
       if (_activeChildren >= MAX_CONCURRENCY) break;
+      if (checkedCount >= TICK_MAX_TENANTS) break;
+      checkedCount += 1;
 
       // Optimization: Skip tenants that were recently checked and found empty
       const nowMs = Date.now();
@@ -200,9 +204,13 @@ async function tickOnce() {
 
       let sequelize;
       try {
-        sequelize = await dbPoolManager.getPool(ex.tenantId);
+        // Add timeout to pool acquisition to prevent stalling the entire runner
+        sequelize = await Promise.race([
+          dbPoolManager.getPool(ex.tenantId),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Pool acquisition timeout")), 5000))
+        ]);
       } catch (poolErr) {
-        // Skip this tenant if we can't get a connection right now
+        // Skip this tenant if we can't get a connection right now or it timed out
         continue;
       }
 
