@@ -12,7 +12,7 @@ const path = require("path");
 const { Op } = require("sequelize");
 
 const PDF_WARMUP_ENABLED = process.env.PDF_WARMUP_ENABLED === "true";
-const PDF_WARMUP_MAX_TENANTS = Math.max(1, parseInt(process.env.PDF_WARMUP_MAX_TENANTS || "5", 10));
+const PDF_WARMUP_MAX_TENANTS = Math.max(1, parseInt(process.env.PDF_WARMUP_MAX_TENANTS || "20", 10));
 
 const mimeFromKey = (key) => {
     if (!key) return "image/jpeg";
