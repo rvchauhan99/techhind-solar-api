@@ -1238,16 +1238,22 @@ const deriveBomSectionsFromSnapshot = async (normalizedBomSnapshot, productMakes
             balance_of_system.lightening_arrestor = productName || makeName || balance_of_system.lightening_arrestor;
         }
     }
-    panel.make_logos = await getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
-    inverter.make_logos = await getMakeLogos([...new Set(inverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
-    hybrid_inverter.make_logos = await getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
-    battery.make_logos = await getMakeLogos([...new Set(batteryMakeIds)], productMakesMap, bucketClient, tenantId, logoCache);
+    const [panelLogos, inverterLogos, hybridInverterLogos, batteryLogos] = await Promise.all([
+        getMakeLogos([...new Set(panelMakeIds)], productMakesMap, bucketClient, tenantId, logoCache),
+        getMakeLogos([...new Set(inverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache),
+        getMakeLogos([...new Set(hybridInverterMakeIds)], productMakesMap, bucketClient, tenantId, logoCache),
+        getMakeLogos([...new Set(batteryMakeIds)], productMakesMap, bucketClient, tenantId, logoCache),
+    ]);
+    panel.make_logos = panelLogos;
+    inverter.make_logos = inverterLogos;
+    hybrid_inverter.make_logos = hybridInverterLogos;
+    battery.make_logos = batteryLogos;
 
     const resolveMakeLogosForItems = async (items) => {
         return Promise.all(
             items.map(async (item) => {
                 const make_logos = item.product_make_id != null && !Number.isNaN(parseInt(item.product_make_id, 10))
-                    ? await getMakeLogos([parseInt(item.product_make_id, 10)], productMakesMap, bucketClient)
+                    ? await getMakeLogos([parseInt(item.product_make_id, 10)], productMakesMap, bucketClient, tenantId, logoCache)
                     : [];
                 return { ...item, make_logos };
             })
