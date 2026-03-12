@@ -66,6 +66,9 @@ const list = asyncHandler(async (req, res) => {
     last_called_to,
     next_follow_up_from,
     next_follow_up_to,
+    customer_name,
+    mobile_number,
+    lead_number,
   } = req.query;
 
   const createdFromDate = normalizeDateRangeValue(created_from, { endOfDay: false });
@@ -104,6 +107,9 @@ const list = asyncHandler(async (req, res) => {
     last_called_to: lastCalledToDate,
     next_follow_up_from: nextFollowUpFromDate,
     next_follow_up_to: nextFollowUpToDate,
+    customer_name,
+    mobile_number,
+    lead_number,
     enforced_assigned_to_ids: enforcedAssignedToIds,
   });
   return responseHandler.sendSuccess(res, result, "Marketing leads fetched", 200);
