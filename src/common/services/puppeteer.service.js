@@ -8,7 +8,7 @@ const fs = require("fs");
 // On macOS/Windows (local dev) we fall back to the system Chrome/Chromium.
 // On Linux (Docker / DigitalOcean) we use the @sparticuz/chromium binary.
 
-const CHROMIUM_HEAP_MB = Math.max(128, parseInt(process.env.PUPPETEER_JS_MAX_OLD_SPACE_SIZE || "256", 10));
+const CHROMIUM_HEAP_MB = Math.max(128, parseInt(process.env.PUPPETEER_JS_MAX_OLD_SPACE_SIZE || "512", 10));
 const JS_FLAGS_HEAP = `--js-flags=--max-old-space-size=${CHROMIUM_HEAP_MB}`;
 const MAX_RENDERS_BEFORE_RESTART = Math.max(1, parseInt(process.env.PDF_CHROMIUM_MAX_RENDERS || "50", 10));
 const MAX_AGE_MS_BEFORE_RESTART = Math.max(60_000, parseInt(process.env.PDF_CHROMIUM_MAX_AGE_MS || "1800000", 10)); // 30 min default
