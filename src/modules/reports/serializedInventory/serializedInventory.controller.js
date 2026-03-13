@@ -4,6 +4,17 @@ const { asyncHandler } = require("../../../common/utils/asyncHandler.js");
 const responseHandler = require("../../../common/utils/responseHandler.js");
 const serializedInventoryService = require("./serializedInventory.service.js");
 
+const ALLOWED_SORT_COLUMNS = [
+  "id",
+  "serial_number",
+  "status",
+  "inward_date",
+  "outward_date",
+  "unit_price",
+  "created_at",
+  "updated_at",
+];
+
 const list = asyncHandler(async (req, res) => {
   const {
     page = 1,
@@ -20,6 +31,13 @@ const list = asyncHandler(async (req, res) => {
     sortBy = "id",
     sortOrder = "DESC",
   } = req.query;
+
+  const safeSortBy =
+    sortBy && ALLOWED_SORT_COLUMNS.includes(String(sortBy).toLowerCase())
+      ? String(sortBy)
+      : "id";
+  const safeSortOrder =
+    String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
 
   // Handle status as array if multiple values provided
   let statusArray = null;
@@ -45,8 +63,8 @@ const list = asyncHandler(async (req, res) => {
     product_type_id: product_type_id ? parseInt(product_type_id) : null,
     issued_against: issued_against || null,
     reference_number: reference_number || null,
-    sortBy,
-    sortOrder,
+    sortBy: safeSortBy,
+    sortOrder: safeSortOrder,
   });
 
   return responseHandler.sendSuccess(res, result, "Serialized inventory report fetched", 200);
