@@ -81,7 +81,11 @@ async function main() {
         for (const order of orders) {
             const payable = Number(order.project_cost || 0) - Number(order.discount || 0);
             const sumResult = await OrderPaymentDetail.sum("payment_amount", {
-                where: { order_id: order.id, deleted_at: null },
+                where: {
+                    order_id: order.id,
+                    deleted_at: null,
+                    status: { [Op.in]: ["approved", "pending_approval"] },
+                },
                 transaction: t,
             });
             const totalPaid = Number(sumResult || 0);
