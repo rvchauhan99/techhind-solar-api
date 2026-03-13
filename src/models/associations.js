@@ -75,6 +75,9 @@ module.exports = (db) => {
     MarketingLeadFollowUp,
     SerialMaster,
     SerialMasterDetail,
+    PurchaseReturn,
+    PurchaseReturnItem,
+    PurchaseReturnSerial,
   } = db;
 
   // User ↔ Role
@@ -652,6 +655,48 @@ module.exports = (db) => {
   if (POInwardItem && POInwardSerial) {
     POInwardItem.hasMany(POInwardSerial, { foreignKey: "po_inward_item_id", as: "serials" });
     POInwardSerial.belongsTo(POInwardItem, { foreignKey: "po_inward_item_id", as: "poInwardItem" });
+  }
+
+  // Purchase Return associations
+  if (PurchaseReturn && PurchaseOrder) {
+    PurchaseReturn.belongsTo(PurchaseOrder, { foreignKey: "purchase_order_id", as: "purchaseOrder" });
+    PurchaseOrder.hasMany(PurchaseReturn, { foreignKey: "purchase_order_id", as: "purchaseReturns" });
+  }
+  if (PurchaseReturn && POInward) {
+    PurchaseReturn.belongsTo(POInward, { foreignKey: "po_inward_id", as: "poInward" });
+    POInward.hasMany(PurchaseReturn, { foreignKey: "po_inward_id", as: "purchaseReturns" });
+  }
+  if (PurchaseReturn && Supplier) {
+    PurchaseReturn.belongsTo(Supplier, { foreignKey: "supplier_id", as: "supplier" });
+    Supplier.hasMany(PurchaseReturn, { foreignKey: "supplier_id", as: "purchaseReturns" });
+  }
+  if (PurchaseReturn && CompanyWarehouse) {
+    PurchaseReturn.belongsTo(CompanyWarehouse, { foreignKey: "warehouse_id", as: "warehouse" });
+    CompanyWarehouse.hasMany(PurchaseReturn, { foreignKey: "warehouse_id", as: "purchaseReturns" });
+  }
+  if (PurchaseReturn && User) {
+    PurchaseReturn.belongsTo(User, { foreignKey: "created_by", as: "createdByUser" });
+    User.hasMany(PurchaseReturn, { foreignKey: "created_by", as: "createdPurchaseReturns" });
+  }
+  if (PurchaseReturn && PurchaseReturnItem) {
+    PurchaseReturn.hasMany(PurchaseReturnItem, { foreignKey: "purchase_return_id", as: "items" });
+    PurchaseReturnItem.belongsTo(PurchaseReturn, { foreignKey: "purchase_return_id", as: "purchaseReturn" });
+  }
+  if (PurchaseReturnItem && POInwardItem) {
+    PurchaseReturnItem.belongsTo(POInwardItem, { foreignKey: "po_inward_item_id", as: "poInwardItem" });
+    POInwardItem.hasMany(PurchaseReturnItem, { foreignKey: "po_inward_item_id", as: "purchaseReturnItems" });
+  }
+  if (PurchaseReturnItem && PurchaseOrderItem) {
+    PurchaseReturnItem.belongsTo(PurchaseOrderItem, { foreignKey: "purchase_order_item_id", as: "purchaseOrderItem" });
+    PurchaseOrderItem.hasMany(PurchaseReturnItem, { foreignKey: "purchase_order_item_id", as: "purchaseReturnItems" });
+  }
+  if (PurchaseReturnItem && Product) {
+    PurchaseReturnItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(PurchaseReturnItem, { foreignKey: "product_id", as: "purchaseReturnItems" });
+  }
+  if (PurchaseReturnItem && PurchaseReturnSerial) {
+    PurchaseReturnItem.hasMany(PurchaseReturnSerial, { foreignKey: "purchase_return_item_id", as: "serials" });
+    PurchaseReturnSerial.belongsTo(PurchaseReturnItem, { foreignKey: "purchase_return_item_id", as: "purchaseReturnItem" });
   }
 
   // Stock associations

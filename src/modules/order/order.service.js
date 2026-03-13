@@ -160,13 +160,24 @@ const escapeSearchForLike = (s) => {
         .replace(/'/g, "''");
 };
 
-/** Literal for "outstanding amount > 0": (project_cost - discount) - SUM(payment_amount) > 0 */
+/** WHERE clause for order_payment_details that counts as "paid" (approved or pending_approval; excludes rejected). */
+const PAID_PAYMENT_WHERE =
+    `order_payment_details.order_id = "Order".id AND order_payment_details.deleted_at IS NULL AND order_payment_details.status IN ('approved', 'pending_approval')`;
+
+/** Literal for "outstanding amount > 0": (project_cost - discount) - SUM(payment_amount for paid statuses) > 0 */
 const getPaymentOutstandingLiteral = (models) =>
     models.sequelize.literal(
         `(("Order".project_cost - COALESCE("Order".discount, 0)) - ` +
-        `(SELECT COALESCE(SUM(payment_amount), 0) FROM order_payment_details ` +
-        `WHERE order_payment_details.order_id = "Order".id AND order_payment_details.deleted_at IS NULL) > 0)`
+        `(SELECT COALESCE(SUM(payment_amount), 0) FROM order_payment_details WHERE ${PAID_PAYMENT_WHERE}) > 0)`
     );
+
+/** Literal for total_paid: SUM(payment_amount) for approved + pending_approval only. */
+const getTotalPaidLiteral = (models) =>
+    models.sequelize.literal(`(
+        SELECT COALESCE(SUM(payment_amount), 0)
+        FROM order_payment_details
+        WHERE ${PAID_PAYMENT_WHERE}
+    )`);
 
 const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
     const where = { deleted_at: null };
@@ -489,15 +500,7 @@ const listOrders = async ({
         where,
         attributes: {
             include: [
-                [
-                    models.sequelize.literal(`(
-                        SELECT COALESCE(SUM(payment_amount), 0)
-                        FROM order_payment_details
-                        WHERE order_payment_details.order_id = "Order".id
-                          AND order_payment_details.deleted_at IS NULL
-                    )`),
-                    'total_paid'
-                ]
+                [getTotalPaidLiteral(models), 'total_paid']
             ]
         },
         include: includeList,
@@ -908,15 +911,7 @@ const getOrderById = async ({ id } = {}) => {
         where: { id, deleted_at: null },
         attributes: {
             include: [
-                [
-                    models.sequelize.literal(`(
-                        SELECT COALESCE(SUM(payment_amount), 0)
-                        FROM order_payment_details
-                        WHERE order_payment_details.order_id = "Order".id
-                          AND order_payment_details.deleted_at IS NULL
-                    )`),
-                    "total_paid",
-                ],
+                [getTotalPaidLiteral(models), "total_paid"],
             ],
         },
         include: [
@@ -2094,15 +2089,7 @@ const listDeliveryExecutionOrders = async ({
             "current_stage_key",
             "bom_snapshot",
             "updated_at",
-            [
-                models.sequelize.literal(`(
-                    SELECT COALESCE(SUM(payment_amount), 0)
-                    FROM order_payment_details
-                    WHERE order_payment_details.order_id = "Order".id
-                      AND order_payment_details.deleted_at IS NULL
-                )`),
-                "total_paid",
-            ],
+            [getTotalPaidLiteral(models), "total_paid"],
             [
                 models.sequelize.literal(`(
                     SELECT MAX(challan_date)
@@ -2408,15 +2395,7 @@ const listFabricationInstallationOrders = async ({
             "consumer_no",
             "reference_from",
             "payment_type",
-            [
-                models.sequelize.literal(`(
-                    SELECT COALESCE(SUM(payment_amount), 0)
-                    FROM order_payment_details
-                    WHERE order_payment_details.order_id = "Order".id
-                      AND order_payment_details.deleted_at IS NULL
-                )`),
-                "total_paid",
-            ],
+            [getTotalPaidLiteral(models), "total_paid"],
         ],
         include: [
             {

@@ -68,10 +68,12 @@ const getSerializedInventoryReport = async ({
     }
   }
 
-  // Build include conditions for product type filter
+  // Build include conditions: require product when filtering by product_type_id so list/summary match
   const productInclude = {
     model: Product,
     as: "product",
+    required: !!product_type_id,
+    paranoid: false,
     attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required", "product_type_id"],
     include: [
       {
@@ -79,6 +81,7 @@ const getSerializedInventoryReport = async ({
         as: "productType",
         attributes: ["id", "name"],
         required: !!product_type_id,
+        paranoid: false,
         ...(product_type_id ? { where: { id: product_type_id } } : {}),
       },
     ],
@@ -140,26 +143,24 @@ const getSerializedInventoryReport = async ({
     by_product_type: {},
   };
 
-  // Get all serials for summary (without pagination)
-  const summaryProductInclude = {
-    model: Product,
-    as: "product",
-    attributes: ["id", "product_name"],
-    include: [
-      {
-        model: ProductType,
-        as: "productType",
-        attributes: ["id", "name"],
-        required: !!product_type_id,
-        ...(product_type_id ? { where: { id: product_type_id } } : {}),
-      },
-    ],
-  };
-
+  // Summary uses same filter/include as list so KPI counts match applied filters
   const allSerials = await StockSerial.findAll({
     where,
     include: [
-      summaryProductInclude,
+      {
+        ...productInclude,
+        attributes: ["id", "product_name"],
+        include: [
+          {
+            model: ProductType,
+            as: "productType",
+            attributes: ["id", "name"],
+            required: !!product_type_id,
+            paranoid: false,
+            ...(product_type_id ? { where: { id: product_type_id } } : {}),
+          },
+        ],
+      },
       {
         model: CompanyWarehouse,
         as: "warehouse",

@@ -26,6 +26,7 @@ const homeRoutes = require('../modules/home/home.routes.js');
 const supplierRoutes = require('../modules/supplier/supplier.routes.js');
 const purchaseOrderRoutes = require('../modules/purchaseOrder/purchaseOrder.routes.js');
 const poInwardRoutes = require('../modules/poInward/poInward.routes.js');
+const purchaseReturnRoutes = require('../modules/purchaseReturn/purchaseReturn.routes.js');
 const stockRoutes = require('../modules/stock/stock.routes.js');
 const inventoryLedgerRoutes = require('../modules/inventoryLedger/inventoryLedger.routes.js');
 const stockTransferRoutes = require('../modules/stockTransfer/stockTransfer.routes.js');
@@ -82,6 +83,7 @@ router.use("/quotation", requireAuthWithTenant, requireModulePermissionByMethod(
 router.use("/supplier", requireAuthWithTenant, supplierRoutes);
 router.use("/purchase-orders", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/purchase-orders" }), purchaseOrderRoutes);
 router.use("/po-inwards", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/po-inwards" }), poInwardRoutes);
+router.use("/purchase-returns", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/purchase-returns" }), purchaseReturnRoutes);
 router.use("/stocks", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: STOCK_API_CONSUMER_ROUTES }), stockRoutes);
 router.use("/inventory-ledger", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/inventory-ledger" }), inventoryLedgerRoutes);
 router.use("/stock-transfers", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/stock-transfers" }), stockTransferRoutes);
