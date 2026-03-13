@@ -37,6 +37,7 @@ const list = asyncHandler(async (req, res) => {
     status: statusArray,
     order_number,
     receipt_number,
+    req,
   });
 
   return responseHandler.sendSuccess(res, result, "Payments report fetched", 200);
@@ -73,6 +74,7 @@ const exportReport = asyncHandler(async (req, res) => {
     order_number,
     receipt_number,
     format,
+    req,
   });
 
   const filename = `payments-report-${new Date().toISOString().split("T")[0]}.${
