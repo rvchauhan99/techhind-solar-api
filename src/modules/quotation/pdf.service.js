@@ -1310,31 +1310,42 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const systemCostRounded = roundMoney(systemCost);
 
     const gstPercent = parseFloat(quotation.gst_rate) || 0;
-    const gedaAmount = roundMoney(parseFloat(quotation.state_government_amount) || 0);
+
+    // Money fields that participate in the Final Payable calculation – mirror UI logic (calculateTotals).
     const netMeteringCostValue = parseMoney(quotation.netmeter_amount);
+    const stampChargesValue = parseMoney(quotation.stamp_charges);
+    const stateGovernmentAmountValue = parseMoney(quotation.state_government_amount);
+    const structureAmountValue = parseMoney(quotation.structure_amount);
+    const additionalCost1Value = parseMoney(quotation.additional_cost_amount_1);
+    const additionalCost2Value = parseMoney(quotation.additional_cost_amount_2);
+    const discountValueRaw = parseMoney(quotation.discount);
+    const discountValue = roundMoney(discountValueRaw);
+
+    // Net metering display string/number for table row (may be text when 0).
     const netMeteringCostDisplay =
         netMeteringCostValue > 0 ? roundMoney(netMeteringCostValue) : "As Actual To Be Paid By The Customer";
 
-    const discountValueRaw = parseMoney(quotation.discount);
-    const discountValue = roundMoney(discountValueRaw);
-    const discountType = (quotation.discount_type != null ? String(quotation.discount_type) : "").trim();
-    const hasDiscount = discountValue > 0;
-    const isBeforeTax = hasDiscount && discountType.toLowerCase() === "before tax";
+    // Subtotal before GST – same structure as frontend `calculateTotals`.
+    const subtotalBeforeGstRaw =
+        totalProjectValue +
+        netMeteringCostValue +
+        stampChargesValue +
+        stateGovernmentAmountValue +
+        structureAmountValue +
+        additionalCost1Value +
+        additionalCost2Value -
+        discountValueRaw;
+    const subtotalBeforeGst = roundMoney(subtotalBeforeGstRaw);
 
-    // GST base depends on discount type (use rounded system cost for consistency)
-    const gstBaseSystemCost = isBeforeTax ? Math.max(0, systemCostRounded - discountValue) : systemCostRounded;
-    const gstAmount = roundMoney(gstBaseSystemCost * (gstPercent / 100));
-
-    const netMeteringForTotal = typeof netMeteringCostDisplay === "number" ? netMeteringCostDisplay : roundMoney(netMeteringCostValue);
-    const grandTotalBeforeAfterTaxDiscount = gstBaseSystemCost + gstAmount + gedaAmount + netMeteringForTotal;
-    const grandTotal = roundMoney(hasDiscount && !isBeforeTax
-        ? Math.max(0, grandTotalBeforeAfterTaxDiscount - discountValue)
-        : grandTotalBeforeAfterTaxDiscount);
+    const gstAmount = roundMoney(subtotalBeforeGst * (gstPercent / 100));
+    const totalPayable = roundMoney(subtotalBeforeGst + gstAmount);
 
     const subsidyAmount = roundMoney(parseMoney(quotation.subsidy_amount));
     const stateSubsidyAmount = roundMoney(parseMoney(quotation.state_subsidy_amount));
     const totalSubsidy = subsidyAmount + stateSubsidyAmount;
-    const finalCost = roundMoney(grandTotal - totalSubsidy);
+    const finalCost = roundMoney(totalPayable - totalSubsidy);
+
+    const gedaAmount = roundMoney(stateGovernmentAmountValue);
 
     // Use graph fields from quotation for savings calculations
     const pricePerUnit = parseFloat(quotation.graph_price_per_unit) || 0; // Default Rs. 8/unit
@@ -1581,17 +1592,30 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         net_metering_cost: netMeteringCostValue,
         net_metering_cost_display: netMeteringCostDisplay,
         geda_amount: gedaAmount,
-        grand_total: grandTotal,
+        grand_total: totalPayable,
         subsidy_amount: subsidyAmount,
         state_subsidy_amount: stateSubsidyAmount,
         total_subsidy_amount: totalSubsidy,
         final_cost: finalCost,
-        has_discount: hasDiscount,
-        discount_type: discountType || null,
-        discount_value: hasDiscount ? discountValue : 0,
-        discount_label: hasDiscount
-            ? (discountType ? `Discount (${discountType}) (-)` : "Discount (-)")
+        has_discount: discountValue > 0,
+        discount_type: (quotation.discount_type != null ? String(quotation.discount_type).trim() : "") || null,
+        discount_value: discountValue > 0 ? discountValue : 0,
+        discount_label: discountValue > 0
+            ? ((quotation.discount_type != null && String(quotation.discount_type).trim() !== "")
+                ? `Discount (${String(quotation.discount_type).trim()}) (-)`
+                : "Discount (-)")
             : null,
+
+        // Detailed components for Commercial Offer table and parity with UI Final Payable section
+        structure_amount: structureAmountValue,
+        stamp_charges: stampChargesValue,
+        state_government_amount: stateGovernmentAmountValue,
+        additional_cost_amount_1: additionalCost1Value,
+        additional_cost_amount_2: additionalCost2Value,
+        additional_cost_details_1: quotation.additional_cost_details_1 || "",
+        additional_cost_details_2: quotation.additional_cost_details_2 || "",
+        subtotal_before_gst: subtotalBeforeGst,
+        total_payable: totalPayable,
 
         // Payment terms
         payment_terms: quotation.payment_terms || [
