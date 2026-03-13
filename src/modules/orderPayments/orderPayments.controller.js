@@ -27,7 +27,7 @@ const orderPaymentsController = {
                 }
             }
 
-            const payment = await orderPaymentService.createPayment(payload, req.transaction);
+            const payment = await orderPaymentService.createPayment(payload, req.transaction, req);
             res.status(201).json({ success: true, result: payment });
         } catch (error) {
             console.error("Error creating payment:", error);
@@ -39,7 +39,7 @@ const orderPaymentsController = {
     async getPaymentById(req, res) {
         try {
             const { id } = req.params;
-            const payment = await orderPaymentService.getPaymentById(id);
+            const payment = await orderPaymentService.getPaymentById(id, req);
 
             if (!payment) {
                 return res.status(404).json({ success: false, message: "Payment not found" });
@@ -55,7 +55,7 @@ const orderPaymentsController = {
     async getReceiptUrl(req, res) {
         try {
             const { id } = req.params;
-            const payment = await orderPaymentService.getPaymentById(id);
+            const payment = await orderPaymentService.getPaymentById(id, req);
             if (!payment) {
                 return res.status(404).json({ success: false, message: "Payment not found" });
             }
@@ -103,7 +103,7 @@ const orderPaymentsController = {
                 receipt_number: req.query.receipt_number,
             };
 
-            const result = await orderPaymentService.listPayments(filters);
+            const result = await orderPaymentService.listPayments(filters, req);
             res.json({ success: true, result: result.data, pagination: result.pagination });
         } catch (error) {
             console.error("Error listing payments:", error);
@@ -118,7 +118,7 @@ const orderPaymentsController = {
 
             if (req.file) {
                 const bucketClient = bucketService.getBucketForRequest(req);
-                const existingPayment = await orderPaymentService.getPaymentById(id);
+                const existingPayment = await orderPaymentService.getPaymentById(id, req);
                 if (existingPayment && existingPayment.receipt_cheque_file && !existingPayment.receipt_cheque_file.startsWith("/")) {
                     try {
                         await bucketService.deleteFileWithClient(bucketClient, existingPayment.receipt_cheque_file);
@@ -138,7 +138,7 @@ const orderPaymentsController = {
                 }
             }
 
-            const payment = await orderPaymentService.updatePayment(id, payload, req.transaction);
+            const payment = await orderPaymentService.updatePayment(id, payload, req.transaction, req);
             res.json({ success: true, result: payment });
         } catch (error) {
             console.error("Error updating payment:", error);
@@ -151,7 +151,7 @@ const orderPaymentsController = {
         try {
             const { id } = req.params;
 
-            const payment = await orderPaymentService.getPaymentById(id);
+            const payment = await orderPaymentService.getPaymentById(id, req);
             if (payment && payment.receipt_cheque_file && !payment.receipt_cheque_file.startsWith("/")) {
                 try {
                     const bucketClient = bucketService.getBucketForRequest(req);
@@ -162,7 +162,7 @@ const orderPaymentsController = {
                 }
             }
 
-            await orderPaymentService.deletePayment(id, req.transaction);
+            await orderPaymentService.deletePayment(id, req.transaction, req);
             res.json({ success: true, message: "Payment deleted successfully" });
         } catch (error) {
             console.error("Error deleting payment:", error);
@@ -182,6 +182,7 @@ const orderPaymentsController = {
                 id,
                 userId,
                 transaction: req.transaction,
+                req,
             });
             if (payment && payment.receipt_cheque_file && payment.order_id) {
                 const existingList = await orderDocumentsService.listOrderDocuments({
@@ -224,6 +225,7 @@ const orderPaymentsController = {
                 userId,
                 reason: rejection_reason,
                 transaction: req.transaction,
+                req,
             });
             res.json({ success: true, result: orderPaymentService.formatPaymentResponse(payment) });
         } catch (error) {
@@ -236,7 +238,7 @@ const orderPaymentsController = {
     async generateReceiptPdf(req, res) {
         try {
             const { id } = req.params;
-            const payment = await orderPaymentService.getPaymentById(id);
+            const payment = await orderPaymentService.getPaymentById(id, req);
 
             if (!payment) {
                 return res.status(404).json({ success: false, message: "Payment not found" });
@@ -247,7 +249,7 @@ const orderPaymentsController = {
                     .json({ success: false, message: "Receipt is only available for approved payments" });
             }
 
-            const { Order, Customer, CompanyBranch, Company, CompanyBankAccount } = getTenantModels();
+            const { Order, Customer, CompanyBranch, Company, CompanyBankAccount } = getTenantModels(req);
             const order = payment.order_id
                 ? await Order.findByPk(payment.order_id, {
                       include: [

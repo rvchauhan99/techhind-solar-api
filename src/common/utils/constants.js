@@ -52,7 +52,6 @@ const QUOTATION_STATUS = {
   CONVERTED: "Converted",
   NOT_SELECTED: "Not Selected",
 };
-const PAYMENT_TYPES = ["Direct Payment", "Loan Payment", "PDC Payment"];
 const FOLLOWUP_RATING = ["High", "Medium", "Low"];
 
 // Inventory Module Constants
@@ -145,7 +144,6 @@ module.exports = {
   TOKEN_EXPIRY,
   ROOF_TYPES,
   INQUIRY_RATINGS,
-  PAYMENT_TYPES,
   INQUIRY_STATUS,
   QUOTATION_STATUS,
   FOLLOWUP_RATING,

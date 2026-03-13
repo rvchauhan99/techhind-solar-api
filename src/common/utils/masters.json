@@ -306,5 +306,13 @@
         "required_fields": [
             "name"
         ]
+    },
+    {
+        "id": 36,
+        "name": "Payment Type",
+        "model_name": "payment_type.model",
+        "required_fields": [
+            "name"
+        ]
     }
 ]
