@@ -4,8 +4,8 @@ const notificationService = require("../notification/notification.service.js");
 
 const orderPaymentService = {
     // Create a new payment
-    async createPayment(payload, transaction) {
-        const models = getTenantModels();
+    async createPayment(payload, transaction, req) {
+        const models = getTenantModels(req);
         const { OrderPaymentDetail, Order } = models;
         const payment = await OrderPaymentDetail.create(payload, { transaction });
         const orderId = payload.order_id;
@@ -33,8 +33,8 @@ const orderPaymentService = {
     },
 
     // Get payment by ID
-    async getPaymentById(id) {
-        const models = getTenantModels();
+    async getPaymentById(id, req) {
+        const models = getTenantModels(req);
         const { OrderPaymentDetail, PaymentMode, Bank, CompanyBankAccount, Order, User } = models;
         return OrderPaymentDetail.findByPk(id, {
             include: [
@@ -79,7 +79,7 @@ const orderPaymentService = {
     },
 
     // List payments with filters
-    async listPayments(filters = {}) {
+    async listPayments(filters = {}, req) {
         const {
             page = 1,
             limit = 10,
@@ -152,7 +152,7 @@ const orderPaymentService = {
             ];
         }
 
-        const models = getTenantModels();
+        const models = getTenantModels(req);
         const { OrderPaymentDetail, PaymentMode, Bank, CompanyBankAccount, Order, Customer, CompanyBranch, User } = models;
         const { count, rows } = await OrderPaymentDetail.findAndCountAll({
             where: whereClause,
@@ -232,8 +232,8 @@ const orderPaymentService = {
     },
 
     // Update payment (blocked for approved payments)
-    async updatePayment(id, payload, transaction) {
-        const models = getTenantModels();
+    async updatePayment(id, payload, transaction, req) {
+        const models = getTenantModels(req);
         const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id);
         if (!payment) {
@@ -247,8 +247,8 @@ const orderPaymentService = {
     },
 
     // Delete payment
-    async deletePayment(id, transaction) {
-        const models = getTenantModels();
+    async deletePayment(id, transaction, req) {
+        const models = getTenantModels(req);
         const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id);
         if (!payment) {
@@ -258,8 +258,8 @@ const orderPaymentService = {
         return payment;
     },
 
-    async approvePayment({ id, userId, transaction }) {
-        const models = getTenantModels();
+    async approvePayment({ id, userId, transaction, req }) {
+        const models = getTenantModels(req);
         const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id, { transaction });
         if (!payment) {
@@ -291,8 +291,8 @@ const orderPaymentService = {
         return payment;
     },
 
-    async rejectPayment({ id, userId, reason, transaction }) {
-        const models = getTenantModels();
+    async rejectPayment({ id, userId, reason, transaction, req }) {
+        const models = getTenantModels(req);
         const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id, { transaction });
         if (!payment) {

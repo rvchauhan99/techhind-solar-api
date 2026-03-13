@@ -592,14 +592,14 @@ const addFollowUp = async ({ lead_id, payload, user, transaction } = {}) => {
   // Derive new lead status from outcome when not explicitly provided
   let derivedStatus = lead.status;
   if (!payload.status) {
-    if (outcome === "interested" || outcome === "follow_up" || outcome === "callback_scheduled") {
+    if (outcome === "follow_up" || outcome === "callback_scheduled") {
       derivedStatus = "follow_up";
     } else if (outcome === "converted") {
       derivedStatus = "converted";
     } else if (outcome === "not_interested" || outcome === "wrong_number") {
       derivedStatus = "not_interested";
-    } else if (outcome === "no_answer" || outcome === "switched_off") {
-      derivedStatus = "contacted";
+    } else if (outcome === "viewed" || outcome === "no_answer" || outcome === "switched_off") {
+      derivedStatus = "viewed";
     }
   }
 
@@ -673,7 +673,7 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
     throw new AppError("Lead id is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
   const models = getTenantModels();
-  const { MarketingLead, Inquiry, Customer } = models;
+  const { MarketingLead, Inquiry, Customer, PaymentType } = models;
 
   const lead = await MarketingLead.findOne({
     where: { id, deleted_at: null },
@@ -717,6 +717,27 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
     customerId = customer.id;
   }
 
+  // Normalize and optionally validate payment_type if provided (but do not require it)
+  let normalizedPaymentType = null;
+  const rawPaymentType = payload?.payment_type;
+  if (rawPaymentType && String(rawPaymentType).trim() !== "") {
+    normalizedPaymentType = String(rawPaymentType).trim();
+    if (PaymentType) {
+      const match = await PaymentType.findOne({
+        where: {
+          deleted_at: null,
+          is_active: true,
+          name: { [Op.iLike]: normalizedPaymentType },
+        },
+        transaction,
+      });
+      if (!match) {
+        throw new AppError("Invalid Payment Type", RESPONSE_STATUS_CODES.BAD_REQUEST);
+      }
+      normalizedPaymentType = match.name;
+    }
+  }
+
   const inquiryPayload = {
     customer_id: customerId,
     inquiry_source_id: lead.inquiry_source_id || payload?.inquiry_source_id || null,
@@ -734,7 +755,7 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
     next_reminder_date: payload?.next_reminder_date || null,
     reference_from: payload?.reference_from || lead.campaign_name || null,
     estimated_cost: payload?.estimated_cost || lead.expected_project_cost || null,
-    payment_type: payload?.payment_type || null,
+    payment_type: normalizedPaymentType,
     status: payload?.status || undefined,
   };
 

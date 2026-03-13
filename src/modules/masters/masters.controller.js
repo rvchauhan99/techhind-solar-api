@@ -167,10 +167,25 @@ const getReferenceOptions = asyncHandler(async (req, res) => {
 });
 
 const getAppConstants = asyncHandler(async (req, res) => {
-  const { INQUIRY_RATINGS, PAYMENT_TYPES } = require('../../common/utils/constants.js');
+  const { INQUIRY_RATINGS } = require('../../common/utils/constants.js');
+
+  // Fetch active payment types from master data
+  const paymentTypeOptions = await masterService.getReferenceOptions(
+    {
+      model: 'payment_type.model',
+      status: 'active',
+      limit: 100,
+    },
+    req
+  );
+
+  const paymentTypes = Array.isArray(paymentTypeOptions)
+    ? paymentTypeOptions.map((opt) => opt.name || opt.label || opt.value).filter(Boolean)
+    : [];
+
   return responseHandler.sendSuccess(
     res,
-    { ratings: INQUIRY_RATINGS, paymentTypes: PAYMENT_TYPES },
+    { ratings: INQUIRY_RATINGS, paymentTypes },
     'Constants fetched',
     200
   );

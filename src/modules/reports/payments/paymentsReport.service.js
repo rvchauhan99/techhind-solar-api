@@ -14,8 +14,9 @@ const getPaymentsReport = async ({
   status = null,
   order_number = null,
   receipt_number = null,
+  req = null,
 } = {}) => {
-  const models = getTenantModels();
+  const models = getTenantModels(req);
   const { OrderPaymentDetail, Order, CompanyBranch, User, PaymentMode } = models;
   const offset = (page - 1) * limit;
 
