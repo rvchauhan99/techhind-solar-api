@@ -592,14 +592,14 @@ const addFollowUp = async ({ lead_id, payload, user, transaction } = {}) => {
   // Derive new lead status from outcome when not explicitly provided
   let derivedStatus = lead.status;
   if (!payload.status) {
-    if (outcome === "interested" || outcome === "follow_up" || outcome === "callback_scheduled") {
+    if (outcome === "follow_up" || outcome === "callback_scheduled") {
       derivedStatus = "follow_up";
     } else if (outcome === "converted") {
       derivedStatus = "converted";
     } else if (outcome === "not_interested" || outcome === "wrong_number") {
       derivedStatus = "not_interested";
-    } else if (outcome === "no_answer" || outcome === "switched_off") {
-      derivedStatus = "contacted";
+    } else if (outcome === "viewed" || outcome === "no_answer" || outcome === "switched_off") {
+      derivedStatus = "viewed";
     }
   }
 
