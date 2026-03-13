@@ -45,6 +45,42 @@
                 <td style="text-align:right; white-space:nowrap; font-size:9px;">{{formatCurrency net_metering_cost_display}}</td>
                 {{/if}}
             </tr>
+            {{#if structure_amount}}
+            <tr>
+                <td>Structure Amount (+)</td>
+                <td>{{formatCurrency structure_amount}}</td>
+            </tr>
+            {{/if}}
+            {{#if stamp_charges}}
+            <tr>
+                <td>Stamp Charges (+)</td>
+                <td>{{formatCurrency stamp_charges}}</td>
+            </tr>
+            {{/if}}
+            {{#if additional_cost_amount_1}}
+            <tr>
+                <td>
+                    {{#if additional_cost_details_1}}
+                    Additional Cost 1 ({{additional_cost_details_1}}) (+)
+                    {{else}}
+                    Additional Cost 1 (+)
+                    {{/if}}
+                </td>
+                <td>{{formatCurrency additional_cost_amount_1}}</td>
+            </tr>
+            {{/if}}
+            {{#if additional_cost_amount_2}}
+            <tr>
+                <td>
+                    {{#if additional_cost_details_2}}
+                    Additional Cost 2 ({{additional_cost_details_2}}) (+)
+                    {{else}}
+                    Additional Cost 2 (+)
+                    {{/if}}
+                </td>
+                <td>{{formatCurrency additional_cost_amount_2}}</td>
+            </tr>
+            {{/if}}
             <tr>
                 <td>GEDA Application Amount</td>
                 <td>{{formatCurrency geda_amount}}</td>

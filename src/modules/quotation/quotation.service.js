@@ -262,6 +262,26 @@ const listQuotations = async ({
     const data = list.map((it) => {
         const row = it.toJSON();
         const derived = derivePanelAndInverterFromBomSnapshot(row.bom_snapshot);
+
+        const toNum = (val) => {
+            const n = Number(val);
+            return Number.isFinite(n) ? n : 0;
+        };
+
+        const subtotal =
+            toNum(row.total_project_value) +
+            toNum(row.netmeter_amount) +
+            toNum(row.stamp_charges) +
+            toNum(row.state_government_amount) +
+            toNum(row.structure_amount) +
+            toNum(row.additional_cost_amount_1) +
+            toNum(row.additional_cost_amount_2) -
+            toNum(row.discount);
+
+        const gstRate = toNum(row.gst_rate);
+        const gstAmount = (subtotal * gstRate) / 100;
+        const totalPayable = subtotal + gstAmount;
+
         return {
             id: row.id,
             quotation_number: row.quotation_number,
@@ -272,6 +292,7 @@ const listQuotations = async ({
             project_capacity: row.project_capacity,
             project_cost: row.project_cost,
             total_project_value: row.total_project_value,
+            total_payable: totalPayable,
             is_approved: row.is_approved,
             panel_product: derived.panel_product ?? row.panel_product,
             inverter_product: derived.inverter_product ?? row.inverter_product,

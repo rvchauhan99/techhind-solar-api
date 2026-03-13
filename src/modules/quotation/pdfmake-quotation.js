@@ -319,6 +319,40 @@ const createOfferPage = (data) => {
         ...(data.gst_percent ? [[{ text: `GST @ ${data.gst_percent} %`, style: "tableCell" }, { text: formatCurrency(data.gst_amount), style: "tableCell", alignment: "right" }]] : []),
         [{ text: "Net-Metering Cost", style: "tableCell" }, { text: formatCurrency(netMeteringDisplay), style: "tableCell", alignment: "right", noWrap: true, fontSize: isNetMeteringText ? 8 : undefined }],
         [{ text: "GEDA Application Amount", style: "tableCell" }, { text: formatCurrency(data.geda_amount), style: "tableCell", alignment: "right" }],
+        ...(data.structure_amount
+            ? [[
+                { text: "Structure Amount (+)", style: "tableCell" },
+                { text: formatCurrency(data.structure_amount), style: "tableCell", alignment: "right" },
+            ]]
+            : []),
+        ...(data.stamp_charges
+            ? [[
+                { text: "Stamp Charges (+)", style: "tableCell" },
+                { text: formatCurrency(data.stamp_charges), style: "tableCell", alignment: "right" },
+            ]]
+            : []),
+        ...(data.additional_cost_amount_1
+            ? [[
+                {
+                    text: data.additional_cost_details_1
+                        ? `Additional Cost 1 (${data.additional_cost_details_1}) (+)`
+                        : "Additional Cost 1 (+)",
+                    style: "tableCell",
+                },
+                { text: formatCurrency(data.additional_cost_amount_1), style: "tableCell", alignment: "right" },
+            ]]
+            : []),
+        ...(data.additional_cost_amount_2
+            ? [[
+                {
+                    text: data.additional_cost_details_2
+                        ? `Additional Cost 2 (${data.additional_cost_details_2}) (+)`
+                        : "Additional Cost 2 (+)",
+                    style: "tableCell",
+                },
+                { text: formatCurrency(data.additional_cost_amount_2), style: "tableCell", alignment: "right" },
+            ]]
+            : []),
         [
             { text: "Grand Total Cost Of The Project", style: "tableCell", bold: true, fillColor: COLORS.lightGray },
             { text: formatCurrency(data.grand_total), style: "tableCell", bold: true, alignment: "right", fillColor: COLORS.lightGray },
@@ -331,11 +365,17 @@ const createOfferPage = (data) => {
     ];
 
     if (data.has_discount) {
-        const discountInsertIdx = data.gst_percent ? 6 : 5;
-        priceTableBody.splice(discountInsertIdx, 0, [
+        const discountRow = [
             { text: data.discount_label || "Discount (-)", style: "tableCell" },
             { text: `- ${formatCurrency(data.discount_value)}`, style: "tableCell", alignment: "right" },
-        ]);
+        ];
+
+        // Insert discount row just before the Grand Total row so it always affects the final total.
+        const grandTotalIndex = priceTableBody.findIndex(
+            (row) => Array.isArray(row) && row[0] && row[0].text === "Grand Total Cost Of The Project"
+        );
+        const insertIdx = grandTotalIndex > -1 ? grandTotalIndex : priceTableBody.length - 2;
+        priceTableBody.splice(insertIdx, 0, discountRow);
     }
 
     const paymentTermsList = (data.payment_terms || ["Full payment before system delivery"]).map((term, idx) => ({
