@@ -169,19 +169,27 @@ const getReferenceOptions = asyncHandler(async (req, res) => {
 const getAppConstants = asyncHandler(async (req, res) => {
   const { INQUIRY_RATINGS } = require('../../common/utils/constants.js');
 
-  // Fetch active payment types from master data
-  const paymentTypeOptions = await masterService.getReferenceOptions(
-    {
-      model: 'payment_type.model',
-      status: 'active',
-      limit: 100,
-    },
-    req
-  );
-
-  const paymentTypes = Array.isArray(paymentTypeOptions)
-    ? paymentTypeOptions.map((opt) => opt.name || opt.label || opt.value).filter(Boolean)
-    : [];
+  let paymentTypes = [];
+  try {
+    const paymentTypeOptions = await masterService.getReferenceOptions(
+      {
+        model: 'payment_type.model',
+        status: 'active',
+        limit: 100,
+      },
+      req
+    );
+    paymentTypes = Array.isArray(paymentTypeOptions)
+      ? paymentTypeOptions.map((opt) => opt.name || opt.label || opt.value).filter(Boolean)
+      : [];
+  } catch (err) {
+    // payment_types table may not exist if tenant migrations (e.g. 20260313010001) have not been run
+    if (err.name === 'SequelizeDatabaseError' && err.parent?.code === '42P01') {
+      // relation "payment_types" does not exist - return empty list so app still works
+    } else {
+      throw err;
+    }
+  }
 
   return responseHandler.sendSuccess(
     res,

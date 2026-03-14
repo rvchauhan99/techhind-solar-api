@@ -7,12 +7,13 @@ const controller = require("./stock.controller.js");
 const router = Router();
 
 router.get("/", ...requireAuthWithTenant, controller.list);
+router.get("/summary", ...requireAuthWithTenant, controller.getSummary);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
 router.get("/serials/available", ...requireAuthWithTenant, controller.getAvailableSerials);
 router.get("/serials/validate", ...requireAuthWithTenant, controller.validateSerial);
 router.get("/serials/validate-not-exists", ...requireAuthWithTenant, controller.validateSerialNotExists);
-router.get("/:id", ...requireAuthWithTenant, controller.getById);
 router.get("/warehouse/:warehouseId", ...requireAuthWithTenant, controller.getByWarehouse);
+router.get("/:id", ...requireAuthWithTenant, controller.getById);
 
 module.exports = router;
 

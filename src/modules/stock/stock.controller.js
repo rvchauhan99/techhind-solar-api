@@ -15,6 +15,15 @@ const list = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, result, "Stock list fetched", 200);
 });
 
+const getSummary = asyncHandler(async (req, res) => {
+  const params = { ...req.query };
+  if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
+  if (params.product_id) params.product_id = parseInt(params.product_id, 10);
+  if (params.product_type_id) params.product_type_id = parseInt(params.product_type_id, 10);
+  const result = await stockService.getStockSummary(params);
+  return responseHandler.sendSuccess(res, result, "Stock summary fetched", 200);
+});
+
 const exportList = asyncHandler(async (req, res) => {
   const params = { ...req.query };
   if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
@@ -81,6 +90,7 @@ const validateSerialNotExists = asyncHandler(async (req, res) => {
 
 module.exports = {
   list,
+  getSummary,
   exportList,
   getById,
   getByWarehouse,
