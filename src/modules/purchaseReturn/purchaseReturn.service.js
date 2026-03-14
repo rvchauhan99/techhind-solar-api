@@ -4,6 +4,7 @@ const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const { MOVEMENT_TYPE, TRANSACTION_TYPE, PO_STATUS, RECEIPT_STATUS, SERIAL_STATUS } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const stockService = require("../stock/stock.service.js");
 
 /**
  * List purchase returns with basic filters and pagination.
@@ -481,6 +482,59 @@ const createPurchaseReturn = async ({ payload, userId, transaction } = {}) => {
   }
 };
 
+const APPROVED_STATUS = "APPROVED";
+
+/**
+ * Approve a purchase return (DRAFT -> APPROVED).
+ * Applies reverse stock and inventory ledger (OUT) in the same transaction.
+ * Returns the updated purchase return or null if not found.
+ * Throws if the return is not in DRAFT status.
+ */
+const approvePurchaseReturn = async ({ id, userId } = {}) => {
+  if (!id) return null;
+  const models = getTenantModels();
+  const { PurchaseReturn, PurchaseReturnItem, PurchaseReturnSerial, sequelize } = models;
+
+  const pr = await PurchaseReturn.findByPk(id, {
+    include: [
+      {
+        model: PurchaseReturnItem,
+        as: "items",
+        include: [{ model: PurchaseReturnSerial, as: "serials" }],
+      },
+    ],
+  });
+  if (!pr) return null;
+  if (pr.status !== "DRAFT") {
+    throw new Error(`Purchase return can only be approved when status is DRAFT (current: ${pr.status})`);
+  }
+
+  const t = await sequelize.transaction();
+  let committedHere = true;
+  try {
+    const updatePayload = { status: APPROVED_STATUS };
+    if (userId != null && pr.rawAttributes && pr.rawAttributes.updated_by) {
+      updatePayload.updated_by = userId;
+    }
+    await pr.update(updatePayload, { transaction: t });
+
+    await stockService.reverseStockFromPurchaseReturn({
+      purchaseReturn: pr,
+      performed_by: userId,
+      transaction: t,
+    });
+
+    await t.commit();
+    committedHere = false;
+    return pr.toJSON();
+  } catch (err) {
+    if (committedHere) {
+      await t.rollback();
+    }
+    throw err;
+  }
+};
+
 /**
  * Get eligibility for purchase return against a PO: line-wise eligible qty and (for serialized) eligible serials.
  * Only considers inwards with status RECEIVED. Serials must be received under this PO and currently AVAILABLE in stock.
@@ -709,12 +763,88 @@ const getInwardEligibilityForReturn = async ({ poInwardId, req } = {}) => {
   };
 };
 
+/**
+ * Validate that the given serials are available for return: present in stock_serials
+ * for the same product_id and warehouse_id with status AVAILABLE, and not already
+ * returned (or if purchase_return_id is set, serials belonging to that PR are allowed).
+ */
+const validateReturnSerials = async ({
+  productId,
+  serialNumbers = [],
+  warehouseId,
+  purchaseReturnId = null,
+} = {}) => {
+  const models = getTenantModels();
+  const { StockSerial, PurchaseReturnSerial, PurchaseReturnItem } = models;
+
+  const serials = [...new Set((serialNumbers || []).map((s) => String(s).trim()).filter(Boolean))];
+  if (serials.length === 0) {
+    return { valid: true, invalid_serials: [] };
+  }
+  if (productId == null || warehouseId == null) {
+    return {
+      valid: false,
+      invalid_serials: serials.map((sn) => ({
+        serial_number: sn,
+        message: "Product and warehouse are required for validation.",
+      })),
+    };
+  }
+
+  const invalidSerials = [];
+  for (const serial of serials) {
+    const inStock = await StockSerial.findOne({
+      where: {
+        product_id: productId,
+        warehouse_id: warehouseId,
+        serial_number: serial,
+        status: SERIAL_STATUS.AVAILABLE,
+      },
+    });
+    if (!inStock) {
+      invalidSerials.push({
+        serial_number: serial,
+        message: "Serial not available in stock (wrong warehouse/product) or not available for return.",
+      });
+      continue;
+    }
+    const alreadyReturned = await PurchaseReturnSerial.findOne({
+      where: { serial_number: serial },
+      include: [
+        {
+          model: PurchaseReturnItem,
+          as: "purchaseReturnItem",
+          where: { product_id: productId },
+          required: true,
+          attributes: ["id", "purchase_return_id", "product_id"],
+        },
+      ],
+    });
+    if (alreadyReturned) {
+      const prItem = alreadyReturned.purchaseReturnItem;
+      const belongsToCurrentPR = purchaseReturnId != null && prItem && prItem.purchase_return_id === purchaseReturnId;
+      if (!belongsToCurrentPR) {
+        invalidSerials.push({
+          serial_number: serial,
+          message: "Serial has already been returned.",
+        });
+      }
+    }
+  }
+  return {
+    valid: invalidSerials.length === 0,
+    invalid_serials: invalidSerials,
+  };
+};
+
 module.exports = {
   listPurchaseReturns,
   exportPurchaseReturns,
   getPurchaseReturnById,
   createPurchaseReturn,
+  approvePurchaseReturn,
   getPOEligibilityForReturn,
   getInwardEligibilityForReturn,
+  validateReturnSerials,
 };
 
