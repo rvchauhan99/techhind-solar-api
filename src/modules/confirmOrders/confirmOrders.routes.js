@@ -9,5 +9,6 @@ const router = Router();
 
 router.get("/", ...requireAuthWithTenant, requireModulePermission({ moduleRoute: "/confirm-orders", action: "read" }), controller.list);
 router.get("/:id", ...requireAuthWithTenant, requireModulePermission({ moduleRoute: "/confirm-orders", action: "read" }), controller.getById);
+router.get("/:id/model-agreement-pdf", ...requireAuthWithTenant, requireModulePermission({ moduleRoute: "/confirm-orders", action: "read" }), controller.getModelAgreementPdf);
 
 module.exports = router;

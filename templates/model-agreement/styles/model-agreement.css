@@ -1,0 +1,197 @@
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 11px;
+  line-height: 1.42;
+  color: #000;
+  background: #fff;
+}
+
+.doc {
+  max-width: 100%;
+  padding: 0;
+}
+
+.doc-header {
+  text-align: center;
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #333;
+}
+
+.logo-wrap {
+  margin-bottom: 8px;
+}
+
+.doc-header .logo-wrap:last-of-type {
+  margin-bottom: 6px;
+}
+
+.company-logo {
+  max-height: 56px;
+  max-width: 220px;
+  object-fit: contain;
+}
+
+.doc-title {
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  margin: 0 0 6px 0;
+  text-transform: uppercase;
+}
+
+.file-no {
+  font-size: 11px;
+  margin: 0;
+}
+
+.intro {
+  margin: 0 0 6px 0;
+  text-align: justify;
+}
+
+.first-party-list {
+  margin: 0 0 6px 0;
+  padding-left: 18px;
+  text-align: justify;
+}
+
+.first-party-list li {
+  margin-bottom: 4px;
+}
+
+.annexure {
+  margin: 6px 0 8px 0;
+  text-align: justify;
+}
+
+.agreement-title {
+  font-size: 13px;
+  font-weight: bold;
+  text-align: center;
+  margin: 8px 0 6px 0;
+  line-height: 1.3;
+}
+
+.date-intro {
+  margin: 0 0 4px 0;
+  text-align: justify;
+}
+
+.between {
+  margin: 6px 0 4px 0;
+}
+
+.party-intro {
+  margin: 4px 0 6px 0;
+  text-align: justify;
+}
+
+.party-block {
+  margin: 0 0 8px 0;
+}
+
+.party-block .party-name {
+  font-weight: bold;
+  margin: 0 0 2px 0;
+}
+
+.party-block .party-address {
+  margin: 0 0 3px 0;
+  text-align: justify;
+}
+
+.hereinafter {
+  margin: 0 0 5px 0;
+  font-style: italic;
+  text-align: justify;
+}
+
+.agree-intro {
+  margin: 6px 0 0 0;
+  text-align: justify;
+}
+
+.page-break {
+  page-break-after: always;
+}
+
+.page-footer {
+  font-size: 9px;
+  color: #333;
+  text-align: center;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.section-header {
+  margin: 0 0 8px 0;
+  text-align: justify;
+}
+
+.section-item {
+  margin: 0 0 7px 0;
+}
+
+.section-label {
+  font-weight: bold;
+  margin: 0 0 2px 0;
+  text-align: justify;
+}
+
+.section-body {
+  margin: 0 0 5px 0;
+  text-align: justify;
+}
+
+.sig-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 10px 0;
+  font-size: 11px;
+}
+
+.sig-table th,
+.sig-table td {
+  border: 1px solid #333;
+  padding: 6px 10px;
+  vertical-align: top;
+  width: 50%;
+}
+
+.sig-table th {
+  font-weight: bold;
+  background: #f8f8f8;
+}
+
+.sig-table tr.sig-blank td {
+  min-height: 36px;
+  height: 36px;
+  vertical-align: bottom;
+}
+
+.sig-name {
+  margin-top: 8px;
+  font-weight: bold;
+}
+
+@media print {
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .page-break {
+    page-break-after: always;
+  }
+}
