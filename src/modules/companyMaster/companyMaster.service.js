@@ -193,6 +193,7 @@ const createBankAccount = async (payload, transaction = null) => {
 
   const createPayload = {
     company_id: company.id,
+    branch_id: payload.branch_id || null,
     bank_name: payload.bank_name,
     bank_account_name: payload.bank_account_name,
     bank_account_number: payload.bank_account_number,
@@ -247,6 +248,7 @@ const updateBankAccount = async (id, payload, transaction = null) => {
   }
 
   const updatePayload = {
+    branch_id: payload.branch_id !== undefined ? payload.branch_id || null : bankAccount.branch_id,
     bank_name: payload.bank_name !== undefined ? payload.bank_name : bankAccount.bank_name,
     bank_account_name: payload.bank_account_name !== undefined ? payload.bank_account_name : bankAccount.bank_account_name,
     bank_account_number: payload.bank_account_number !== undefined ? payload.bank_account_number : bankAccount.bank_account_number,
@@ -288,7 +290,7 @@ const deleteBankAccount = async (id, transaction = null) => {
 
 const listBankAccounts = async (transaction = null) => {
   const models = getTenantModels();
-  const { Company, CompanyBankAccount } = models;
+  const { Company, CompanyBankAccount, CompanyBranch } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -302,6 +304,9 @@ const listBankAccounts = async (transaction = null) => {
 
   const bankAccounts = await CompanyBankAccount.findAll({
     where: { company_id: company.id, deleted_at: null, is_active: true },
+    include: [
+      { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
+    ],
     order: [
       ["is_default", "DESC"], // Default accounts first
       ["created_at", "DESC"],
