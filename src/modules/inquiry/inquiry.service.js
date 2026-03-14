@@ -450,6 +450,7 @@ const getInquiryById = async ({ id }) => {
     handled_by: row.handled_by,
     handled_by_name: row.handledBy?.name || null,
     channel_partner: row.channel_partner,
+    channel_partner_id: row.channel_partner,
     channel_partner_name: row.channelPartner?.name || null,
     branch_id: row.branch_id,
     branch_name: row.branch?.name || null,

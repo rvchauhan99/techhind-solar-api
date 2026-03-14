@@ -220,8 +220,13 @@ async function resolveReferences() {
         }
     });
 
+    /** Default inquiry_source_id when CSV has no inquiry_source_name: source_name === 'individual' (case-insensitive). */
+    const defaultInquirySourceId =
+        inquirySources.find((s) => (s.source_name || "").toString().toLowerCase().trim() === "individual")?.id ?? null;
+
     return {
         inquirySource: byName(inquirySources, "source_name"),
+        defaultInquirySourceId,
         projectScheme: byName(projectSchemes, "name"),
         orderType: byName(orderTypes, "name"),
         discom: byDiscomNameOrNameValue(discoms),
@@ -304,7 +309,14 @@ function resolveRowReferences(row, refs) {
     const projectSchemeId = get(refs.projectScheme, row.project_scheme_name, "project_scheme_name");
     const orderTypeId = get(refs.orderType, row.order_type_name, "order_type_name");
     const discomId = get(refs.discom, row.discom_name, "discom_name");
-    const inquirySourceId = get(refs.inquirySource, row.inquiry_source_name, "inquiry_source_name");
+    const inquirySourceFromCsv = getOptional(refs.inquirySource, row.inquiry_source_name);
+    if (trim(row.inquiry_source_name) && inquirySourceFromCsv == null) {
+        errs.push(`inquiry_source_name not found: "${trim(row.inquiry_source_name)}"`);
+    }
+    const inquirySourceId = inquirySourceFromCsv ?? refs.defaultInquirySourceId ?? null;
+    if (inquirySourceId == null) {
+        errs.push("inquiry_source_name not provided and default 'individual' inquiry source not found in inquiry_sources");
+    }
     const inquiryById = get(refs.userByEmail, row.inquiry_by_email, "inquiry_by_email");
     const handledById = get(refs.userByEmail, row.handled_by_email, "handled_by_email");
 
