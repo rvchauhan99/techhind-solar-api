@@ -6,6 +6,9 @@ const orderService = require("../order/order.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
+const modelAgreementPdfService = require("./modelAgreementPdf.service.js");
+const { getTenantModels } = require("../tenant/tenantModels.js");
+const pdfImageCache = require("../quotation/pdfImageCache.service.js");
 
 const resolveConfirmOrderVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
@@ -87,7 +90,42 @@ const getById = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, item, "Order fetched", 200);
 });
 
+const getModelAgreementPdf = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const order = await orderService.getOrderById({ id });
+    if (!order) {
+        return responseHandler.sendError(res, "Order not found", 404);
+    }
+    const context = await resolveConfirmOrderVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
+    let logoDataUrl = null;
+    const tenantId = req.tenant?.id;
+    if (tenantId) {
+        const models = getTenantModels(req);
+        const company = await models.Company.findOne({
+            where: { deleted_at: null },
+            order: [["created_at", "ASC"]],
+            attributes: ["logo"],
+        });
+        if (company?.logo) {
+            logoDataUrl = pdfImageCache.getImageDataUrl(tenantId, company.logo) || null;
+        }
+    }
+    const buffer = await modelAgreementPdfService.generateModelAgreementPdfBuffer(order, {
+        logoDataUrl: logoDataUrl || undefined,
+    });
+    const filename = `model-agreement-${order.order_number || id}.pdf`;
+    const isDownload = req.query.action === "download";
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+        "Content-Disposition",
+        isDownload ? `attachment; filename="${filename}"` : `inline; filename="${filename}"`
+    );
+    res.send(buffer);
+});
+
 module.exports = {
     list,
     getById,
+    getModelAgreementPdf,
 };

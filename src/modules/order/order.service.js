@@ -929,7 +929,7 @@ const getOrderById = async ({ id } = {}) => {
             { model: User, as: "handledBy", attributes: ["id", "name"], required: false },
             { model: User, as: "channelPartner", attributes: ["id", "name"], required: false },
             { model: InquirySource, as: "inquirySource", attributes: ["id", "source_name"], required: false },
-            { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
+            { model: CompanyBranch, as: "branch", attributes: ["id", "name", "address"], required: false },
             { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"], required: false },
             { model: OrderType, as: "orderType", attributes: ["id", "name"], required: false },
             { model: Discom, as: "discom", attributes: ["id", "name"], required: false },
@@ -1003,6 +1003,7 @@ const getOrderById = async ({ id } = {}) => {
         channel_partner_name: row.channelPartner?.name || null,
         inquiry_source_name: row.inquirySource?.source_name || null,
         branch_name: row.branch?.name || null,
+        branch_address: row.branch?.address || null,
         project_scheme_name: row.projectScheme?.name || null,
         order_type_name: row.orderType?.name || null,
         discom_name: row.discom?.name || null,
@@ -1029,6 +1030,8 @@ const getOrderById = async ({ id } = {}) => {
         city_name: row.customer?.city?.name || null,
         address: row.customer?.address || null,
         landmark_area: row.customer?.landmark_area || null,
+        taluka: row.customer?.taluka || null,
+        district: row.customer?.district || null,
 
         // Pipeline tracking
         stages: row.stages,
