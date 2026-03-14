@@ -15,6 +15,13 @@ const CompanyBankAccount = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    branch_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "company_branches", key: "id" },
+      onUpdate: "CASCADE",
+      onDelete: "SET NULL",
+    },
     bank_name: {
       type: DataTypes.STRING,
       allowNull: false,

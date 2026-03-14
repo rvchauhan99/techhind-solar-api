@@ -155,6 +155,99 @@ const createPOInwardLedgerEntries = async ({ poInward, transaction }) => {
   }
 };
 
+// Create ledger OUT entries for Purchase Return (reverse of PO Inward). Call before decreasing stock.
+const createPurchaseReturnLedgerEntries = async ({ purchaseReturn, performed_by, transaction }) => {
+  const models = getTenantModels();
+  const { Stock, StockSerial } = models;
+  const t = transaction;
+
+  const transactionReferenceNo =
+    purchaseReturn.supplier_return_ref || (purchaseReturn.id != null ? `PR-#${purchaseReturn.id}` : null);
+  const warehouseId = purchaseReturn.warehouse_id;
+
+  for (const item of purchaseReturn.items || []) {
+    const stock = await Stock.findOne({
+      where: {
+        product_id: item.product_id,
+        warehouse_id: warehouseId,
+      },
+      transaction: t,
+    });
+
+    if (!stock) {
+      throw new Error(`Stock not found for product ${item.product_id} in warehouse ${warehouseId}`);
+    }
+
+    const rate = parseFloat(item.rate) || 0;
+    const gstPercent = parseFloat(item.gst_percent) || 0;
+    const returnQty = parseInt(item.return_quantity, 10) || 0;
+    if (returnQty <= 0) continue;
+
+    const isSerialized = item.serial_required && item.serials && item.serials.length > 0;
+
+    if (isSerialized) {
+      for (const prSerial of item.serials) {
+        const serialId = prSerial.stock_serial_id || null;
+        let stockSerial = null;
+        if (serialId) {
+          stockSerial = await StockSerial.findByPk(serialId, { transaction: t });
+        }
+        if (!stockSerial && prSerial.serial_number) {
+          stockSerial = await StockSerial.findOne({
+            where: {
+              serial_number: prSerial.serial_number,
+              product_id: item.product_id,
+              warehouse_id: warehouseId,
+            },
+            transaction: t,
+          });
+        }
+        const taxableAmount = rate;
+        const gstAmount = (taxableAmount * gstPercent) / 100;
+        const totalAmount = parseFloat((taxableAmount + gstAmount).toFixed(2));
+
+        await createLedgerEntry({
+          product_id: item.product_id,
+          warehouse_id: warehouseId,
+          stock_id: stock.id,
+          transaction_type: TRANSACTION_TYPE.PO_RETURN,
+          transaction_id: purchaseReturn.id,
+          transaction_reference_no: transactionReferenceNo,
+          movement_type: MOVEMENT_TYPE.OUT,
+          quantity: 1,
+          serial_id: stockSerial ? stockSerial.id : null,
+          rate: parseFloat(rate.toFixed(2)),
+          gst_percent: parseFloat(gstPercent.toFixed(2)),
+          amount: totalAmount,
+          performed_by,
+          transaction: t,
+        });
+      }
+    } else {
+      const totalAmount =
+        item.total_amount != null
+          ? parseFloat(item.total_amount)
+          : parseFloat((rate * returnQty * (1 + gstPercent / 100)).toFixed(2));
+
+      await createLedgerEntry({
+        product_id: item.product_id,
+        warehouse_id: warehouseId,
+        stock_id: stock.id,
+        transaction_type: TRANSACTION_TYPE.PO_RETURN,
+        transaction_id: purchaseReturn.id,
+        transaction_reference_no: transactionReferenceNo,
+        movement_type: MOVEMENT_TYPE.OUT,
+        quantity: returnQty,
+        rate: parseFloat(rate.toFixed(2)),
+        gst_percent: parseFloat(gstPercent.toFixed(2)),
+        amount: totalAmount,
+        performed_by,
+        transaction: t,
+      });
+    }
+  }
+};
+
 // Read-only reporting functions
 const listLedgerEntries = async ({
   page = 1,
@@ -367,6 +460,7 @@ const getLedgerEntryById = async ({ id } = {}) => {
 module.exports = {
   createLedgerEntry,
   createPOInwardLedgerEntries,
+  createPurchaseReturnLedgerEntries,
   listLedgerEntries,
   exportLedgerEntries,
   getLedgerEntryById,

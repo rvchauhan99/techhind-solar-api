@@ -115,6 +115,32 @@ const create = asyncHandler(async (req, res) => {
   return responseHandler.sendSuccess(res, created, "Purchase Return created", 201);
 });
 
+const validateSerials = asyncHandler(async (req, res) => {
+  const { product_id: productId, serial_numbers: serialNumbers, warehouse_id: warehouseId, purchase_return_id: purchaseReturnId } = req.body;
+  const result = await purchaseReturnService.validateReturnSerials({
+    productId: productId != null ? parseInt(productId, 10) : null,
+    serialNumbers: Array.isArray(serialNumbers) ? serialNumbers : [],
+    warehouseId: warehouseId != null && warehouseId !== "" ? parseInt(warehouseId, 10) : null,
+    purchaseReturnId: purchaseReturnId != null && purchaseReturnId !== "" ? parseInt(purchaseReturnId, 10) : null,
+  });
+  return responseHandler.sendSuccess(res, result, "Serial validation completed", 200);
+});
+
+const approve = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user?.id;
+
+  const updated = await purchaseReturnService.approvePurchaseReturn({
+    id: id ? parseInt(id, 10) : null,
+    userId,
+  });
+
+  if (!updated) {
+    return responseHandler.sendError(res, "Purchase Return not found", 404);
+  }
+  return responseHandler.sendSuccess(res, updated, "Purchase Return approved", 200);
+});
+
 module.exports = {
   list,
   exportList,
@@ -122,5 +148,7 @@ module.exports = {
   getInwardEligibility,
   getById,
   create,
+  validateSerials,
+  approve,
 };
 

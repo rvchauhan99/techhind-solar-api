@@ -10,6 +10,8 @@ router.get("/", ...requireAuthWithTenant, controller.list);
 router.get("/export", ...requireAuthWithTenant, controller.exportList);
 router.get("/po/:purchase_order_id/eligibility", ...requireAuthWithTenant, controller.getPOEligibility);
 router.get("/inward/:po_inward_id/eligibility", ...requireAuthWithTenant, controller.getInwardEligibility);
+router.post("/validate-serials", ...requireAuthWithTenant, controller.validateSerials);
+router.post("/:id/approve", ...requireAuthWithTenant, controller.approve);
 router.get("/:id", ...requireAuthWithTenant, controller.getById);
 router.post("/", ...requireAuthWithTenant, controller.create);
 

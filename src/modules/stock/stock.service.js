@@ -134,6 +134,82 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
   });
 };
 
+/**
+ * Reverse stock and ledger for an approved purchase return (OUT movement).
+ * Creates ledger OUT entries first (so opening balance is correct), then decreases Stock
+ * and marks returned serials as SERIAL_STATUS.RETURNED.
+ */
+const reverseStockFromPurchaseReturn = async ({ purchaseReturn, performed_by, transaction }) => {
+  const models = getTenantModels();
+  const { Stock, StockSerial } = models;
+  const t = transaction;
+
+  const data = purchaseReturn.toJSON ? purchaseReturn.toJSON() : purchaseReturn;
+  const warehouseId = data.warehouse_id;
+  if (!warehouseId) {
+    throw new Error("Purchase return warehouse_id is required for stock reversal");
+  }
+
+  // 1) Create ledger OUT entries (current stock = opening; closing = opening - quantity)
+  await inventoryLedgerService.createPurchaseReturnLedgerEntries({
+    purchaseReturn: data,
+    performed_by,
+    transaction: t,
+  });
+
+  // 2) Decrease stock quantities and update serial status
+  for (const item of data.items || []) {
+    const stock = await Stock.findOne({
+      where: {
+        product_id: item.product_id,
+        warehouse_id: warehouseId,
+      },
+      transaction: t,
+    });
+
+    if (!stock) {
+      throw new Error(`Stock not found for product ${item.product_id} in warehouse ${warehouseId}`);
+    }
+
+    const returnQty = parseInt(item.return_quantity, 10) || 0;
+    if (returnQty <= 0) continue;
+
+    await updateStockQuantities({
+      stock,
+      quantity: returnQty,
+      last_updated_by: performed_by,
+      isInward: false,
+      transaction: t,
+    });
+
+    // 3) Mark returned serials as RETURNED so they are no longer available
+    if (item.serial_required && item.serials && item.serials.length > 0) {
+      for (const prSerial of item.serials) {
+        let stockSerial = null;
+        if (prSerial.stock_serial_id) {
+          stockSerial = await StockSerial.findByPk(prSerial.stock_serial_id, { transaction: t });
+        }
+        if (!stockSerial && prSerial.serial_number) {
+          stockSerial = await StockSerial.findOne({
+            where: {
+              serial_number: prSerial.serial_number,
+              product_id: item.product_id,
+              warehouse_id: warehouseId,
+            },
+            transaction: t,
+          });
+        }
+        if (stockSerial) {
+          await stockSerial.update(
+            { status: SERIAL_STATUS.RETURNED },
+            { transaction: t }
+          );
+        }
+      }
+    }
+  }
+};
+
 const buildStockFilters = (params = {}, models) => {
   const {
     warehouse_id = null,
@@ -725,6 +801,7 @@ module.exports = {
   validateSerialAvailable,
   validateSerialNotExists,
   createStockFromPOInward,
+  reverseStockFromPurchaseReturn,
   updateStockQuantities,
   getOrCreateStock,
 };

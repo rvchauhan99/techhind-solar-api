@@ -232,6 +232,12 @@ module.exports = (db) => {
     });
   }
 
+  // CompanyBankAccount ↔ CompanyBranch (Many-to-One)
+  if (CompanyBankAccount && CompanyBranch) {
+    CompanyBankAccount.belongsTo(CompanyBranch, { foreignKey: "branch_id", as: "branch" });
+    CompanyBranch.hasMany(CompanyBankAccount, { foreignKey: "branch_id", as: "bankAccounts" });
+  }
+
   // Company ↔ CompanyWarehouse (One-to-Many)
   if (Company && CompanyWarehouse) {
     Company.hasMany(CompanyWarehouse, { foreignKey: "company_id", as: "warehouses" });

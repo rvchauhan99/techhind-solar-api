@@ -87,10 +87,26 @@ const PurchaseReturnItem = sequelize.define(
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
     },
+    updated_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    },
+    updated_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    },
   },
   {
     tableName: "purchase_return_items",
-    timestamps: false,
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
   }
 );
 

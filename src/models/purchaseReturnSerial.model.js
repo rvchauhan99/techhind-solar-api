@@ -33,10 +33,22 @@ const PurchaseReturnSerial = sequelize.define(
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
     },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    },
+    updated_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    },
   },
   {
     tableName: "purchase_return_serials",
-    timestamps: false,
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
   }
 );
 
