@@ -6,9 +6,8 @@ const orderService = require("../order/order.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
-const modelAgreementPdfService = require("./modelAgreementPdf.service.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
-const pdfImageCache = require("../quotation/pdfImageCache.service.js");
+const modelAgreementPdfService = require("./modelAgreementPdf.service.js");
 
 const resolveConfirmOrderVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
@@ -98,22 +97,18 @@ const getModelAgreementPdf = asyncHandler(async (req, res) => {
     }
     const context = await resolveConfirmOrderVisibilityContext(req);
     assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
-    let logoDataUrl = null;
-    const tenantId = req.tenant?.id;
-    if (tenantId) {
-        const models = getTenantModels(req);
-        const company = await models.Company.findOne({
-            where: { deleted_at: null },
-            order: [["created_at", "ASC"]],
-            attributes: ["logo"],
-        });
-        if (company?.logo) {
-            logoDataUrl = pdfImageCache.getImageDataUrl(tenantId, company.logo) || null;
-        }
-    }
-    const buffer = await modelAgreementPdfService.generateModelAgreementPdfBuffer(order, {
-        logoDataUrl: logoDataUrl || undefined,
+
+    const models = getTenantModels(req);
+    const company = await models.Company.findOne({
+        where: { deleted_at: null },
+        order: [["created_at", "ASC"]],
+        attributes: ["company_name"],
     });
+    if (!company) {
+        return responseHandler.sendError(res, "Company not found", 404);
+    }
+
+    const buffer = await modelAgreementPdfService.generateModelAgreementPdfBuffer(order, company);
     const filename = `model-agreement-${order.order_number || id}.pdf`;
     const isDownload = req.query.action === "download";
     res.setHeader("Content-Type", "application/pdf");
