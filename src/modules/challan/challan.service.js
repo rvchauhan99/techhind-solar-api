@@ -518,7 +518,7 @@ const getChallanForPdf = async ({ id } = {}) => {
  */
 const createChallan = async ({ payload, user_id, transaction } = {}) => {
     const models = getTenantModels();
-    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, Stock, StockSerial, Quotation, User, ProductType } = models;
+    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, Stock, StockSerial, Quotation, User, ProductType, ProjectScheme } = models;
     const { items, ...challanData } = payload;
 
     // Validate minimum one item
@@ -555,6 +555,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                         "la_quantity",
                     ],
                 },
+                { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"] },
             ],
             transaction,
         });
@@ -655,19 +656,25 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
             const productIdToName = {};
             itemProducts.forEach((p) => { productIdToName[p.id] = p.product_name || `Product #${p.id}`; });
 
+            const isCommercialProject = (order.projectScheme?.name || "").toLowerCase() === "commercial project";
+
             for (const item of items) {
                 const bomEntry = bomByProductId[item.product_id];
                 const productName = productIdToName[item.product_id] || `Product #${item.product_id}`;
                 if (!bomEntry) {
-                    const error = new Error(`${productName} is not in order BOM`);
-                    error.statusCode = 400;
-                    throw error;
+                    if (!isCommercialProject) {
+                        const error = new Error(`${productName} is not in order BOM`);
+                        error.statusCode = 400;
+                        throw error;
+                    }
+                    // For commercial projects, we allow items not in BOM
+                    continue;
                 }
                 const previousQty = previousQuantities[item.product_id] || 0;
                 const currentQty = parseFloat(item.quantity) || 0;
                 const totalQty = previousQty + currentQty;
                 const maxQty = bomEntry.maxQty;
-                if (totalQty > maxQty) {
+                if (!isCommercialProject && totalQty > maxQty) {
                     const lineProductName = getBomLineProduct(bomEntry.line)?.product_name || productName;
                     const error = new Error(
                         `Total quantity for ${lineProductName} (${totalQty}) exceeds planned quantity (${maxQty}). Previous challan: ${previousQty}, Current: ${currentQty}`
