@@ -32,6 +32,8 @@ const getCompanyProfile = async (transaction = null) => {
       header: null,
       footer: null,
       stamp: null,
+      authorized_signature: null,
+      stamp_with_signature: null,
       owner_name: "",
       owner_number: "",
       owner_email: "",
@@ -788,7 +790,14 @@ const uploadCompanyImage = async (imageType, filePath, transaction = null, req =
   }
 
   // Validate image type
-  const validImageTypes = ["logo", "header", "footer", "stamp"];
+  const validImageTypes = [
+    "logo",
+    "header",
+    "footer",
+    "stamp",
+    "authorized_signature",
+    "stamp_with_signature",
+  ];
   if (!validImageTypes.includes(imageType)) {
     throw new AppError(
       `Invalid image type. Valid types are: ${validImageTypes.join(", ")}`,
@@ -835,7 +844,14 @@ const deleteCompanyImage = async (imageType, transaction = null, req = null) => 
   }
 
   // Validate image type
-  const validImageTypes = ["logo", "header", "footer", "stamp"];
+  const validImageTypes = [
+    "logo",
+    "header",
+    "footer",
+    "stamp",
+    "authorized_signature",
+    "stamp_with_signature",
+  ];
   if (!validImageTypes.includes(imageType)) {
     throw new AppError(
       `Invalid image type. Valid types are: ${validImageTypes.join(", ")}`,

@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const PdfPrinter = require("pdfmake/js/Printer").default;
 const URLResolver = require("pdfmake/js/URLResolver").default;
+const bucketService = require("../../common/services/bucket.service.js");
 
 const FONTS_DIR = path.join(__dirname, "../../../templates/model-agreement/fonts");
 const FONT_KEYS = {
@@ -80,14 +81,62 @@ function buildFirstPartyAddress(order) {
  * - firstParty / firstPartyAddress: consumer from order
  * - secondParty: company name; secondPartyAddress: order's branch address
  */
-function prepareModelAgreementData(order, company) {
+function prepareModelAgreementData(
+    order,
+    company,
+    firstPartySignatureImage,
+    secondPartySignatureImage
+) {
     return {
         agreementDate: formatAgreementDate(),
         firstParty: order.customer_name || "–",
         firstPartyAddress: buildFirstPartyAddress(order),
         secondParty: company?.company_name || "–",
         secondPartyAddress: order.branch_address || "–",
+        firstPartySignatureImage: firstPartySignatureImage || null,
+        secondPartySignatureImage: secondPartySignatureImage || null,
     };
+}
+
+async function resolveCompanySignatureImage(company, req) {
+    const rawPath =
+        company && company.stamp_with_signature ? String(company.stamp_with_signature).trim() : "";
+    if (!rawPath) return null;
+
+    try {
+        const bucketClient = bucketService.getBucketForRequest(req);
+        const { s3, bucketName } = bucketClient;
+        const result = await s3
+            .getObject({ Bucket: bucketName, Key: rawPath })
+            .promise();
+        const buf = result.Body;
+        const contentType = result.ContentType || "image/png";
+        const base64 = Buffer.isBuffer(buf) ? buf.toString("base64") : Buffer.from(buf).toString("base64");
+        return `data:${contentType};base64,${base64}`;
+    } catch (err) {
+        console.error("Failed to resolve company stamp_with_signature image for agreement:", err);
+        return null;
+    }
+}
+
+async function resolveCustomerSignatureImage(customerSignPath, req) {
+    const rawPath = customerSignPath ? String(customerSignPath).trim() : "";
+    if (!rawPath) return null;
+
+    try {
+        const bucketClient = bucketService.getBucketForRequest(req);
+        const { s3, bucketName } = bucketClient;
+        const result = await s3
+            .getObject({ Bucket: bucketName, Key: rawPath })
+            .promise();
+        const buf = result.Body;
+        const contentType = result.ContentType || "image/png";
+        const base64 = Buffer.isBuffer(buf) ? buf.toString("base64") : Buffer.from(buf).toString("base64");
+        return `data:${contentType};base64,${base64}`;
+    } catch (err) {
+        console.error("Failed to resolve customer signature image for agreement:", err);
+        return null;
+    }
 }
 
 /**
@@ -100,6 +149,8 @@ function buildDocDefinition(data) {
         firstPartyAddress,
         secondParty,
         secondPartyAddress,
+        firstPartySignatureImage,
+        secondPartySignatureImage,
     } = data;
 
     return {
@@ -309,6 +360,13 @@ function buildDocDefinition(data) {
                 ],
                 margin: [0, 0, 0, 20],
             },
+            { text: "", pageBreak: "before" },
+            {
+                text: "Signatures",
+                style: "section",
+                alignment: "center",
+                margin: [0, 0, 0, 10],
+            },
             {
                 table: {
                     widths: ["auto", "*", "auto", "*"],
@@ -333,9 +391,25 @@ function buildDocDefinition(data) {
                         ],
                         [
                             { text: "Sign:", bold: true, alignment: "right" },
-                            "__________________",
+                            firstPartySignatureImage
+                                ? {
+                                      image: firstPartySignatureImage,
+                                      width: 80,
+                                      height: 40,
+                                      alignment: "center",
+                                      margin: [10, 4, 0, 0],
+                                  }
+                                : "__________________",
                             { text: "Sign:", bold: true, alignment: "right" },
-                            "__________________",
+                            secondPartySignatureImage
+                                ? {
+                                      image: secondPartySignatureImage,
+                                      width: 80,
+                                      height: 40,
+                                      alignment: "center",
+                                      margin: [10, 4, 0, 0],
+                                  }
+                                : "__________________",
                         ],
                         [
                             { text: "Date:", bold: true, alignment: "right" },
@@ -354,6 +428,22 @@ function buildDocDefinition(data) {
                 margin: [0, 20, 0, 0],
             },
         ],
+        footer: function (currentPage, pageCount) {
+            if (!firstPartySignatureImage) return null;
+            if (currentPage === pageCount) return null;
+            return {
+                columns: [
+                    {
+                        image: firstPartySignatureImage,
+                        width: 50,
+                        height: 25,
+                        alignment: "left",
+                        margin: [30, 4, 0, 0],
+                    },
+                    { text: "", width: "*" },
+                ],
+            };
+        },
         styles: {
             header: { fontSize: 16, bold: true },
             subheader: { fontSize: 12, bold: true },
@@ -368,8 +458,17 @@ function buildDocDefinition(data) {
  * @param {Object} company - Tenant Company (company_name)
  * @returns {Promise<Buffer>}
  */
-async function generateModelAgreementPdfBuffer(order, company) {
-    const data = prepareModelAgreementData(order, company);
+async function generateModelAgreementPdfBuffer(order, company, req, customerSignPath) {
+    const [firstPartySignatureImage, secondPartySignatureImage] = await Promise.all([
+        resolveCustomerSignatureImage(customerSignPath, req),
+        resolveCompanySignatureImage(company, req),
+    ]);
+    const data = prepareModelAgreementData(
+        order,
+        company,
+        firstPartySignatureImage,
+        secondPartySignatureImage
+    );
     const docDefinition = buildDocDefinition(data);
     const printer = createPrinter();
     const pdfDoc = await printer.createPdfKitDocument(docDefinition);

@@ -38,6 +38,14 @@ const Company = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    authorized_signature: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    stamp_with_signature: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
 
     // Owner Info
     owner_name: { type: DataTypes.STRING },
