@@ -8,6 +8,7 @@ const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCac
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const modelAgreementPdfService = require("./modelAgreementPdf.service.js");
+const orderDocumentsService = require("../orderDocuments/orderDocuments.service.js");
 
 const resolveConfirmOrderVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
@@ -90,6 +91,7 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const getModelAgreementPdf = asyncHandler(async (req, res) => {
+    const withSignatures = req.query.with_signatures === "true";
     const { id } = req.params;
     const order = await orderService.getOrderById({ id });
     if (!order) {
@@ -102,13 +104,28 @@ const getModelAgreementPdf = asyncHandler(async (req, res) => {
     const company = await models.Company.findOne({
         where: { deleted_at: null },
         order: [["created_at", "ASC"]],
-        attributes: ["company_name"],
+        attributes: withSignatures
+            ? ["company_name", "stamp_with_signature", "authorized_signature"]
+            : ["company_name"],
     });
     if (!company) {
         return responseHandler.sendError(res, "Company not found", 404);
     }
 
-    const buffer = await modelAgreementPdfService.generateModelAgreementPdfBuffer(order, company);
+    const customerSignDoc = await orderDocumentsService.getLatestOrderDocumentByType(
+        order.id,
+        "Customer Sign",
+        req.transaction,
+        req
+    );
+    const customerSignPath = withSignatures && customerSignDoc ? customerSignDoc.document_path : null;
+
+    const buffer = await modelAgreementPdfService.generateModelAgreementPdfBuffer(
+        order,
+        company,
+        req,
+        customerSignPath
+    );
     const filename = `model-agreement-${order.order_number || id}.pdf`;
     const isDownload = req.query.action === "download";
     res.setHeader("Content-Type", "application/pdf");

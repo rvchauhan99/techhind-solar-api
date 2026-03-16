@@ -78,10 +78,26 @@ const listOrderDocuments = async ({ order_id, page = 1, limit = 20, q = null }, 
     };
 };
 
+const getLatestOrderDocumentByType = async (orderId, docType, transaction, req) => {
+    const models = getTenantModels(req);
+    const { OrderDocument } = models;
+    const document = await OrderDocument.findOne({
+        where: {
+            order_id: orderId,
+            doc_type: docType,
+            deleted_at: null,
+        },
+        order: [["created_at", "DESC"]],
+        transaction,
+    });
+    return document;
+};
+
 module.exports = {
     createOrderDocument,
     updateOrderDocument,
     deleteOrderDocument,
     getOrderDocumentById,
     listOrderDocuments,
+    getLatestOrderDocumentByType,
 };
