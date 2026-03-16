@@ -328,7 +328,7 @@ const createPurchaseReturn = async ({ payload, userId, transaction } = {}) => {
           const serialNumber = typeof s === "string" ? s : (s && s.serial_number) || "";
           if (!serialNumber.trim()) continue;
           const inInward = await POInwardSerial.findOne({
-            where: { po_inward_item_id: inwardItem.id, serial_number: serialNumber.trim() },
+            where: { po_inward_item_id: inwardItem.id, serial_number: { [Op.iLike]: serialNumber.trim() } },
             transaction: t,
           });
           if (!inInward) {
@@ -340,7 +340,7 @@ const createPurchaseReturn = async ({ payload, userId, transaction } = {}) => {
             where: {
               product_id: inwardItem.product_id,
               warehouse_id: warehouseId,
-              serial_number: serialNumber.trim(),
+              serial_number: { [Op.iLike]: serialNumber.trim() },
               status: SERIAL_STATUS.AVAILABLE,
             },
             transaction: t,
@@ -351,7 +351,7 @@ const createPurchaseReturn = async ({ payload, userId, transaction } = {}) => {
             );
           }
           const alreadyReturned = await PurchaseReturnSerial.findOne({
-            where: { serial_number: serialNumber.trim() },
+            where: { serial_number: { [Op.iLike]: serialNumber.trim() } },
             include: [{ model: PurchaseReturnItem, as: "purchaseReturnItem", where: { product_id: inwardItem.product_id }, required: true }],
             transaction: t,
           });
@@ -797,7 +797,7 @@ const validateReturnSerials = async ({
       where: {
         product_id: productId,
         warehouse_id: warehouseId,
-        serial_number: serial,
+        serial_number: { [Op.iLike]: serial },
         status: SERIAL_STATUS.AVAILABLE,
       },
     });
@@ -809,7 +809,7 @@ const validateReturnSerials = async ({
       continue;
     }
     const alreadyReturned = await PurchaseReturnSerial.findOne({
-      where: { serial_number: serial },
+      where: { serial_number: { [Op.iLike]: serial } },
       include: [
         {
           model: PurchaseReturnItem,

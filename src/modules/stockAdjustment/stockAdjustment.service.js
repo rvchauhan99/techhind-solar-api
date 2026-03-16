@@ -214,18 +214,18 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
           let stockSerialId = typeof serial === "object" && serial?.stock_serial_id != null ? serial.stock_serial_id : null;
           if (!stockSerialId && (typeof serial === "string" || typeof serial === "number")) {
             const trimmed = String(serial).trim();
-            if (trimmed) {
-              if (direction === MOVEMENT_TYPE.OUT) {
-                const stockSerial = await StockSerial.findOne({
-                  where: {
-                    serial_number: trimmed,
-                    product_id: item.product_id,
-                    warehouse_id: adjustmentData.warehouse_id,
-                    status: SERIAL_STATUS.AVAILABLE,
-                  },
-                  attributes: ["id"],
-                  transaction: t,
-                });
+              if (trimmed) {
+                if (direction === MOVEMENT_TYPE.OUT) {
+                  const stockSerial = await StockSerial.findOne({
+                    where: {
+                      serial_number: { [Op.iLike]: trimmed },
+                      product_id: item.product_id,
+                      warehouse_id: adjustmentData.warehouse_id,
+                      status: SERIAL_STATUS.AVAILABLE,
+                    },
+                    attributes: ["id"],
+                    transaction: t,
+                  });
                 if (!stockSerial) {
                   throw new Error(`Serial "${trimmed}" is not available at this warehouse for product id ${item.product_id}`);
                 }
@@ -233,7 +233,7 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
               } else if (direction === MOVEMENT_TYPE.IN) {
                 const existing = await StockSerial.findOne({
                   where: {
-                    serial_number: trimmed,
+                    serial_number: { [Op.iLike]: trimmed },
                     product_id: item.product_id,
                     warehouse_id: adjustmentData.warehouse_id,
                   },
@@ -369,7 +369,7 @@ const updateStockAdjustment = async ({ id, payload, transaction } = {}) => {
                 if (direction === MOVEMENT_TYPE.OUT) {
                   const stockSerial = await StockSerial.findOne({
                     where: {
-                      serial_number: trimmed,
+                      serial_number: { [Op.iLike]: trimmed },
                       product_id: item.product_id,
                       warehouse_id: adjustmentData.warehouse_id,
                       status: SERIAL_STATUS.AVAILABLE,
@@ -384,7 +384,7 @@ const updateStockAdjustment = async ({ id, payload, transaction } = {}) => {
                 } else if (direction === MOVEMENT_TYPE.IN) {
                   const existing = await StockSerial.findOne({
                     where: {
-                      serial_number: trimmed,
+                      serial_number: { [Op.iLike]: trimmed },
                       product_id: item.product_id,
                       warehouse_id: adjustmentData.warehouse_id,
                     },
