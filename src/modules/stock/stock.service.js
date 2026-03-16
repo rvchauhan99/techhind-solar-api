@@ -93,7 +93,7 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
         // Check if serial already exists for this product type.
         const existingSerial = await StockSerial.findOne({
           where: {
-            serial_number: serial.serial_number,
+            serial_number: { [Op.iLike]: serial.serial_number },
           },
           include: [
             {
@@ -218,7 +218,7 @@ const reverseStockFromPurchaseReturn = async ({ purchaseReturn, performed_by, tr
         if (!stockSerial && prSerial.serial_number) {
           stockSerial = await StockSerial.findOne({
             where: {
-              serial_number: prSerial.serial_number,
+              serial_number: { [Op.iLike]: prSerial.serial_number },
               product_id: item.product_id,
               warehouse_id: warehouseId,
             },
@@ -766,7 +766,7 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
   const { StockSerial, Product } = models;
   const row = await StockSerial.findOne({
     where: {
-      serial_number: trimmed,
+      serial_number: { [Op.iLike]: trimmed },
       product_id: parseInt(product_id, 10),
       warehouse_id: parseInt(warehouse_id, 10),
       status: SERIAL_STATUS.AVAILABLE,
@@ -799,7 +799,7 @@ const validateSerialNotExists = async ({ serial_number, product_id, warehouse_id
   const { StockSerial, Product } = models;
   const row = await StockSerial.findOne({
     where: {
-      serial_number: trimmed,
+      serial_number: { [Op.iLike]: trimmed },
       product_id: parseInt(product_id, 10),
       warehouse_id: parseInt(warehouse_id, 10),
     },

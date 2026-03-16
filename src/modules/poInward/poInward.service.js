@@ -692,11 +692,19 @@ const validatePOInwardSerials = async ({ product_id, serial_numbers, po_inward_i
 
   const productTypeId = product.product_type_id ?? null;
 
-  // Find any currently active stock serials for the same product type
+  // Find any currently active stock serials for the same product type (case-insensitive)
+  const sequelize = models.sequelize;
+  const loweredSerials = serials.map((s) => s.toLowerCase());
+
   const existing = await StockSerial.findAll({
     where: {
-      serial_number: { [Op.in]: serials },
-      status: { [Op.ne]: SERIAL_STATUS.RETURNED },
+      [Op.and]: [
+        sequelize.where(
+          sequelize.fn("LOWER", sequelize.col("serial_number")),
+          { [Op.in]: loweredSerials }
+        ),
+        { status: { [Op.ne]: SERIAL_STATUS.RETURNED } },
+      ],
     },
     include: [
       {
