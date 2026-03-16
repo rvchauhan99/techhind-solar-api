@@ -86,42 +86,68 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
       transaction: t,
     });
 
-    // Create serials if serialized
+    // Create / reactivate serials if serialized
     if (product.serial_required && item.serials && item.serials.length > 0) {
       const productTypeId = product.product_type_id;
       for (const serial of item.serials) {
-        // Check if serial already exists for this product type (different product types can share same serial)
+        // Check if serial already exists for this product type.
         const existingSerial = await StockSerial.findOne({
-          where: { serial_number: serial.serial_number },
-          include: [{
-            model: Product,
-            as: "product",
-            required: true,
-            where: { product_type_id: productTypeId },
-          }],
+          where: {
+            serial_number: serial.serial_number,
+          },
+          include: [
+            {
+              model: Product,
+              as: "product",
+              required: true,
+              where: { product_type_id: productTypeId },
+            },
+          ],
           transaction: t,
         });
 
-        if (existingSerial) {
-          throw new Error(`Serial number "${serial.serial_number}" already exists for this product type. Use a unique serial within the same product type.`);
-        }
-
         const unitPrice =
           item.purchaseOrderItem?.rate != null ? item.purchaseOrderItem.rate : null;
-        await StockSerial.create(
-          {
-            product_id: item.product_id,
-            warehouse_id: warehouseId,
-            stock_id: stock.id,
-            serial_number: serial.serial_number,
-            status: SERIAL_STATUS.AVAILABLE,
-            source_type: TRANSACTION_TYPE.PO_INWARD,
-            source_id: poInward.id,
-            inward_date: new Date(),
-            unit_price: unitPrice,
-          },
-          { transaction: t }
-        );
+
+        if (existingSerial) {
+          // If the serial was previously RETURNED, reactivate the same row.
+          if (existingSerial.status === SERIAL_STATUS.RETURNED) {
+            await existingSerial.update(
+              {
+                status: SERIAL_STATUS.AVAILABLE,
+                stock_id: stock.id,
+                product_id: item.product_id,
+                warehouse_id: warehouseId,
+                source_type: TRANSACTION_TYPE.PO_INWARD,
+                source_id: poInward.id,
+                unit_price: unitPrice,
+                inward_date: new Date(),
+              },
+              { transaction: t }
+            );
+          } else {
+            // Active (non-returned) serial for this product type already exists.
+            throw new Error(
+              `Serial number "${serial.serial_number}" already exists for this product type. Use a unique serial within the same product type.`
+            );
+          }
+        } else {
+          // No history for this serial: create a new row.
+          await StockSerial.create(
+            {
+              product_id: item.product_id,
+              warehouse_id: warehouseId,
+              stock_id: stock.id,
+              serial_number: serial.serial_number,
+              status: SERIAL_STATUS.AVAILABLE,
+              source_type: TRANSACTION_TYPE.PO_INWARD,
+              source_id: poInward.id,
+              inward_date: new Date(),
+              unit_price: unitPrice,
+            },
+            { transaction: t }
+          );
+        }
       }
     }
 
