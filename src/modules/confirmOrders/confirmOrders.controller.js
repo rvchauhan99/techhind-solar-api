@@ -91,6 +91,7 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const getModelAgreementPdf = asyncHandler(async (req, res) => {
+    const withSignatures = req.query.with_signatures === "true";
     const { id } = req.params;
     const order = await orderService.getOrderById({ id });
     if (!order) {
@@ -103,7 +104,9 @@ const getModelAgreementPdf = asyncHandler(async (req, res) => {
     const company = await models.Company.findOne({
         where: { deleted_at: null },
         order: [["created_at", "ASC"]],
-        attributes: ["company_name", "stamp_with_signature", "authorized_signature"],
+        attributes: withSignatures
+            ? ["company_name", "stamp_with_signature", "authorized_signature"]
+            : ["company_name"],
     });
     if (!company) {
         return responseHandler.sendError(res, "Company not found", 404);
@@ -115,7 +118,7 @@ const getModelAgreementPdf = asyncHandler(async (req, res) => {
         req.transaction,
         req
     );
-    const customerSignPath = customerSignDoc ? customerSignDoc.document_path : null;
+    const customerSignPath = withSignatures && customerSignDoc ? customerSignDoc.document_path : null;
 
     const buffer = await modelAgreementPdfService.generateModelAgreementPdfBuffer(
         order,
