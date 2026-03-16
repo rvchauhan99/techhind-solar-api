@@ -3,7 +3,7 @@
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const { QueryTypes } = require("sequelize");
-const { RECEIPT_STATUS, RECEIPT_TYPE, PO_STATUS } = require("../../common/utils/constants.js");
+const { RECEIPT_STATUS, RECEIPT_TYPE, PO_STATUS, SERIAL_STATUS } = require("../../common/utils/constants.js");
 const stockService = require("../stock/stock.service.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
@@ -668,7 +668,7 @@ const DUPLICATE_SERIAL_MESSAGE = "Duplicate serial number for this product type.
  */
 const validatePOInwardSerials = async ({ product_id, serial_numbers, po_inward_id } = {}) => {
   const models = getTenantModels();
-  const { POInwardSerial, POInwardItem, Product } = models;
+  const { StockSerial, Product } = models;
 
   const serials = (serial_numbers || [])
     .map((s) => (s != null ? String(s).trim() : ""))
@@ -681,29 +681,32 @@ const validatePOInwardSerials = async ({ product_id, serial_numbers, po_inward_i
     attributes: ["id", "product_type_id"],
   });
   if (!product) {
-    return { valid: false, invalid_serials: serials.map((sn) => ({ serial_number: sn, message: "Product not found." })) };
+    return {
+      valid: false,
+      invalid_serials: serials.map((sn) => ({
+        serial_number: sn,
+        message: "Product not found.",
+      })),
+    };
   }
 
   const productTypeId = product.product_type_id ?? null;
 
-  const where = {
-    product_type_id: productTypeId,
-    serial_number: { [Op.in]: serials },
-  };
-
-  const include = [
-    {
-      model: POInwardItem,
-      as: "poInwardItem",
-      required: true,
-      attributes: ["id", "po_inward_id"],
-      ...(po_inward_id != null && { where: { po_inward_id: { [Op.ne]: parseInt(po_inward_id, 10) } } }),
+  // Find any currently active stock serials for the same product type
+  const existing = await StockSerial.findAll({
+    where: {
+      serial_number: { [Op.in]: serials },
+      status: { [Op.ne]: SERIAL_STATUS.RETURNED },
     },
-  ];
-
-  const existing = await POInwardSerial.findAll({
-    where,
-    include,
+    include: [
+      {
+        model: Product,
+        as: "product",
+        required: true,
+        attributes: ["id", "product_type_id"],
+        where: { product_type_id: productTypeId },
+      },
+    ],
     attributes: ["serial_number"],
   });
 
