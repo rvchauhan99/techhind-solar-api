@@ -7,6 +7,28 @@ const orderPaymentService = {
     async createPayment(payload, transaction, req) {
         const models = getTenantModels(req);
         const { OrderPaymentDetail, Order } = models;
+
+        // Defensive guard: avoid creating duplicate rows for the same payment
+        // when the same request is accidentally sent multiple times in a short window.
+        if (payload.order_id && payload.date_of_payment && payload.payment_amount && payload.payment_mode_id) {
+            const recentCreatedAfter = new Date(Date.now() - 60 * 1000); // last 60 seconds
+            const existing = await OrderPaymentDetail.findOne({
+                where: {
+                    order_id: payload.order_id,
+                    date_of_payment: new Date(payload.date_of_payment),
+                    payment_amount: payload.payment_amount,
+                    payment_mode_id: payload.payment_mode_id,
+                    transaction_cheque_number: payload.transaction_cheque_number || null,
+                    status: "pending_approval",
+                    created_at: { [Op.gte]: recentCreatedAfter },
+                },
+                transaction,
+            });
+            if (existing) {
+                return existing;
+            }
+        }
+
         const payment = await OrderPaymentDetail.create(payload, { transaction });
         const orderId = payload.order_id;
         if (orderId) {
