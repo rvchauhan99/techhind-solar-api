@@ -389,7 +389,7 @@ function buildDocDefinition(data) {
                                       image: firstPartySignatureImage,
                                       width: 80,
                                       height: 40,
-                                      alignment: "center",
+                                      alignment: "left",
                                       margin: [10, 4, 0, 0],
                                   }
                                 : "__________________",
@@ -397,10 +397,7 @@ function buildDocDefinition(data) {
                             secondPartySignatureImage
                                 ? {
                                       image: secondPartySignatureImage,
-                                      width: 80,
-                                      height: 40,
-                                      alignment: "center",
-                                      margin: [10, 4, 0, 0],
+                                      alignment: "left",
                                   }
                                 : "__________________",
                         ],
