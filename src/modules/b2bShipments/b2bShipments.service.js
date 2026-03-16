@@ -282,7 +282,7 @@ const createShipment = async ({ payload, user_id, transaction }) => {
       for (const serial of serialList) {
         const stockSerial = await StockSerial.findOne({
           where: {
-            serial_number: serial,
+            serial_number: { [Op.iLike]: serial },
             product_id: item.product_id,
             warehouse_id: plannedWarehouseId,
           },
@@ -414,7 +414,7 @@ const deleteShipment = async ({ id, user_id, transaction }) => {
       if (isSerialized && serialList.length > 0) {
         for (const serial of serialList) {
           const stockSerial = await StockSerial.findOne({
-            where: { serial_number: serial, product_id: item.product_id },
+            where: { serial_number: { [Op.iLike]: serial }, product_id: item.product_id },
             transaction,
           });
           if (stockSerial) {
