@@ -360,13 +360,6 @@ function buildDocDefinition(data) {
                 ],
                 margin: [0, 0, 0, 20],
             },
-            { text: "", pageBreak: "before" },
-            {
-                text: "Signatures",
-                style: "section",
-                alignment: "center",
-                margin: [0, 0, 0, 10],
-            },
             {
                 table: {
                     widths: ["auto", "*", "auto", "*"],
