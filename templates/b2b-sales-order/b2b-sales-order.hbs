@@ -27,7 +27,7 @@
     </div>
   </header>
 
-  <div class="grid grid-3">
+  <div class="grid grid-2">
     <article class="card">
       <h3>Bill To</h3>
       <p><strong>{{safe client.client_name}}</strong></p>
@@ -44,12 +44,6 @@
       {{else}}
         <p class="muted">-</p>
       {{/if}}
-    </article>
-    <article class="card">
-      <h3>Terms</h3>
-      <p><span>Payment</span><strong>{{safe payment_terms}}</strong></p>
-      <p><span>Delivery</span><strong>{{safe delivery_terms}}</strong></p>
-      {{#if remarks}}<p><span>Remarks</span><strong>{{safe remarks}}</strong></p>{{/if}}
     </article>
   </div>
 
@@ -127,13 +121,46 @@
       </tr>
     </tfoot>
   </table>
-
-  <div class="notes-signatures single-sign">
-    <article class="sign">
-      <h4>Authorized Signatory</h4>
-      <p>Name: _______________________</p>
-      <p>Signature: ___________________</p>
-    </article>
+  <div class="terms-box">
+    <h3>Terms &amp; Conditions</h3>
+    <p><span>Freight</span><strong>{{safe terms.freight}}</strong></p>
+    <p><span>Payment terms</span><strong>{{safe terms.payment_terms_text}}</strong></p>
+    <p><span>Delivery Schedule</span><strong>{{safe terms.delivery_schedule}}</strong></p>
+    <p><span>Remarks</span><strong>{{safe terms.terms_remarks}}</strong></p>
+  </div>
+  <div class="footer-sections">
+    <div class="bank-details">
+      <h4>Bank Details</h4>
+      {{#if bank_details}}
+        <p><span>Bank Name:</span><strong>{{safe bank_details.bank_name}}</strong></p>
+        <p><span>Name:</span><strong>{{safe bank_details.bank_account_name}}</strong></p>
+        <p><span>Account No:</span><strong>{{safe bank_details.bank_account_number}}</strong></p>
+        <p><span>IFSC Code:</span><strong>{{safe bank_details.bank_account_ifsc}}</strong></p>
+        {{#if bank_details.bank_account_branch}}
+          <p><span>Branch:</span><strong>{{safe bank_details.bank_account_branch}}</strong></p>
+        {{/if}}
+        {{#if bank_details.upi_id}}
+          <p><span>UPI ID:</span><strong>{{safe bank_details.upi_id}}</strong></p>
+        {{/if}}
+      {{else}}
+        <p class="muted">Bank details not configured.</p>
+      {{/if}}
+      <p class="jurisdiction">*Subject to {{safe company.city}} Jurisdiction</p>
+    </div>
+    <div class="sign-block">
+      <p class="for-company">For, {{safe company.name}}</p>
+      {{#if company.stamp_with_signature_data_url}}
+        <img class="stamp-sign" src="{{company.stamp_with_signature_data_url}}" alt="Stamp with Signature" />
+      {{else}}
+        {{#if company.stamp_data_url}}
+          <img class="stamp" src="{{company.stamp_data_url}}" alt="Company Stamp" />
+        {{/if}}
+        {{#if company.authorized_signature_data_url}}
+          <img class="signature" src="{{company.authorized_signature_data_url}}" alt="Authorized Signature" />
+        {{/if}}
+      {{/if}}
+      <p class="authorized-text">(Authorized Signatory)</p>
+    </div>
   </div>
 </body>
 </html>

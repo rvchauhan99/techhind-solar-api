@@ -580,7 +580,7 @@ const getDefaultBranch = async (transaction = null) => {
 // Warehouse Methods
 const createWarehouse = async (payload, transaction = null) => {
   const models = getTenantModels();
-  const { Company, CompanyWarehouse } = models;
+  const { Company, CompanyWarehouse, CompanyBranch } = models;
   // Get company
   const company = await Company.findOne({
     where: { deleted_at: null },
@@ -593,7 +593,7 @@ const createWarehouse = async (payload, transaction = null) => {
   }
 
   // Validation: Required fields
-  if (!payload.name || !payload.mobile || !payload.state_id || !payload.address) {
+  if (!payload.name || !payload.mobile || !payload.state_id || !payload.address || !payload.branch_id) {
     throw new AppError(
       "Name, mobile, state, and address are required",
       RESPONSE_STATUS_CODES.BAD_REQUEST
@@ -602,6 +602,7 @@ const createWarehouse = async (payload, transaction = null) => {
 
   const createPayload = {
     company_id: company.id,
+    branch_id: payload.branch_id,
     name: payload.name,
     contact_person: payload.contact_person || null,
     mobile: payload.mobile,
@@ -641,6 +642,9 @@ const updateWarehouse = async (id, payload, transaction = null) => {
   if (payload.address !== undefined && !payload.address.trim()) {
     throw new AppError("Address is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
+  if (payload.branch_id !== undefined && !payload.branch_id) {
+    throw new AppError("Branch is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
 
   const updatePayload = {
     name: payload.name !== undefined ? payload.name : warehouse.name,
@@ -650,6 +654,7 @@ const updateWarehouse = async (id, payload, transaction = null) => {
     email: payload.email !== undefined ? payload.email : warehouse.email,
     phone_no: payload.phone_no !== undefined ? payload.phone_no : warehouse.phone_no,
     address: payload.address !== undefined ? payload.address : warehouse.address,
+    branch_id: payload.branch_id !== undefined ? payload.branch_id : warehouse.branch_id,
     is_active: payload.is_active !== undefined ? payload.is_active : warehouse.is_active,
   };
 
@@ -676,7 +681,7 @@ const deleteWarehouse = async (id, transaction = null) => {
 
 const listWarehouses = async (companyId = null, transaction = null) => {
   const models = getTenantModels();
-  const { Company, CompanyWarehouse, State, User } = models;
+  const { Company, CompanyWarehouse, State, User, CompanyBranch } = models;
   let company;
   
   // If company_id is provided, use it; otherwise get the first company
@@ -708,6 +713,12 @@ const listWarehouses = async (companyId = null, transaction = null) => {
         required: false,
       },
       {
+        model: CompanyBranch,
+        as: "branch",
+        attributes: ["id", "name"],
+        required: false,
+      },
+      {
         model: User,
         as: "managers",
         attributes: ["id", "name", "email"],
@@ -721,9 +732,12 @@ const listWarehouses = async (companyId = null, transaction = null) => {
 
   return warehouses.map((warehouse) => {
     const warehouseData = warehouse.toJSON();
-    // Include state name in the response
+    // Include state and branch name in the response
     if (warehouseData.state) {
       warehouseData.state_name = warehouseData.state.name;
+    }
+    if (warehouseData.branch) {
+      warehouseData.branch_name = warehouseData.branch.name;
     }
     // managers array is already included from include
     return warehouseData;

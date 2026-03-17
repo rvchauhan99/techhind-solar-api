@@ -99,18 +99,79 @@ const generatePDF = asyncHandler(async (req, res) => {
   const order = await b2bSalesOrdersService.getOrderById({ id });
   if (!order) return responseHandler.sendError(res, "B2B sales order not found", 404);
 
-  const { Company } = getTenantModels();
+  const { Company, CompanyWarehouse, CompanyBranch, CompanyBankAccount, TermsAndConditions } = getTenantModels();
   const company = await Company.findOne({ where: { deleted_at: null } });
+
+  // Resolve bank account based on planned warehouse's branch
+  let bankAccount = null;
+  try {
+    const warehouse = order.plannedWarehouse || null;
+    const branchId = warehouse && warehouse.branch_id ? warehouse.branch_id : null;
+    const companyId = company ? company.id : null;
+
+    if (branchId && companyId) {
+      // Prefer branch-specific default, then any active for that branch
+      bankAccount =
+        (await CompanyBankAccount.findOne({
+          where: { branch_id: branchId, company_id: companyId, deleted_at: null, is_active: true, is_default: true },
+          order: [["created_at", "ASC"]],
+        })) ||
+        (await CompanyBankAccount.findOne({
+          where: { branch_id: branchId, company_id: companyId, deleted_at: null, is_active: true },
+          order: [["is_default", "DESC"], ["created_at", "ASC"]],
+        }));
+    }
+
+    // Fallback to any company-level default account
+    if (!bankAccount && companyId) {
+      bankAccount =
+        (await CompanyBankAccount.findOne({
+          where: { branch_id: null, company_id: companyId, deleted_at: null, is_active: true, is_default: true },
+          order: [["created_at", "ASC"]],
+        })) ||
+        (await CompanyBankAccount.findOne({
+          where: { company_id: companyId, deleted_at: null, is_active: true },
+          order: [["is_default", "DESC"], ["created_at", "ASC"]],
+        }));
+    }
+  } catch (e) {
+    // If anything fails while resolving bank account, continue without it.
+    bankAccount = null;
+  }
   let bucketClient = null;
   try {
     bucketClient = bucketService.getBucketForRequest(req);
   } catch {
     bucketClient = null;
   }
+
+  // Default Terms & Conditions from master (used only when order snapshot fields are missing)
+  const [defaultFreight, defaultPayment, defaultDelivery, defaultRemarks] = await Promise.all([
+    TermsAndConditions.findOne({
+      where: { type: "freight", is_default: true, is_active: true, deleted_at: null },
+    }),
+    TermsAndConditions.findOne({
+      where: { type: "payment_terms", is_default: true, is_active: true, deleted_at: null },
+    }),
+    TermsAndConditions.findOne({
+      where: { type: "delivery_schedule", is_default: true, is_active: true, deleted_at: null },
+    }),
+    TermsAndConditions.findOne({
+      where: { type: "other", is_default: true, is_active: true, deleted_at: null },
+    }),
+  ]);
+
   const pdfData = await pdfService.prepareB2BOrderPdfData(
     order.toJSON ? order.toJSON() : order,
     company ? company.toJSON() : null,
-    { bucketClient }
+    bankAccount ? (bankAccount.toJSON ? bankAccount.toJSON() : bankAccount) : null,
+    {
+      bucketClient,
+      defaultFreight: defaultFreight ? defaultFreight.content : "",
+      defaultPaymentTerms: defaultPayment ? defaultPayment.content : "",
+      defaultDeliverySchedule: defaultDelivery ? defaultDelivery.content : "",
+      defaultTermsRemarks: defaultRemarks ? defaultRemarks.content : "",
+    }
   );
   const pdfBuffer = await pdfService.generateB2BOrderPDF(pdfData);
 

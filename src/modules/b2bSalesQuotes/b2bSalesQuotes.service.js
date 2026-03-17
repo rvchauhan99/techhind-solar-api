@@ -176,7 +176,7 @@ const createQuote = async ({ payload, user_id, transaction }) => {
     console.warn("Failed to generate B2B Sales Quote number from serial master:", err.message);
   }
 
-  header.quote_no = serialQuoteNumber || await generateQuoteNumber();
+  header.quote_no = serialQuoteNumber || await generateQuoteNumber({ transaction });
   const { items: computedItems, subtotal_amount, total_gst_amount, grand_total } = computeTotals(items);
   header.subtotal_amount = subtotal_amount;
   header.total_gst_amount = total_gst_amount;

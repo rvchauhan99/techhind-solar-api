@@ -68,16 +68,59 @@ const pathToDataUrl = async (pathOrKey, mimeType, bucketClient) => {
   }
 };
 
-const prepareB2BOrderPdfData = async (order, company, options = {}) => {
+const prepareB2BOrderPdfData = async (order, company, bankAccount, options = {}) => {
   const client = order.client || {};
   const shipTo = order.shipTo || null;
   const items = order.items || [];
+
+  // Company images
   let logoDataUrl = "";
-  if (company?.logo && options.bucketClient) {
-    const ext = path.extname(company.logo || "").toLowerCase();
-    const mime = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
-    logoDataUrl = await pathToDataUrl(company.logo, mime, options.bucketClient);
+  let stampDataUrl = "";
+  let authorizedSignatureDataUrl = "";
+  let stampWithSignatureDataUrl = "";
+
+  if (company && options.bucketClient) {
+    const loadImage = async (key) => {
+      if (!key) return "";
+      const ext = path.extname(key || "").toLowerCase();
+      const mime =
+        ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
+      return pathToDataUrl(key, mime, options.bucketClient);
+    };
+
+    if (company.logo) {
+      logoDataUrl = await loadImage(company.logo);
+    }
+    if (company.stamp) {
+      stampDataUrl = await loadImage(company.stamp);
+    }
+    if (company.authorized_signature) {
+      authorizedSignatureDataUrl = await loadImage(company.authorized_signature);
+    }
+    if (company.stamp_with_signature) {
+      stampWithSignatureDataUrl = await loadImage(company.stamp_with_signature);
+    }
   }
+
+  const bankDetails = bankAccount
+    ? {
+        bank_name: bankAccount.bank_name || "",
+        bank_account_name: bankAccount.bank_account_name || "",
+        bank_account_number: bankAccount.bank_account_number || "",
+        bank_account_ifsc: bankAccount.bank_account_ifsc || "",
+        bank_account_branch: bankAccount.bank_account_branch || "",
+        upi_id: bankAccount.upi_id || "",
+      }
+    : null;
+
+  // Terms & Conditions - snapshot on order first, fallback to provided defaults
+  const terms = {
+    freight: order.freight_text || options.defaultFreight || "",
+    payment_terms_text: order.payment_terms_text || order.payment_terms || options.defaultPaymentTerms || "",
+    delivery_schedule: order.delivery_schedule_text || order.delivery_terms || options.defaultDeliverySchedule || "",
+    terms_remarks: order.terms_remarks || options.defaultTermsRemarks || "",
+  };
+
   return {
     order_no: order.order_no,
     order_date: order.order_date,
@@ -91,14 +134,20 @@ const prepareB2BOrderPdfData = async (order, company, options = {}) => {
     payment_terms: order.payment_terms,
     delivery_terms: order.delivery_terms,
     remarks: order.remarks,
+    terms,
     status: order.status,
+    bank_details: bankDetails,
     company: {
       name: company?.company_name || "Company",
       address: [company?.address, company?.city, company?.state].filter(Boolean).join(", "),
       phone: company?.contact_number,
       email: company?.company_email,
       website: company?.company_website,
+      city: company?.city || "",
       logo_data_url: logoDataUrl,
+      stamp_data_url: stampDataUrl,
+      authorized_signature_data_url: authorizedSignatureDataUrl,
+      stamp_with_signature_data_url: stampWithSignatureDataUrl,
     },
   };
 };

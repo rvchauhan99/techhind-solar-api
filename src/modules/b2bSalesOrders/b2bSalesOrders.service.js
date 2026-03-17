@@ -6,24 +6,25 @@ const { buildStringCond, buildNumberCond, buildDateCond } = require("../../commo
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
 
-const generateOrderNumber = async () => {
+const generateOrderNumber = async ({ transaction } = {}) => {
   const models = getTenantModels();
-  // QueryTypes.SELECT returns the rows array directly (do not destructure as [rows])
-  const rows = await models.sequelize.query(
-    `SELECT order_no
-     FROM b2b_sales_orders
-     WHERE order_no LIKE :pattern AND deleted_at IS NULL
-     ORDER BY LENGTH(order_no) DESC, order_no DESC
-     LIMIT 1`,
-    { replacements: { pattern: `SO%` }, type: QueryTypes.SELECT }
+  const { B2BSalesOrder } = models;
+
+  // Compute the maximum numeric sequence across ALL SO order numbers,
+  // regardless of formatting (e.g. "SO-02260003", "SO2260004"), so we
+  // never re-generate an already used number when formats change.
+  const [result] = await models.sequelize.query(
+    'SELECT MAX(CAST(regexp_replace(order_no, \'\\D\', \'\', \'g\') AS INTEGER)) AS max_seq FROM "b2b_sales_orders" WHERE order_no LIKE \'SO%\'',
+    {
+      transaction,
+      type: QueryTypes.SELECT,
+    }
   );
-  let seq = 1;
-  if (Array.isArray(rows) && rows.length > 0 && rows[0].order_no) {
-    const last = String(rows[0].order_no || "");
-    const lastSeq = parseInt(last.replace(/^SO/i, "").replace(/[^0-9]/g, ""), 10);
-    if (!Number.isNaN(lastSeq)) seq = lastSeq + 1;
-  }
-  return `SO${String(seq).padStart(2, "0")}`;
+
+  const maxSeq = result && result.max_seq ? parseInt(result.max_seq, 10) : 0;
+  const nextSeq = Number.isNaN(maxSeq) || maxSeq < 0 ? 1 : maxSeq + 1;
+  const generated = `SO${String(nextSeq).padStart(2, "0")}`;
+  return generated;
 };
 
 const listOrders = async ({
@@ -198,7 +199,7 @@ const createOrder = async ({ payload, user_id, transaction }) => {
     console.warn("Failed to generate B2B Sales Order number from serial master:", err.message);
   }
 
-  header.order_no = serialOrderNumber || await generateOrderNumber();
+  header.order_no = serialOrderNumber || await generateOrderNumber({ transaction });
   if (!header.order_date) header.order_date = new Date().toISOString().slice(0, 10);
   const { items: computedItems, subtotal_amount, total_gst_amount, grand_total } = computeTotals(items);
   header.subtotal_amount = subtotal_amount;
@@ -285,7 +286,7 @@ const createFromQuote = async ({ quoteId, payloadOverride, user_id, transaction 
     console.warn("Failed to generate B2B Sales Order number from serial master:", err.message);
   }
 
-  header.order_no = header.order_no || serialOrderNumberGen || await generateOrderNumber();
+  header.order_no = header.order_no || serialOrderNumberGen || await generateOrderNumber({ transaction });
 
   const order = await B2BSalesOrder.create(header, { transaction });
   await B2BSalesOrderItem.bulkCreate(
