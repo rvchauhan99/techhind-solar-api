@@ -37,7 +37,11 @@ const listPOInwards = async ({
   if (supplierInvoiceNumber) {
     where.supplier_invoice_number = { [Op.iLike]: `%${supplierInvoiceNumber}%` };
   } else if (q) {
-    where[Op.or] = [{ supplier_invoice_number: { [Op.iLike]: `%${q}%` } }];
+    where[Op.or] = [
+      { supplier_invoice_number: { [Op.iLike]: `%${q}%` } },
+      { "$purchaseOrder.po_number$": { [Op.iLike]: `%${q}%` } },
+      { "$supplier.supplier_name$": { [Op.iLike]: `%${q}%` } },
+    ];
   }
   if (receivedAtFrom || receivedAtTo) {
     const dateCond = {};
