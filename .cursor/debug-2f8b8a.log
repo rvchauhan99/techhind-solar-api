@@ -1,0 +1,2 @@
+{"sessionId":"2f8b8a","runId":"pre-fix","hypothesisId":"H1","location":"b2bSalesOrders.service.js:generateOrderNumber","message":"Generated fallback SO number","data":{"generated":"SO2260005","maxSeq":2260004},"timestamp":1773748245569}
+{"sessionId":"2f8b8a","runId":"pre-fix","hypothesisId":"H2","location":"b2bSalesOrders.service.js:createOrder:beforeCreate","message":"Creating B2B order","data":{"order_no":"SO2260005","fromSerial":false},"timestamp":1773748245594}

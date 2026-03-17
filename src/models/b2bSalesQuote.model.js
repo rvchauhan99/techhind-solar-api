@@ -57,6 +57,7 @@ const B2BSalesQuote = sequelize.define(
     },
     sales_order_id: { type: DataTypes.INTEGER, allowNull: true },
     remarks: { type: DataTypes.TEXT, allowNull: true },
+    terms_remarks: { type: DataTypes.TEXT, allowNull: true },
     user_id: {
       type: DataTypes.INTEGER,
       allowNull: true,

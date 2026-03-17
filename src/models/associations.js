@@ -244,6 +244,12 @@ module.exports = (db) => {
     CompanyWarehouse.belongsTo(Company, { foreignKey: "company_id", as: "company" });
   }
 
+  // CompanyBranch ↔ CompanyWarehouse (One-to-Many)
+  if (CompanyBranch && CompanyWarehouse) {
+    CompanyBranch.hasMany(CompanyWarehouse, { foreignKey: "branch_id", as: "warehouses" });
+    CompanyWarehouse.belongsTo(CompanyBranch, { foreignKey: "branch_id", as: "branch" });
+  }
+
   // State ↔ CompanyWarehouse (One-to-Many)
   if (State && CompanyWarehouse) {
     State.hasMany(CompanyWarehouse, { foreignKey: "state_id", as: "warehouses" });

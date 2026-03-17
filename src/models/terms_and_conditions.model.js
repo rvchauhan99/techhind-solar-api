@@ -3,54 +3,51 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db.js");
 
-const CompanyWarehouse = sequelize.define(
-  "CompanyWarehouse",
+const TermsAndConditions = sequelize.define(
+  "TermsAndConditions",
   {
     id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.BIGINT,
       autoIncrement: true,
       primaryKey: true,
     },
-    company_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-    },
-    branch_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-    },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    contact_person: {
-      type: DataTypes.STRING,
+    tenant_id: {
+      type: DataTypes.BIGINT,
       allowNull: true,
     },
-    mobile: {
-      type: DataTypes.STRING,
-      allowNull: false,
+    type: {
+      type: DataTypes.STRING(50),
+      allowNull: false, // 'freight' | 'payment_terms' | 'delivery_schedule' | 'other'
     },
-    state_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-    },
-    email: {
-      type: DataTypes.STRING,
+    code: {
+      type: DataTypes.STRING(50),
       allowNull: true,
     },
-    phone_no: {
-      type: DataTypes.STRING,
-      allowNull: true,
+    title: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
     },
-    address: {
+    content: {
       type: DataTypes.TEXT,
       allowNull: false,
+    },
+    is_default: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
     is_active: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true,
+    },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    updated_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
     },
     created_at: {
       type: DataTypes.DATE,
@@ -66,14 +63,14 @@ const CompanyWarehouse = sequelize.define(
     },
   },
   {
-    tableName: "company_warehouses",
+    tableName: "terms_and_conditions",
     timestamps: true,
+    paranoid: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
-    paranoid: true,
     deletedAt: "deleted_at",
   }
 );
 
-module.exports = CompanyWarehouse;
+module.exports = TermsAndConditions;
 
