@@ -99,8 +99,18 @@
   <div class="notes-signatures single-sign">
     <article class="sign">
       <h4>Authorized Signatory</h4>
-      <p>Name: _______________________</p>
-      <p>Signature: ___________________</p>
+      <p class="for-company">For, {{safe company.name}}</p>
+      {{#if company.stamp_with_signature_data_url}}
+        <img class="stamp-sign" src="{{company.stamp_with_signature_data_url}}" alt="Stamp with Signature" />
+      {{else}}
+        {{#if company.stamp_data_url}}
+          <img class="stamp" src="{{company.stamp_data_url}}" alt="Company Stamp" />
+        {{/if}}
+        {{#if company.authorized_signature_data_url}}
+          <img class="signature" src="{{company.authorized_signature_data_url}}" alt="Authorized Signature" />
+        {{/if}}
+      {{/if}}
+      <p class="authorized-text">(Authorized Signatory)</p>
     </article>
   </div>
 
