@@ -280,7 +280,7 @@ const orderPaymentService = {
         return payment;
     },
 
-    async approvePayment({ id, userId, transaction, req }) {
+    async approvePayment({ id, userId, approvalRemarks, transaction, req }) {
         const models = getTenantModels(req);
         const { OrderPaymentDetail } = models;
         const payment = await OrderPaymentDetail.findByPk(id, { transaction });
@@ -305,6 +305,7 @@ const orderPaymentService = {
                 rejected_at: null,
                 rejected_by: null,
                 rejection_reason: null,
+                approval_remarks: approvalRemarks || null,
                 receipt_number: receiptNumber,
             },
             { transaction }
@@ -359,6 +360,7 @@ const orderPaymentService = {
             receipt_cheque_file: row.receipt_cheque_file,
             payment_remarks: row.payment_remarks,
             status: row.status,
+            approval_remarks: row.approval_remarks,
             approved_at: row.approved_at,
             approved_by: row.approved_by,
             approved_by_name: row.approvedByUser?.name || null,

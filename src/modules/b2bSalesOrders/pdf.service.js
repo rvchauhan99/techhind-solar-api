@@ -2,12 +2,18 @@
 
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const handlebars = require("handlebars");
+const QRCode = require("qrcode");
 const bucketService = require("../../common/services/bucket.service.js");
 const puppeteerService = require("../../common/services/puppeteer.service.js");
 
 const TEMPLATE_DIR = path.join(__dirname, "../../../templates/b2b-sales-order");
 const PUBLIC_DIR = path.join(__dirname, "../../../public");
+
+const UPI_LOGO_URL =
+  process.env.UPI_LOGO_URL ||
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/UPI-Logo-vector.svg/256px-UPI-Logo-vector.svg.png";
 
 const groupItems = (items = []) => {
   const map = {};
@@ -25,6 +31,42 @@ const groupItems = (items = []) => {
     const group_qty = groupItemsList.reduce((sum, it) => sum + (Number(it?.quantity) || 0), 0);
     return { group_name, group_qty, items: groupItemsList };
   });
+};
+
+const fetchRemoteImageAsDataUrl = (url, mimeType = "image/png") =>
+  new Promise((resolve) => {
+    if (!url) return resolve("");
+    try {
+      https
+        .get(url, (res) => {
+          if (res.statusCode !== 200) {
+            return resolve("");
+          }
+          const chunks = [];
+          res.on("data", (d) => chunks.push(d));
+          res.on("end", () => {
+            const buf = Buffer.concat(chunks);
+            resolve(`data:${mimeType};base64,${buf.toString("base64")}`);
+          });
+        })
+        .on("error", () => resolve(""));
+    } catch {
+      resolve("");
+    }
+  });
+
+const generateUpiQrDataUrl = async (upiId) => {
+  if (!upiId) return "";
+  try {
+    const upiString = `upi://pay?pa=${encodeURIComponent(upiId)}`;
+    return await QRCode.toDataURL(upiString, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 200,
+    });
+  } catch {
+    return "";
+  }
 };
 
 handlebars.registerHelper("safe", (value) => {
@@ -113,6 +155,14 @@ const prepareB2BOrderPdfData = async (order, company, bankAccount, options = {})
       }
     : null;
 
+  let upiQrDataUrl = "";
+  let upiLogoDataUrl = "";
+
+  if (bankDetails && bankDetails.upi_id) {
+    upiQrDataUrl = await generateUpiQrDataUrl(bankDetails.upi_id);
+    upiLogoDataUrl = await fetchRemoteImageAsDataUrl(UPI_LOGO_URL, "image/png");
+  }
+
   // Terms & Conditions - snapshot on order first, fallback to provided defaults
   const terms = {
     freight: order.freight_text || options.defaultFreight || "",
@@ -136,7 +186,14 @@ const prepareB2BOrderPdfData = async (order, company, bankAccount, options = {})
     remarks: order.remarks,
     terms,
     status: order.status,
-    bank_details: bankDetails,
+    bank_details:
+      bankDetails && (upiQrDataUrl || upiLogoDataUrl)
+        ? {
+            ...bankDetails,
+            upi_qr_data_url: upiQrDataUrl,
+            upi_logo_data_url: upiLogoDataUrl,
+          }
+        : bankDetails,
     company: {
       name: company?.company_name || "Company",
       address: [company?.address, company?.city, company?.state].filter(Boolean).join(", "),

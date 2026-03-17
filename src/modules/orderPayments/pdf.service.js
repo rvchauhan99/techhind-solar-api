@@ -80,20 +80,52 @@ const loadTemplate = (templateName) => {
 
 const preparePaymentReceiptPdfData = async (payment, order, company, bankAccount, { bucketClient } = {}) => {
     let logoDataUrl = "";
-    if (company?.logo) {
+    let stampDataUrl = "";
+    let authorizedSignatureDataUrl = "";
+    let stampWithSignatureDataUrl = "";
+
+    if (company && bucketClient) {
+        const loadImage = async (key) => {
+            if (!key) return "";
+            const ext = path.extname(key || "").toLowerCase();
+            const mime =
+                ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
+            return pathToDataUrl(key, mime, bucketClient);
+        };
+
+        if (company.logo) {
+            logoDataUrl = await loadImage(company.logo);
+        }
+        if (company.stamp) {
+            stampDataUrl = await loadImage(company.stamp);
+        }
+        if (company.authorized_signature) {
+            authorizedSignatureDataUrl = await loadImage(company.authorized_signature);
+        }
+        if (company.stamp_with_signature) {
+            stampWithSignatureDataUrl = await loadImage(company.stamp_with_signature);
+        }
+    } else if (company?.logo) {
         const ext = path.extname(company.logo || "").toLowerCase();
         const mime = ext === ".png" ? "image/png" : ext === ".svg" ? "image/svg+xml" : "image/jpeg";
         logoDataUrl = await pathToDataUrl(company.logo, mime, bucketClient);
     }
 
     const customer = order?.customer || null;
+    const branch = order?.branch || null;
+
+    const branchRegisteredAddress = branch?.address || "";
 
     const companyNormalized = {
         name: company?.company_name || "",
-        address: buildCompanyAddress(company),
+        // Prefer full registered address from branch when available
+        address: branchRegisteredAddress || buildCompanyAddress(company),
         phone: company?.contact_number || "",
         email: company?.company_email || "",
         logo_data_url: logoDataUrl,
+        stamp_data_url: stampDataUrl,
+        authorized_signature_data_url: authorizedSignatureDataUrl,
+        stamp_with_signature_data_url: stampWithSignatureDataUrl,
     };
 
     return {
@@ -117,6 +149,8 @@ const preparePaymentReceiptPdfData = async (payment, order, company, bankAccount
                   customer_name: customer?.customer_name || "",
                   address: customer?.address || "",
                   phone: customer?.mobile_number || customer?.phone_no || "",
+                  branch_name: branch?.name || "",
+                  branch_address: branchRegisteredAddress,
               }
             : null,
         payment: {

@@ -88,6 +88,10 @@ const OrderPaymentDetail = sequelize.define(
             type: DataTypes.BIGINT,
             allowNull: true,
         },
+        approval_remarks: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
         rejection_reason: {
             type: DataTypes.TEXT,
             allowNull: true,
