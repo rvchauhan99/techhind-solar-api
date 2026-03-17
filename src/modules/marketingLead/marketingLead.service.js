@@ -7,6 +7,7 @@ const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const notificationService = require("../notification/notification.service.js");
+const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
 
 const normalizeLike = (s) => {
   if (s == null) return null;
@@ -376,6 +377,12 @@ const createLead = async ({ payload, transaction } = {}) => {
     throw new AppError("customer_name and mobile_number are required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
+  await assertActiveUserIds(payload?.assigned_to, {
+    transaction,
+    models,
+    fieldLabel: "Assigned user",
+  });
+
   // Try to generate Lead number from Serial Master
   let serialLeadNumber = null;
   try {
@@ -438,6 +445,12 @@ const updateLead = async ({ id, payload, transaction } = {}) => {
   if (!id) throw new AppError("Lead id is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   const models = getTenantModels();
   const { MarketingLead } = models;
+
+  await assertActiveUserIds(payload?.assigned_to, {
+    transaction,
+    models,
+    fieldLabel: "Assigned user",
+  });
 
   const lead = await MarketingLead.findOne({
     where: { id, deleted_at: null },
@@ -758,6 +771,11 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
     payment_type: normalizedPaymentType,
     status: payload?.status || undefined,
   };
+
+  await assertActiveUserIds(
+    [inquiryPayload.inquiry_by, inquiryPayload.handled_by, inquiryPayload.channel_partner],
+    { transaction, models, fieldLabel: "Selected user" }
+  );
 
   const inquiry = await Inquiry.create(inquiryPayload, { transaction });
 
@@ -1642,15 +1660,13 @@ const assignLeads = async ({ lead_ids, assigned_to, transaction } = {}) => {
     throw new AppError("assigned_to is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
   const models = getTenantModels();
-  const { MarketingLead, User } = models;
+  const { MarketingLead } = models;
 
-  const user = await User.findOne({
-    where: { id: assigned_to, deleted_at: null },
+  await assertActiveUserIds(assigned_to, {
     transaction,
+    models,
+    fieldLabel: "Assigned user",
   });
-  if (!user) {
-    throw new AppError("Assigned user not found", RESPONSE_STATUS_CODES.BAD_REQUEST);
-  }
 
   const [updatedCount] = await MarketingLead.update(
     { assigned_to },

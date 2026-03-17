@@ -9,6 +9,7 @@ const { getTenantModels } = require("../tenant/tenantModels.js");
 const { buildBomSnapshotFromProjectPrice } = require("../../common/utils/bomFromProjectPrice.js");
 const notificationService = require("../notification/notification.service.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
+const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -1181,6 +1182,20 @@ const createOrder = async ({ payload, transaction } = {}) => {
     let committedHere = !transaction;
 
     try {
+        await assertActiveUserIds(
+            [
+                payload?.inquiry_by,
+                payload?.handled_by,
+                payload?.channel_partner_id,
+                payload?.estimate_paid_by,
+                payload?.fabricator_installer_id,
+                payload?.fabricator_id,
+                payload?.installer_id,
+                payload?.service_assign_to,
+            ],
+            { transaction: t, models, fieldLabel: "Selected user" }
+        );
+
         // 1) Create or use existing customer
         let customerId = payload.customer_id;
 
@@ -1456,6 +1471,23 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             fabricatorId = fabricatorInstallerId;
             installerId = fabricatorInstallerId;
         }
+
+        // Validate any user assignments touched by this update. Keep existing values valid even if inactive.
+        await assertActiveUserIds(
+            [
+                payload?.inquiry_by,
+                payload?.handled_by,
+                payload?.channel_partner_id,
+                payload?.estimate_paid_by,
+                payload?.fabricator_installer_id,
+                payload?.fabricator_id,
+                payload?.installer_id,
+                payload?.service_assign_to,
+                payload?.fabricator_installer_are_same !== undefined ? fabricatorId : null,
+                payload?.fabricator_installer_are_same !== undefined ? installerId : null,
+            ],
+            { transaction: t, models, fieldLabel: "Selected user" }
+        );
 
         // Update linked customer if present
         if (order.customer_id) {

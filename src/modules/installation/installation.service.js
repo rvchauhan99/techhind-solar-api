@@ -2,6 +2,7 @@
 
 const orderService = require("../order/order.service.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
 
 /**
  * Get installation record by order id.
@@ -76,6 +77,12 @@ const createOrUpdate = async (orderId, payload, options = {}) => {
 
         const installerId = data.installer_id != null ? data.installer_id : order.installer_id || order.fabricator_installer_id;
         if (installerId != null) data.installer_id = installerId;
+
+        await assertActiveUserIds(installerId, {
+            transaction: t,
+            models,
+            fieldLabel: "Installer",
+        });
 
         let installation = await Installation.findOne({
             where: { order_id: orderId, deleted_at: null },

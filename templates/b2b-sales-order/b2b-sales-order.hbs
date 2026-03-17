@@ -139,8 +139,23 @@
         {{#if bank_details.bank_account_branch}}
           <p><span>Branch:</span><strong>{{safe bank_details.bank_account_branch}}</strong></p>
         {{/if}}
-        {{#if bank_details.upi_id}}
-          <p><span>UPI ID:</span><strong>{{safe bank_details.upi_id}}</strong></p>
+        {{#if bank_details.upi_qr_data_url}}
+        <div class="upi-qr-block">
+          <div class="upi-qr-image">
+            <img src="{{bank_details.upi_qr_data_url}}" alt="UPI QR Code" />
+          </div>
+          <div class="upi-qr-meta">
+            <p class="upi-title">Scan &amp; Pay via UPI</p>
+            {{#if bank_details.upi_logo_data_url}}
+            <div class="upi-logo">
+              <img src="{{bank_details.upi_logo_data_url}}" alt="UPI" />
+            </div>
+            {{/if}}
+            {{#if bank_details.upi_id}}
+            <p class="upi-id-text">{{safe bank_details.upi_id}}</p>
+            {{/if}}
+          </div>
+        </div>
         {{/if}}
       {{else}}
         <p class="muted">Bank details not configured.</p>

@@ -6,6 +6,7 @@ const { getTenantModels } = require("../tenant/tenantModels.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const { INQUIRY_STATUS } = require("../../common/utils/constants.js");
 const notificationService = require("../notification/notification.service.js");
+const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
 
 const listInquiries = async ({
   search,
@@ -495,6 +496,11 @@ const createInquiry = async ({ payload, transaction } = {}) => {
   let committedHere = !transaction;
 
   try {
+    await assertActiveUserIds(
+      [payload?.inquiry_by, payload?.handled_by, payload?.channel_partner],
+      { transaction: t, models, fieldLabel: "Selected user" }
+    );
+
     // 1) Create Customer from payload
     const customerPayload = {
       customer_name: payload.customer_name || null,
@@ -614,6 +620,11 @@ const updateInquiry = async ({ id, payload, transaction } = {}) => {
   let committedHere = !transaction;
 
   try {
+    await assertActiveUserIds(
+      [payload?.inquiry_by, payload?.handled_by, payload?.channel_partner],
+      { transaction: t, models, fieldLabel: "Selected user" }
+    );
+
     const inquiry = await Inquiry.findOne({
       where: { id, deleted_at: null },
       transaction: t,

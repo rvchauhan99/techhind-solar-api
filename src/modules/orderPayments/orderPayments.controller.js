@@ -175,12 +175,14 @@ const orderPaymentsController = {
         try {
             const { id } = req.params;
             const userId = req.user?.id;
+            const { approval_remarks } = req.body || {};
             if (!userId) {
                 throw new AppError("Unauthorized", 401);
             }
             const payment = await orderPaymentService.approvePayment({
                 id,
                 userId,
+                approvalRemarks: approval_remarks,
                 transaction: req.transaction,
                 req,
             });

@@ -2,6 +2,7 @@
 
 const orderService = require("../order/order.service.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
 
 /**
  * Get fabrication record by order id.
@@ -75,6 +76,12 @@ const createOrUpdate = async (orderId, payload, options = {}) => {
                 ? data.fabricator_id
                 : order.fabricator_id || order.fabricator_installer_id;
         if (fabricatorId != null) data.fabricator_id = fabricatorId;
+
+        await assertActiveUserIds(fabricatorId, {
+            transaction: t,
+            models,
+            fieldLabel: "Fabricator",
+        });
 
         let fabrication = await Fabrication.findOne({
             where: { order_id: orderId, deleted_at: null },
