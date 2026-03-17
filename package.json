@@ -27,7 +27,9 @@
     "order-import": "node scripts/order-import/import-orders.js",
     "settle-completed-payments": "node scripts/settle-completed-orders-payments/settle-completed-orders-payments.js",
     "cutover:users": "node scripts/cutover/load-user-master.js",
-    "cutover:inventory": "node scripts/cutover/load-inventory.js"
+    "cutover:inventory": "node scripts/cutover/load-inventory.js",
+    "report:available-serial-lengths": "node scripts/report-available-serial-lengths.js",
+    "correct-serial-numbers": "node scripts/correct-serial-numbers.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^143.0.4",
