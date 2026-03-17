@@ -60,6 +60,7 @@ const B2BSalesOrder = sequelize.define(
       defaultValue: "DRAFT",
     },
     remarks: { type: DataTypes.TEXT, allowNull: true },
+    terms_remarks: { type: DataTypes.TEXT, allowNull: true },
     user_id: {
       type: DataTypes.INTEGER,
       allowNull: true,

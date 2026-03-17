@@ -67,6 +67,10 @@ body {
   margin-top: 8px;
 }
 
+.grid-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
 .grid-3 {
   grid-template-columns: 1fr 1fr 1fr;
 }
@@ -175,4 +179,81 @@ body {
 
 .muted {
   color: #6b7280;
+}
+
+.terms-box {
+  border: 1px solid #d1d5db;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.terms-box h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.terms-box p {
+  margin: 3px 0;
+}
+
+.terms-box p span {
+  color: #4b5563;
+  margin-right: 6px;
+}
+
+.footer-sections {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 4fr 3fr;
+  gap: 8px;
+}
+
+.bank-details,
+.sign-block {
+  border: 1px solid #d1d5db;
+  padding: 8px;
+  min-height: 110px;
+}
+
+.bank-details h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.bank-details p {
+  margin: 3px 0;
+}
+
+.bank-details p span {
+  color: #4b5563;
+  margin-right: 6px;
+}
+
+.jurisdiction {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.sign-block .for-company {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.stamp-sign,
+.stamp,
+.signature {
+  display: block;
+  max-width: 120px;
+  max-height: 60px;
+  object-fit: contain;
+  margin: 0 auto 4px;
+}
+
+.authorized-text {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+.sign-block {
+  text-align: center;
 }

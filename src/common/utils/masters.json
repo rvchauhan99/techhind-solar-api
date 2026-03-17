@@ -314,5 +314,15 @@
         "required_fields": [
             "name"
         ]
+    },
+    {
+        "id": 37,
+        "name": "Terms & Conditions",
+        "model_name": "termsAndConditions.model",
+        "required_fields": [
+            "type",
+            "title",
+            "content"
+        ]
     }
 ]
