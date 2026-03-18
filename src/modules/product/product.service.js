@@ -174,6 +174,7 @@ const listProducts = async ({
       product_type_name: row.productType?.name || null,
       tracking_type: row.tracking_type ? row.tracking_type.toUpperCase() : "LOT",
       serial_required: row.serial_required,
+      serial_number_length: row.serial_number_length,
       product_make_id: row.product_make_id,
       product_make_name: row.productMake?.name || null,
       product_name: row.product_name,
@@ -230,6 +231,7 @@ const getProductById = async ({ id } = {}) => {
     product_type_name: row.productType?.name || null,
     tracking_type: row.tracking_type ? row.tracking_type.toUpperCase() : "LOT",
     serial_required: row.serial_required,
+    serial_number_length: row.serial_number_length,
     product_make_id: row.product_make_id,
     product_make_name: row.productMake?.name || null,
     product_name: row.product_name,
@@ -268,6 +270,12 @@ const createProduct = async ({ payload, transaction } = {}) => {
 
     // Auto-set serial_required based on tracking_type
     const serialRequired = trackingType === "SERIAL";
+    if (serialRequired) {
+      const len = payload.serial_number_length;
+      if (len == null || len === "" || Number(len) < 1) {
+        throw new Error("Serial number length is required and must be at least 1 when product is serialized");
+      }
+    }
 
     const productData = {
       product_type_id: payload.product_type_id,
@@ -285,6 +293,7 @@ const createProduct = async ({ payload, transaction } = {}) => {
       min_stock_quantity: payload.min_stock_quantity || 0,
       tracking_type: trackingType,
       serial_required: serialRequired,
+      serial_number_length: payload.serial_number_length !== undefined ? payload.serial_number_length : null,
       properties: payload.properties || null,
     };
 
@@ -342,11 +351,19 @@ const updateProduct = async ({ id, payload, transaction } = {}) => {
       serialRequired = payload.serial_required;
     }
 
+    if (serialRequired && payload.serial_number_length !== undefined) {
+      const len = payload.serial_number_length;
+      if (len == null || len === "" || Number(len) < 1) {
+        throw new Error("Serial number length must be at least 1 when product is serialized");
+      }
+    }
+
     await product.update(
       {
         product_type_id: payload.product_type_id ?? product.product_type_id,
         tracking_type: trackingType,
         serial_required: serialRequired,
+        serial_number_length: payload.serial_number_length !== undefined ? payload.serial_number_length : product.serial_number_length,
         product_make_id: payload.product_make_id ?? product.product_make_id,
         product_name: payload.product_name ?? product.product_name,
         product_description: payload.product_description !== undefined ? payload.product_description : product.product_description,
@@ -429,6 +446,7 @@ const exportProducts = async (params = {}) => {
     { header: "GST %", key: "gst_percent", width: 8 },
     { header: "Min Stock", key: "min_stock_quantity", width: 10 },
     { header: "Tracking Type", key: "tracking_type", width: 12 },
+    { header: "Serial Number Length", key: "serial_number_length", width: 18 },
     { header: "Active", key: "is_active", width: 8 },
     { header: "Created At", key: "created_at", width: 22 },
   ];
@@ -453,6 +471,7 @@ const exportProducts = async (params = {}) => {
       gst_percent: p.gst_percent != null ? p.gst_percent : "",
       min_stock_quantity: p.min_stock_quantity != null ? p.min_stock_quantity : "",
       tracking_type: p.tracking_type || "",
+      serial_number_length: p.serial_number_length != null ? p.serial_number_length : "",
       is_active: p.is_active ? "Yes" : "No",
       created_at: p.created_at ? new Date(p.created_at).toISOString() : "",
     });
@@ -469,6 +488,7 @@ const PRODUCT_IMPORT_CSV_HEADERS = [
   "capacity",
   "hsn_ssn_code",
   "tracking_type",
+  "serial_number_length",
   "gst_percent",
   "min_stock_quantity",
   "is_active",
@@ -497,6 +517,7 @@ function getSampleCsvBuffer() {
     "11",
     "854140",
     "LOT",
+    "",
     "18",
     "0",
     "true",
@@ -522,6 +543,7 @@ function getSampleCsvBuffer() {
     "3",
     "8504",
     "LOT",
+    "",
     "18",
     "0",
     "true",
@@ -644,6 +666,16 @@ async function importProductsFromCsv({ fileBuffer, req } = {}) {
       continue;
     }
 
+    let serialNumberLength = null;
+    if (trackingType === "SERIAL") {
+      const lenVal = parseNum(row.serial_number_length ?? row["Serial Number Length"] ?? null);
+      if (lenVal == null || lenVal < 1) {
+        errors.push({ row: rowNum, product_name: productName, message: "Serial number length is required and must be at least 1 when tracking type is SERIAL" });
+        continue;
+      }
+      serialNumberLength = lenVal;
+    }
+
     const gstPercent = parseNum(row.gst_percent ?? row["GST Percent"] ?? 0);
     if (gstPercent === null || gstPercent < 0) {
       errors.push({ row: rowNum, product_name: productName, message: "GST percent is required and must be >= 0" });
@@ -728,6 +760,7 @@ async function importProductsFromCsv({ fileBuffer, req } = {}) {
       min_stock_quantity: minStockQuantity,
       tracking_type: trackingType,
       serial_required: trackingType === "SERIAL",
+      serial_number_length: serialNumberLength,
       properties: payloadProperties,
     };
 
