@@ -165,10 +165,10 @@ const escapeSearchForLike = (s) => {
 const PAID_PAYMENT_WHERE =
     `order_payment_details.order_id = "Order".id AND order_payment_details.deleted_at IS NULL AND order_payment_details.status IN ('approved', 'pending_approval')`;
 
-/** Literal for "outstanding amount > 0": (project_cost - discount) - SUM(payment_amount for paid statuses) > 0 */
+/** Literal for "outstanding amount > 0": project_cost - SUM(payment_amount for paid statuses) > 0 */
 const getPaymentOutstandingLiteral = (models) =>
     models.sequelize.literal(
-        `(("Order".project_cost - COALESCE("Order".discount, 0)) - ` +
+        `(("Order".project_cost) - ` +
         `(SELECT COALESCE(SUM(payment_amount), 0) FROM order_payment_details WHERE ${PAID_PAYMENT_WHERE}) > 0)`
     );
 
