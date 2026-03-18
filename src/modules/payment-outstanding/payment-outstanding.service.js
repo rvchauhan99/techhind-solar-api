@@ -30,6 +30,8 @@ function buildCommonFilters(query = {}) {
   } = query;
 
   const where = {};
+  // Payment Outstanding should consider only fully delivered orders
+  where.delivery_status = "complete";
   if (status && status !== "all") where.status = status;
   if (branch_id) where.branch_id = branch_id;
   if (inquiry_source_id) where.inquiry_source_id = inquiry_source_id;
@@ -150,7 +152,7 @@ async function kpis(query) {
   )`;
 
   const replacements = {};
-  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL"];
+  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL", "o.delivery_status = 'complete'"];
   if (where.status) { whereClauses.push("o.status = :status"); replacements.status = where.status; }
   if (where.branch_id) { whereClauses.push("o.branch_id = :branch_id"); replacements.branch_id = where.branch_id; }
   if (where.inquiry_source_id) { whereClauses.push("o.inquiry_source_id = :inquiry_source_id"); replacements.inquiry_source_id = where.inquiry_source_id; }
@@ -213,7 +215,7 @@ async function trend(query) {
   )`;
 
   const replacements = {};
-  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL"];
+  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL", "o.delivery_status = 'complete'"];
   if (where.status) { whereClauses.push("o.status = :status"); replacements.status = where.status; }
   if (where.branch_id) { whereClauses.push("o.branch_id = :branch_id"); replacements.branch_id = where.branch_id; }
   if (where.inquiry_source_id) { whereClauses.push("o.inquiry_source_id = :inquiry_source_id"); replacements.inquiry_source_id = where.inquiry_source_id; }
@@ -259,6 +261,169 @@ async function trend(query) {
   return data;
 }
 
+async function analysis(query) {
+  const db = getDb();
+  const where = buildCommonFilters(query);
+  const paidSubquery = `(
+    SELECT COALESCE(SUM(opd.payment_amount), 0)
+    FROM order_payment_details opd
+    WHERE opd.order_id = o.id
+      AND opd.status = '${APPROVED_STATUS}'
+      AND opd.deleted_at IS NULL
+  )`;
+
+  const outstandingExpr = `GREATEST(o.project_cost - ${paidSubquery}, 0)`;
+
+  const replacements = {};
+  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL", "o.delivery_status = 'complete'"];
+  if (where.status) { whereClauses.push("o.status = :status"); replacements.status = where.status; }
+  if (where.branch_id) { whereClauses.push("o.branch_id = :branch_id"); replacements.branch_id = where.branch_id; }
+  if (where.inquiry_source_id) { whereClauses.push("o.inquiry_source_id = :inquiry_source_id"); replacements.inquiry_source_id = where.inquiry_source_id; }
+  if (where.handled_by) { whereClauses.push("o.handled_by = :handled_by"); replacements.handled_by = where.handled_by; }
+  if (where.payment_type) { whereClauses.push("o.payment_type = :payment_type"); replacements.payment_type = where.payment_type; }
+  if (where.loan_type_id) { whereClauses.push("o.loan_type_id = :loan_type_id"); replacements.loan_type_id = where.loan_type_id; }
+  if (where.current_stage_key) { whereClauses.push("o.current_stage_key = :current_stage_key"); replacements.current_stage_key = where.current_stage_key; }
+  if (query.order_number) { whereClauses.push("o.order_number ILIKE :order_number"); replacements.order_number = `%${query.order_number}%`; }
+  if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
+  if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
+  if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
+  if (where.order_date?.[Op.gte]) { whereClauses.push("o.order_date >= :order_date_from"); replacements.order_date_from = where.order_date[Op.gte]; }
+  if (where.order_date?.[Op.lte]) { whereClauses.push("o.order_date <= :order_date_to"); replacements.order_date_to = where.order_date[Op.lte]; }
+  if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
+  if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
+  if (query.q) {
+    whereClauses.push(`(
+      o.order_number ILIKE :q
+      OR o.consumer_no ILIKE :q
+      OR o.application_no ILIKE :q
+      OR c.customer_name ILIKE :q
+      OR c.mobile_number ILIKE :q
+    )`);
+    replacements.q = `%${query.q}%`;
+  }
+
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+  const [base] = await db.sequelize.query(
+    `
+    SELECT
+      COALESCE(SUM(${outstandingExpr}), 0) AS total_outstanding,
+      COALESCE(SUM(CASE WHEN o.payment_type = 'Direct Payment' THEN ${outstandingExpr} ELSE 0 END), 0) AS direct_outstanding,
+      COALESCE(SUM(CASE WHEN o.payment_type = 'Loan' THEN ${outstandingExpr} ELSE 0 END), 0) AS loan_outstanding,
+      COALESCE(SUM(CASE WHEN o.payment_type = 'PDC' THEN ${outstandingExpr} ELSE 0 END), 0) AS pdc_outstanding,
+      COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS order_count
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    ${whereSql}
+    `,
+    { replacements, type: Sequelize.QueryTypes.SELECT }
+  );
+
+  const byPeriod = await db.sequelize.query(
+    `
+    SELECT
+      to_char(date_trunc('month', o.order_date), 'YYYY-MM') AS period,
+      COALESCE(SUM(${outstandingExpr}), 0) AS amount,
+      COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    ${whereSql}
+    GROUP BY 1
+    ORDER BY 1 ASC
+    `,
+    { replacements, type: Sequelize.QueryTypes.SELECT }
+  );
+
+  const byPaymentTypeRows = await db.sequelize.query(
+    `
+    SELECT
+      COALESCE(o.payment_type, 'Unknown') AS key,
+      COALESCE(SUM(${outstandingExpr}), 0) AS amount,
+      COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    ${whereSql}
+    GROUP BY 1
+    ORDER BY 2 DESC
+    `,
+    { replacements, type: Sequelize.QueryTypes.SELECT }
+  );
+
+  const byBranchRows = await db.sequelize.query(
+    `
+    SELECT
+      COALESCE(cb.name, 'Unknown') AS key,
+      COALESCE(SUM(${outstandingExpr}), 0) AS amount,
+      COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN company_branches cb ON cb.id = o.branch_id
+    ${whereSql}
+    GROUP BY 1
+    ORDER BY 2 DESC
+    `,
+    { replacements, type: Sequelize.QueryTypes.SELECT }
+  );
+
+  const byHandledRows = await db.sequelize.query(
+    `
+    SELECT
+      COALESCE(u.name, 'Unknown') AS key,
+      COALESCE(SUM(${outstandingExpr}), 0) AS amount,
+      COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN users u ON u.id = o.handled_by
+    ${whereSql}
+    GROUP BY 1
+    ORDER BY 2 DESC
+    `,
+    { replacements, type: Sequelize.QueryTypes.SELECT }
+  );
+
+  const byStageRows = await db.sequelize.query(
+    `
+    SELECT
+      COALESCE(o.current_stage_key, 'unknown') AS key,
+      COALESCE(SUM(${outstandingExpr}), 0) AS amount,
+      COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
+    FROM orders o
+    LEFT JOIN customers c ON c.id = o.customer_id
+    ${whereSql}
+    GROUP BY 1
+    ORDER BY 2 DESC
+    `,
+    { replacements, type: Sequelize.QueryTypes.SELECT }
+  );
+
+  const asMap = (rows = []) => {
+    const out = {};
+    rows.forEach((r) => {
+      const key = r.key ?? r.name ?? r.label ?? "Unknown";
+      out[key] = { amount: Number(r.amount || 0), count: Number(r.count || 0) };
+    });
+    return out;
+  };
+
+  const byPaymentType = {};
+  (byPaymentTypeRows || []).forEach((r) => {
+    byPaymentType[r.key || "Unknown"] = Number(r.amount || 0);
+  });
+
+  return {
+    total_outstanding: Number(base?.total_outstanding || 0),
+    direct_outstanding: Number(base?.direct_outstanding || 0),
+    loan_outstanding: Number(base?.loan_outstanding || 0),
+    pdc_outstanding: Number(base?.pdc_outstanding || 0),
+    order_count: Number(base?.order_count || 0),
+    by_period: (byPeriod || []).map((r) => ({ period: r.period, amount: Number(r.amount || 0), count: Number(r.count || 0) })),
+    by_payment_type: byPaymentType,
+    by_branch: asMap(byBranchRows || []),
+    by_handled_by: asMap(byHandledRows || []),
+    by_stage: asMap(byStageRows || []),
+  };
+}
+
 async function listFollowUps(orderId, query = {}) {
   const db = getDb();
   const limit = Math.min(Number(query.limit || 100), 200);
@@ -291,6 +456,7 @@ module.exports = {
   listOutstanding,
   kpis,
   trend,
+  analysis,
   listFollowUps,
   createFollowUp,
 };
