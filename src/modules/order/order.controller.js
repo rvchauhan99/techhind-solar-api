@@ -442,6 +442,19 @@ const getInverters = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, result, "Inverters fetched", 200);
 });
 
+const forceCompleteDelivery = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await orderService.getOrderById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Order not found", 404);
+    }
+    const result = await orderService.forceCompleteDelivery({
+        id,
+        transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, result, "Delivery marked as complete", 200);
+});
+
 module.exports = {
     list,
     exportList,
@@ -459,4 +472,5 @@ module.exports = {
     listDeliveryExecution,
     listFabricationInstallation,
     generatePDF,
+    forceCompleteDelivery,
 };
