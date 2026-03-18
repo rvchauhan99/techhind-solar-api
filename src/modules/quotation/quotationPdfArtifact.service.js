@@ -9,7 +9,7 @@ const { getModelsForSequelize } = require("../tenant/tenantModels.js");
 const bucketClientFactory = require("../tenant/bucketClientFactory.js");
 
 /** Bump when PDF content/template logic changes so cache is invalidated and new PDFs use updated code. */
-const PDF_CONTENT_VERSION = "2";
+const PDF_CONTENT_VERSION = "3";
 
 function buildVersionKey({ quotation, template, company, bankAccount }) {
   const configUpdatedAt =
