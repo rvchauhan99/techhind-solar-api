@@ -30,6 +30,15 @@ async function trend(req, res, next) {
   }
 }
 
+async function analysis(req, res, next) {
+  try {
+    const result = await service.analysis(req.query || {});
+    res.json({ status: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function exportList(req, res, next) {
   try {
     const result = await service.listOutstanding({ ...req.query, page: 1, limit: 10000 });
@@ -81,6 +90,7 @@ module.exports = {
   list,
   kpis,
   trend,
+  analysis,
   exportList,
   listFollowUps,
   createFollowUp,

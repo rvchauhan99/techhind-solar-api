@@ -13,6 +13,7 @@ const ORDER_RELATED_MODULES = ["/order", "/confirm-orders", "/closed-orders"];
 router.get("/", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ORDER_RELATED_MODULES }), ctrl.list);
 router.get("/kpis", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ORDER_RELATED_MODULES }), ctrl.kpis);
 router.get("/trend", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ORDER_RELATED_MODULES }), ctrl.trend);
+router.get("/analysis", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ORDER_RELATED_MODULES }), ctrl.analysis);
 router.get("/export", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ORDER_RELATED_MODULES }), ctrl.exportList);
 
 router.get("/:order_id/followups", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ORDER_RELATED_MODULES }), ctrl.listFollowUps);
