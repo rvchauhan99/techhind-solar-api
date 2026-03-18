@@ -1,0 +1,298 @@
+{
+	"info": {
+		"_postman_id": "796943d6-ee7e-49ac-9aad-5d3507ecb8a1",
+		"name": "TechHind Solar - PO Inwards",
+		"description": "API collection for Goods Receipt/PO Inward management, including listing, creation, and approval.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "List PO Inwards",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards?page=1&limit=20&status=DRAFT",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards"
+					],
+					"query": [
+						{
+							"key": "page",
+							"value": "1"
+						},
+						{
+							"key": "limit",
+							"value": "20"
+						},
+						{
+							"key": "status",
+							"value": "DRAFT"
+						},
+						{
+							"key": "q",
+							"value": "",
+							"disabled": true
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Export PO Inwards",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards/export",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards",
+						"export"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get PO Details for Inward",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards/po-details/:id",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards",
+						"po-details",
+						":id"
+					],
+					"variable": [
+						{
+							"key": "id",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create PO Inward",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"purchase_order_id\": 1,\n  \"warehouse_id\": 1,\n  \"supplier_id\": 1,\n  \"received_at\": \"2026-03-18\",\n  \"supplier_invoice_number\": \"INV-123\",\n  \"supplier_invoice_date\": \"2026-03-17\",\n  \"inspection_required\": false,\n  \"remarks\": \"Sample inward\",\n  \"total_received_quantity\": 10,\n  \"total_accepted_quantity\": 10,\n  \"total_rejected_quantity\": 0,\n  \"items\": [\n    {\n      \"purchase_order_item_id\": 1,\n      \"product_id\": 1,\n      \"tracking_type\": \"SERIAL\",\n      \"serial_required\": true,\n      \"ordered_quantity\": 10,\n      \"received_quantity\": 5,\n      \"accepted_quantity\": 5,\n      \"rejected_quantity\": 0,\n      \"rate\": 100.0,\n      \"gst_percent\": 18.0,\n      \"taxable_amount\": 500.0,\n      \"gst_amount\": 90.0,\n      \"total_amount\": 590.0,\n      \"serials\": [\n        { \"serial_number\": \"SN001\" },\n        { \"serial_number\": \"SN002\" },\n        { \"serial_number\": \"SN003\" },\n        { \"serial_number\": \"SN004\" },\n        { \"serial_number\": \"SN005\" }\n      ],\n      \"remarks\": \"\"\n    }\n  ]\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get PO Inward Details",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards/:id",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards",
+						":id"
+					],
+					"variable": [
+						{
+							"key": "id",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Update PO Inward",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"remarks\": \"Updated remarks\"\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards/:id",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards",
+						":id"
+					],
+					"variable": [
+						{
+							"key": "id",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Approve PO Inward",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards/:id/approve",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards",
+						":id",
+						"approve"
+					],
+					"variable": [
+						{
+							"key": "id",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Validate Serials",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{accessToken}}"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"product_id\": 1,\n  \"serial_numbers\": [\"SN001\", \"SN002\", \"SN003\"],\n  \"po_inward_id\": null\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/po-inwards/validate-serials",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"po-inwards",
+						"validate-serials"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"pm.request.headers.add({key: 'x-tenant-id', value: pm.collectionVariables.get('tenant_key')});",
+					"pm.request.headers.add({key: 'x-tenant-key', value: pm.collectionVariables.get('tenant_key')});"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:5000",
+			"type": "string"
+		},
+		{
+			"key": "accessToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "tenant_key",
+			"value": "demo",
+			"type": "string"
+		}
+	]
+}
