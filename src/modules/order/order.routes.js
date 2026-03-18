@@ -34,6 +34,12 @@ router.get("/fabrication-installation", ...requireAuthWithTenant, orderReadAny, 
 router.get("/solar-panels", ...requireAuthWithTenant, pendingOrders("read"), controller.getSolarPanels);
 router.get("/inverters", ...requireAuthWithTenant, pendingOrders("read"), controller.getInverters);
 router.post("/", ...requireAuthWithTenant, pendingOrders("create"), controller.create);
+router.post(
+  "/:id/force-complete-delivery",
+  ...requireAuthWithTenant,
+  orderUpdateAny,
+  controller.forceCompleteDelivery
+);
 router.get("/:id/fabrication", ...requireAuthWithTenant, orderReadAny, fabricationController.getByOrderId);
 router.put("/:id/fabrication", ...requireAuthWithTenant, orderUpdateAny, fabricationController.createOrUpdate);
 router.get("/:id/installation", ...requireAuthWithTenant, orderReadAny, installationController.getByOrderId);
