@@ -316,6 +316,8 @@ const listOrders = async ({
     project_cost_op,
     project_cost_to,
     handled_by,
+    cancelled_stage,
+    cancelled_at_stage_key,
     enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
     const models = getTenantModels();
@@ -367,6 +369,20 @@ const listOrders = async ({
 
     if (reference_from) {
         where.reference_from = { [Op.iLike]: `%${reference_from}%` };
+    }
+
+    if (status === "cancelled") {
+        if (cancelled_stage) {
+            where.cancelled_stage = cancelled_stage;
+        }
+        if (cancelled_at_stage_key != null && String(cancelled_at_stage_key).trim() !== "") {
+            const key = String(cancelled_at_stage_key).trim();
+            if (key === "__none__") {
+                where.cancelled_at_stage_key = { [Op.is]: null };
+            } else {
+                where.cancelled_at_stage_key = key;
+            }
+        }
     }
 
     if (current_stage_key != null && String(current_stage_key).trim() !== "") {
@@ -484,6 +500,7 @@ const listOrders = async ({
         { model: User, as: "inquiryBy", attributes: ["id", "name"], required: false },
         { model: User, as: "handledBy", attributes: ["id", "name"], required: false },
         { model: User, as: "channelPartner", attributes: ["id", "name"], required: false },
+        { model: User, as: "cancelledByUser", attributes: ["id", "name"], required: false },
         { model: InquirySource, as: "inquirySource", attributes: ["id", "source_name"], required: false },
         { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
         { model: ProjectScheme, as: "projectScheme", attributes: ["id", "name"], required: false },
@@ -582,6 +599,13 @@ const listOrders = async ({
             current_stage_key: row.current_stage_key || null,
 
             bom_snapshot: normalizeOrderBomSnapshot(row.bom_snapshot) ?? null,
+
+            // Cancellation details
+            cancelled_at: row.cancelled_at || null,
+            cancelled_by_name: row.cancelledByUser?.name || null,
+            cancelled_stage: row.cancelled_stage || null,
+            cancelled_at_stage_key: row.cancelled_at_stage_key || null,
+            cancellation_reason: row.cancellation_reason || null,
 
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -2623,6 +2647,80 @@ const getInverters = async () => {
     }));
 };
 
+/**
+ * Cancel an order.
+ * Rules:
+ * - Only pending or confirmed orders can be cancelled.
+ * - Orders with any delivered material (delivery_status = 'partial' or 'complete') cannot be cancelled.
+ * - Completed orders cannot be cancelled.
+ */
+const cancelOrder = async ({ id, payload = {}, transaction, user }) => {
+    const models = getTenantModels();
+    const { Order } = models;
+    const txOptions = transaction ? { transaction } : {};
+
+    const order = await Order.findOne({
+        where: { id, deleted_at: null },
+        ...txOptions,
+    });
+    if (!order) {
+        const error = new Error("Order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const status = String(order.status || "").toLowerCase();
+    const deliveryStatus = String(order.delivery_status || "").toLowerCase();
+
+    if (status === "cancelled") {
+        const error = new Error("Order is already cancelled");
+        error.statusCode = 400;
+        throw error;
+    }
+    if (status === "completed") {
+        const error = new Error("Completed orders cannot be cancelled");
+        error.statusCode = 400;
+        throw error;
+    }
+    if (deliveryStatus === "partial" || deliveryStatus === "complete") {
+        const error = new Error("Cannot cancel order because material has been delivered");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    let cancelledStage = null;
+    if (status === "pending") {
+        cancelledStage = "before_confirmation";
+    } else if (status === "confirmed") {
+        cancelledStage = "after_confirmation";
+    } else {
+        // For any other legacy/custom status, keep stage null but still allow cancellation
+        cancelledStage = null;
+    }
+
+    const cancellationReason =
+        payload.cancellation_reason != null
+            ? String(payload.cancellation_reason).slice(0, 2000)
+            : order.cancellation_reason;
+
+    await order.update(
+        {
+            status: "cancelled",
+            cancelled_at: new Date(),
+            cancelled_by: user?.id ?? order.cancelled_by ?? null,
+            cancelled_stage: cancelledStage,
+            // For pending (before_confirmation) orders, no stage has been reached yet → keep null.
+            // For confirmed (after_confirmation) orders, remember the exact stage where it was cancelled.
+            cancelled_at_stage_key:
+                cancelledStage === "after_confirmation" ? (order.current_stage_key || null) : null,
+            cancellation_reason: cancellationReason,
+        },
+        txOptions
+    );
+
+    return order.toJSON ? order.toJSON() : order;
+};
+
 module.exports = {
     listOrders,
     exportOrders,
@@ -2633,6 +2731,7 @@ module.exports = {
     forceCompleteDelivery,
     getSolarPanels,
     getInverters,
+    cancelOrder,
     listPendingDeliveryOrders,
     listDeliveryExecutionOrders,
     listFabricationInstallationOrders,

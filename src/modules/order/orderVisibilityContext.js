@@ -4,7 +4,7 @@ const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
 
 /** Same set as order-payments/challan/order-documents: resolve visibility from first matching order-page module. */
-const ORDER_PAGE_MODULE_ROUTES = ["/order", "/confirm-orders", "/closed-orders", "/fabrication-installation", "/delivery-challans", "/delivery-execution"];
+const ORDER_PAGE_MODULE_ROUTES = ["/order", "/confirm-orders", "/closed-orders", "/cancelled-orders", "/fabrication-installation", "/delivery-challans", "/delivery-execution"];
 
 /**
  * Resolve listing criteria and enforced handled_by ids for order module (used for list and single-record access).
