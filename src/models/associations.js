@@ -505,6 +505,7 @@ module.exports = (db) => {
     Order.belongsTo(User, { foreignKey: "inquiry_by", as: "inquiryBy" });
     Order.belongsTo(User, { foreignKey: "handled_by", as: "handledBy" });
     Order.belongsTo(User, { foreignKey: "channel_partner_id", as: "channelPartner" });
+    Order.belongsTo(User, { foreignKey: "cancelled_by", as: "cancelledByUser" });
   }
   if (Order && InquirySource) {
     Order.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });

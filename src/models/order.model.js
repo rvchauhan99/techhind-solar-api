@@ -566,6 +566,30 @@ const Order = sequelize.define(
             allowNull: true,
         },
 
+        // Cancellation tracking
+        cancelled_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        cancelled_by: {
+            type: DataTypes.BIGINT,
+            allowNull: true,
+        },
+        cancelled_stage: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            comment: "High-level stage: before_confirmation | after_confirmation",
+        },
+        cancelled_at_stage_key: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            comment: "Exact pipeline stage key when cancelled, e.g. estimate_generated, planner, delivery",
+        },
+        cancellation_reason: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+
         created_at: {
             type: DataTypes.DATE,
             defaultValue: DataTypes.NOW,

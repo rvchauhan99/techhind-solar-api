@@ -177,6 +177,14 @@ module.exports = {
         status: "active",
       },
       {
+        name: "Cancelled Orders",
+        key: "cancelled_orders",
+        parent_id: parentMap["order_management"],
+        icon: "closed_orders",
+        route: "/cancelled-orders",
+        status: "active",
+      },
+      {
         name: "Inquiry",
         key: "inquiry",
         parent_id: parentMap["inquiry_management"],
