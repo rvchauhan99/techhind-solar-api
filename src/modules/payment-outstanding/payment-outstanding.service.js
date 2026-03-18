@@ -3,7 +3,23 @@
 const { Op, Sequelize } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
-const APPROVED_STATUS = "approved";
+const PAID_STATUSES = ["approved", "pending_approval"];
+const PAID_STATUSES_SQL = PAID_STATUSES.map((s) => `'${s}'`).join(", ");
+
+function normalizedPaymentTypeSql(columnSql) {
+  // Normalize free-text `orders.payment_type` into stable buckets.
+  // Matches combined strings like "Loan + PDC Payment".
+  //
+  // NOTE: order matters (we check direct/loan/pdc; any non-matching becomes Unknown)
+  return `(
+    CASE
+      WHEN ${columnSql} ILIKE '%direct%' THEN 'Direct'
+      WHEN ${columnSql} ILIKE '%loan%' THEN 'Loan'
+      WHEN ${columnSql} ILIKE '%pdc%' THEN 'PDC'
+      ELSE 'Unknown'
+    END
+  )`;
+}
 
 function getDb() {
   return getTenantModels();
@@ -30,13 +46,47 @@ function buildCommonFilters(query = {}) {
   } = query;
 
   const where = {};
-  // Payment Outstanding should consider only fully delivered orders
-  where.delivery_status = "complete";
-  if (status && status !== "all") where.status = status;
+
+  // Hard eligibility (business rule):
+  // - include completed orders where payment is outstanding
+  // - include active orders only when delivery is complete (and payment is outstanding)
+  // - never include cancelled orders
+  where[Op.and] = where[Op.and] || [];
+  where[Op.and].push({
+    [Op.or]: [
+      { status: "completed" },
+      {
+        status: { [Op.notIn]: ["completed", "cancelled"] },
+        delivery_status: "complete",
+      },
+    ],
+  });
+
+  // Optional user status filter (narrows further)
+  // NOTE: OrderListFilterPanel sends status="active" to mean "not completed/cancelled"
+  if (status && status !== "all") {
+    if (status === "active") {
+      where.status = { [Op.notIn]: ["completed", "cancelled"] };
+      where.delivery_status = "complete";
+    } else {
+      where.status = status;
+    }
+  }
   if (branch_id) where.branch_id = branch_id;
   if (inquiry_source_id) where.inquiry_source_id = inquiry_source_id;
   if (handled_by) where.handled_by = handled_by;
-  if (payment_type) where.payment_type = payment_type;
+  if (payment_type) {
+    const pt = String(payment_type);
+    const like =
+      pt === "Direct Payment"
+        ? "%direct%"
+        : pt === "Loan"
+          ? "%loan%"
+          : pt === "PDC"
+            ? "%pdc%"
+            : `%${pt}%`;
+    where.payment_type = { [Op.iLike || Op.like]: like };
+  }
   if (loan_type_id) where.loan_type_id = loan_type_id;
   if (order_number) where.order_number = { [Op.iLike || Op.like]: `%${order_number}%` };
   if (consumer_no) where.consumer_no = { [Op.iLike || Op.like]: `%${consumer_no}%` };
@@ -84,20 +134,23 @@ async function listOutstanding(query) {
 
   const where = buildCommonFilters(query);
 
-  // Sum of approved payments per order (string for reuse in attributes/where)
+  // Sum of paid payments per order (approved + pending_approval) (string for reuse in attributes/where)
   const paidSubquerySql = `(
     SELECT COALESCE(SUM(opd.payment_amount), 0)
     FROM order_payment_details opd
     WHERE opd.order_id = "Order"."id"
-      AND opd.status = '${APPROVED_STATUS}'
+      AND opd.status IN (${PAID_STATUSES_SQL})
       AND opd.deleted_at IS NULL
   )`;
 
   // Filter in WHERE instead of HAVING to avoid PostgreSQL "must appear in GROUP BY" error
-  where[Op.and] = Sequelize.where(
-    Sequelize.literal(`"Order"."project_cost" - ${paidSubquerySql}`),
-    Op.gt,
-    0
+  where[Op.and] = where[Op.and] || [];
+  where[Op.and].push(
+    Sequelize.where(
+      Sequelize.literal(`"Order"."project_cost" - ${paidSubquerySql}`),
+      Op.gt,
+      0
+    )
   );
 
   const attributes = [
@@ -147,25 +200,46 @@ async function kpis(query) {
     SELECT COALESCE(SUM(opd.payment_amount), 0)
     FROM order_payment_details opd
     WHERE opd.order_id = o.id
-      AND opd.status = '${APPROVED_STATUS}'
+      AND opd.status IN (${PAID_STATUSES_SQL})
       AND opd.deleted_at IS NULL
   )`;
 
   const replacements = {};
-  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL", "o.delivery_status = 'complete'"];
-  if (where.status) { whereClauses.push("o.status = :status"); replacements.status = where.status; }
+  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL"];
+  whereClauses.push(
+    "(o.status = 'completed' OR (o.status NOT IN ('completed','cancelled') AND o.delivery_status = 'complete'))"
+  );
+  if (query.status === "active") {
+    whereClauses.push("o.status NOT IN ('completed','cancelled')");
+    whereClauses.push("o.delivery_status = 'complete'");
+  } else if (query.status === "completed") {
+    whereClauses.push("o.status = 'completed'");
+  } else if (query.status === "cancelled") {
+    whereClauses.push("o.status = 'cancelled'");
+  }
   if (where.branch_id) { whereClauses.push("o.branch_id = :branch_id"); replacements.branch_id = where.branch_id; }
   if (where.inquiry_source_id) { whereClauses.push("o.inquiry_source_id = :inquiry_source_id"); replacements.inquiry_source_id = where.inquiry_source_id; }
   if (where.handled_by) { whereClauses.push("o.handled_by = :handled_by"); replacements.handled_by = where.handled_by; }
-  if (where.payment_type) { whereClauses.push("o.payment_type = :payment_type"); replacements.payment_type = where.payment_type; }
+  if (query.payment_type) {
+    const pt = String(query.payment_type);
+    const like =
+      pt === "Direct Payment"
+        ? "%direct%"
+        : pt === "Loan"
+          ? "%loan%"
+          : pt === "PDC"
+            ? "%pdc%"
+            : `%${pt}%`;
+    whereClauses.push("COALESCE(o.payment_type,'') ILIKE :payment_type_like");
+    replacements.payment_type_like = like;
+  }
   if (where.loan_type_id) { whereClauses.push("o.loan_type_id = :loan_type_id"); replacements.loan_type_id = where.loan_type_id; }
   if (where.current_stage_key) { whereClauses.push("o.current_stage_key = :current_stage_key"); replacements.current_stage_key = where.current_stage_key; }
   if (query.order_number) { whereClauses.push("o.order_number ILIKE :order_number"); replacements.order_number = `%${query.order_number}%`; }
   if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
   if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
-  if (where.order_date?.[Op.gte]) { whereClauses.push("o.order_date >= :order_date_from"); replacements.order_date_from = where.order_date[Op.gte]; }
-  if (where.order_date?.[Op.lte]) { whereClauses.push("o.order_date <= :order_date_to"); replacements.order_date_to = where.order_date[Op.lte]; }
+  // NOTE: Trend must always show full history; ignore order_date filters here.
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
   if (query.q) {
@@ -180,14 +254,17 @@ async function kpis(query) {
   }
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const normPayType = normalizedPaymentTypeSql("COALESCE(o.payment_type,'')");
+  const outExpr = `GREATEST(o.project_cost - ${paidSubquery}, 0)`;
 
   const [rows] = await db.sequelize.query(
     `
     SELECT
-      COALESCE(SUM(GREATEST(o.project_cost - ${paidSubquery}, 0)), 0) AS total_outstanding,
-      COALESCE(SUM(CASE WHEN o.payment_type = 'Direct Payment' THEN GREATEST(o.project_cost - ${paidSubquery}, 0) ELSE 0 END), 0) AS direct_outstanding,
-      COALESCE(SUM(CASE WHEN o.payment_type = 'Loan' THEN GREATEST(o.project_cost - ${paidSubquery}, 0) ELSE 0 END), 0) AS loan_outstanding,
-      COALESCE(SUM(CASE WHEN o.payment_type = 'PDC' THEN GREATEST(o.project_cost - ${paidSubquery}, 0) ELSE 0 END), 0) AS pdc_outstanding
+      COALESCE(SUM(${outExpr}), 0) AS total_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'Direct' THEN ${outExpr} ELSE 0 END), 0) AS direct_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'Loan' THEN ${outExpr} ELSE 0 END), 0) AS loan_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'PDC' THEN ${outExpr} ELSE 0 END), 0) AS pdc_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'Unknown' THEN ${outExpr} ELSE 0 END), 0) AS unknown_outstanding
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customer_id
     ${whereSql}
@@ -200,6 +277,7 @@ async function kpis(query) {
     direct_outstanding: 0,
     loan_outstanding: 0,
     pdc_outstanding: 0,
+    unknown_outstanding: 0,
   };
 }
 
@@ -210,25 +288,46 @@ async function trend(query) {
     SELECT COALESCE(SUM(opd.payment_amount), 0)
     FROM order_payment_details opd
     WHERE opd.order_id = o.id
-      AND opd.status = '${APPROVED_STATUS}'
+      AND opd.status IN (${PAID_STATUSES_SQL})
       AND opd.deleted_at IS NULL
   )`;
 
   const replacements = {};
-  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL", "o.delivery_status = 'complete'"];
-  if (where.status) { whereClauses.push("o.status = :status"); replacements.status = where.status; }
+  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL"];
+  whereClauses.push(
+    "(o.status = 'completed' OR (o.status NOT IN ('completed','cancelled') AND o.delivery_status = 'complete'))"
+  );
+  if (query.status === "active") {
+    whereClauses.push("o.status NOT IN ('completed','cancelled')");
+    whereClauses.push("o.delivery_status = 'complete'");
+  } else if (query.status === "completed") {
+    whereClauses.push("o.status = 'completed'");
+  } else if (query.status === "cancelled") {
+    whereClauses.push("o.status = 'cancelled'");
+  }
   if (where.branch_id) { whereClauses.push("o.branch_id = :branch_id"); replacements.branch_id = where.branch_id; }
   if (where.inquiry_source_id) { whereClauses.push("o.inquiry_source_id = :inquiry_source_id"); replacements.inquiry_source_id = where.inquiry_source_id; }
   if (where.handled_by) { whereClauses.push("o.handled_by = :handled_by"); replacements.handled_by = where.handled_by; }
-  if (where.payment_type) { whereClauses.push("o.payment_type = :payment_type"); replacements.payment_type = where.payment_type; }
+  if (query.payment_type) {
+    const pt = String(query.payment_type);
+    const like =
+      pt === "Direct Payment"
+        ? "%direct%"
+        : pt === "Loan"
+          ? "%loan%"
+          : pt === "PDC"
+            ? "%pdc%"
+            : `%${pt}%`;
+    whereClauses.push("COALESCE(o.payment_type,'') ILIKE :payment_type_like");
+    replacements.payment_type_like = like;
+  }
   if (where.loan_type_id) { whereClauses.push("o.loan_type_id = :loan_type_id"); replacements.loan_type_id = where.loan_type_id; }
   if (where.current_stage_key) { whereClauses.push("o.current_stage_key = :current_stage_key"); replacements.current_stage_key = where.current_stage_key; }
   if (query.order_number) { whereClauses.push("o.order_number ILIKE :order_number"); replacements.order_number = `%${query.order_number}%`; }
   if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
   if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
-  if (where.order_date?.[Op.gte]) { whereClauses.push("o.order_date >= :order_date_from"); replacements.order_date_from = where.order_date[Op.gte]; }
-  if (where.order_date?.[Op.lte]) { whereClauses.push("o.order_date <= :order_date_to"); replacements.order_date_to = where.order_date[Op.lte]; }
+  // NOTE: Trend must always show full history; ignore order_date filters here.
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
   if (query.q) {
@@ -268,19 +367,41 @@ async function analysis(query) {
     SELECT COALESCE(SUM(opd.payment_amount), 0)
     FROM order_payment_details opd
     WHERE opd.order_id = o.id
-      AND opd.status = '${APPROVED_STATUS}'
+      AND opd.status IN (${PAID_STATUSES_SQL})
       AND opd.deleted_at IS NULL
   )`;
 
   const outstandingExpr = `GREATEST(o.project_cost - ${paidSubquery}, 0)`;
 
   const replacements = {};
-  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL", "o.delivery_status = 'complete'"];
-  if (where.status) { whereClauses.push("o.status = :status"); replacements.status = where.status; }
+  const whereClauses = ["o.deleted_at IS NULL", "c.deleted_at IS NULL"];
+  whereClauses.push(
+    "(o.status = 'completed' OR (o.status NOT IN ('completed','cancelled') AND o.delivery_status = 'complete'))"
+  );
+  if (query.status === "active") {
+    whereClauses.push("o.status NOT IN ('completed','cancelled')");
+    whereClauses.push("o.delivery_status = 'complete'");
+  } else if (query.status === "completed") {
+    whereClauses.push("o.status = 'completed'");
+  } else if (query.status === "cancelled") {
+    whereClauses.push("o.status = 'cancelled'");
+  }
   if (where.branch_id) { whereClauses.push("o.branch_id = :branch_id"); replacements.branch_id = where.branch_id; }
   if (where.inquiry_source_id) { whereClauses.push("o.inquiry_source_id = :inquiry_source_id"); replacements.inquiry_source_id = where.inquiry_source_id; }
   if (where.handled_by) { whereClauses.push("o.handled_by = :handled_by"); replacements.handled_by = where.handled_by; }
-  if (where.payment_type) { whereClauses.push("o.payment_type = :payment_type"); replacements.payment_type = where.payment_type; }
+  if (query.payment_type) {
+    const pt = String(query.payment_type);
+    const like =
+      pt === "Direct Payment"
+        ? "%direct%"
+        : pt === "Loan"
+          ? "%loan%"
+          : pt === "PDC"
+            ? "%pdc%"
+            : `%${pt}%`;
+    whereClauses.push("COALESCE(o.payment_type,'') ILIKE :payment_type_like");
+    replacements.payment_type_like = like;
+  }
   if (where.loan_type_id) { whereClauses.push("o.loan_type_id = :loan_type_id"); replacements.loan_type_id = where.loan_type_id; }
   if (where.current_stage_key) { whereClauses.push("o.current_stage_key = :current_stage_key"); replacements.current_stage_key = where.current_stage_key; }
   if (query.order_number) { whereClauses.push("o.order_number ILIKE :order_number"); replacements.order_number = `%${query.order_number}%`; }
@@ -303,14 +424,21 @@ async function analysis(query) {
   }
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  // Trend (by_period) should ignore date filters to show full history.
+  const trendWhereClauses = whereClauses.filter(
+    (c) => !String(c).includes("o.order_date >=") && !String(c).includes("o.order_date <=")
+  );
+  const trendWhereSql = trendWhereClauses.length ? `WHERE ${trendWhereClauses.join(" AND ")}` : "";
+  const normPayType = normalizedPaymentTypeSql("COALESCE(o.payment_type,'')");
 
   const [base] = await db.sequelize.query(
     `
     SELECT
       COALESCE(SUM(${outstandingExpr}), 0) AS total_outstanding,
-      COALESCE(SUM(CASE WHEN o.payment_type = 'Direct Payment' THEN ${outstandingExpr} ELSE 0 END), 0) AS direct_outstanding,
-      COALESCE(SUM(CASE WHEN o.payment_type = 'Loan' THEN ${outstandingExpr} ELSE 0 END), 0) AS loan_outstanding,
-      COALESCE(SUM(CASE WHEN o.payment_type = 'PDC' THEN ${outstandingExpr} ELSE 0 END), 0) AS pdc_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'Direct' THEN ${outstandingExpr} ELSE 0 END), 0) AS direct_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'Loan' THEN ${outstandingExpr} ELSE 0 END), 0) AS loan_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'PDC' THEN ${outstandingExpr} ELSE 0 END), 0) AS pdc_outstanding,
+      COALESCE(SUM(CASE WHEN ${normPayType} = 'Unknown' THEN ${outstandingExpr} ELSE 0 END), 0) AS unknown_outstanding,
       COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS order_count
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customer_id
@@ -327,7 +455,7 @@ async function analysis(query) {
       COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
     FROM orders o
     LEFT JOIN customers c ON c.id = o.customer_id
-    ${whereSql}
+    ${trendWhereSql}
     GROUP BY 1
     ORDER BY 1 ASC
     `,
@@ -337,7 +465,7 @@ async function analysis(query) {
   const byPaymentTypeRows = await db.sequelize.query(
     `
     SELECT
-      COALESCE(o.payment_type, 'Unknown') AS key,
+      ${normPayType} AS key,
       COALESCE(SUM(${outstandingExpr}), 0) AS amount,
       COALESCE(SUM(CASE WHEN ${outstandingExpr} > 0 THEN 1 ELSE 0 END), 0) AS count
     FROM orders o
@@ -415,6 +543,7 @@ async function analysis(query) {
     direct_outstanding: Number(base?.direct_outstanding || 0),
     loan_outstanding: Number(base?.loan_outstanding || 0),
     pdc_outstanding: Number(base?.pdc_outstanding || 0),
+    unknown_outstanding: Number(base?.unknown_outstanding || 0),
     order_count: Number(base?.order_count || 0),
     by_period: (byPeriod || []).map((r) => ({ period: r.period, amount: Number(r.amount || 0), count: Number(r.count || 0) })),
     by_payment_type: byPaymentType,
