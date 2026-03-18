@@ -1858,6 +1858,74 @@ const deleteOrder = async ({ id, transaction } = {}) => {
 };
 
 /**
+ * Force-complete delivery for an order currently in partial delivery.
+ * - Sets all BOM pending quantities to 0
+ * - Marks delivery_status as 'complete'
+ */
+const forceCompleteDelivery = async ({ id, transaction } = {}) => {
+    if (!id) {
+        throw new Error("Order id is required");
+    }
+    const models = getTenantModels();
+    const { Order } = models;
+    const t = transaction || (await models.sequelize.transaction());
+    let committedHere = !transaction;
+
+    try {
+        const order = await Order.findOne({
+            where: { id, deleted_at: null },
+            attributes: ["id", "bom_snapshot", "delivery_status"],
+            transaction: t,
+        });
+
+        if (!order) {
+            const error = new Error("Order not found");
+            error.statusCode = 404;
+            throw error;
+        }
+
+        const currentStatus = (order.delivery_status || "").toLowerCase();
+        if (currentStatus === "complete") {
+            const error = new Error("Delivery is already complete for this order.");
+            error.statusCode = 400;
+            throw error;
+        }
+        if (currentStatus !== "partial") {
+            const error = new Error("Force complete is only allowed for partially delivered orders.");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const normalizedBom = normalizeOrderBomSnapshot(order.bom_snapshot) || [];
+        const updatedBom = Array.isArray(normalizedBom)
+            ? normalizedBom.map((line) => ({
+                ...line,
+                pending_qty: 0,
+            }))
+            : normalizedBom;
+
+        await order.update(
+            {
+                bom_snapshot: updatedBom,
+                delivery_status: "complete",
+            },
+            { transaction: t }
+        );
+
+        if (committedHere) {
+            await t.commit();
+        }
+
+        return order.toJSON();
+    } catch (err) {
+        if (committedHere) {
+            await t.rollback();
+        }
+        throw err;
+    }
+};
+
+/**
  * List pending delivery orders for warehouse managers.
  * Rules:
  * - Order must belong to a warehouse managed by the current user
@@ -2562,6 +2630,7 @@ module.exports = {
     createOrder,
     updateOrder,
     deleteOrder,
+    forceCompleteDelivery,
     getSolarPanels,
     getInverters,
     listPendingDeliveryOrders,
