@@ -22,6 +22,11 @@ const Product = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    serial_number_length: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: "Expected character length for serial numbers when product is serialized",
+    },
     product_make_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
