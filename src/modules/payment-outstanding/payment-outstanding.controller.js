@@ -1,0 +1,88 @@
+"use strict";
+
+const service = require("./payment-outstanding.service.js");
+const { Parser } = require("json2csv");
+
+async function list(req, res, next) {
+  try {
+    const result = await service.listOutstanding(req.query || {});
+    res.json({ status: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function kpis(req, res, next) {
+  try {
+    const result = await service.kpis(req.query || {});
+    res.json({ status: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function trend(req, res, next) {
+  try {
+    const result = await service.trend(req.query || {});
+    res.json({ status: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function exportList(req, res, next) {
+  try {
+    const result = await service.listOutstanding({ ...req.query, page: 1, limit: 10000 });
+    const rows = (result.data || []).map((o) => ({
+      order_number: o.order_number,
+      capacity: o.capacity,
+      customer_name: o.customer?.name || "",
+      mobile: o.customer?.mobile_number || "",
+      project_cost: Number(o.project_cost || 0),
+      total_paid: Number(o.get?.("total_paid") ?? o.dataValues?.total_paid ?? 0),
+      outstanding: Number(o.get?.("outstanding") ?? o.dataValues?.outstanding ?? 0),
+      payment_type: o.payment_type || "",
+      loan_type: o.loanType?.name || "",
+      branch: o.branch?.name || "",
+      handled_by: o.handledBy?.name || "",
+      order_date: o.order_date ? new Date(o.order_date).toISOString().slice(0, 10) : "",
+    }));
+    const parser = new Parser();
+    const csv = parser.parse(rows);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=payment-outstanding.csv");
+    res.status(200).send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listFollowUps(req, res, next) {
+  try {
+    const { order_id } = req.params;
+    const data = await service.listFollowUps(order_id, req.query);
+    res.json({ status: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createFollowUp(req, res, next) {
+  try {
+    const { order_id } = req.params;
+    const item = await service.createFollowUp(order_id, req.body || {});
+    res.status(201).json({ status: true, data: item });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  list,
+  kpis,
+  trend,
+  exportList,
+  listFollowUps,
+  createFollowUp,
+};
+

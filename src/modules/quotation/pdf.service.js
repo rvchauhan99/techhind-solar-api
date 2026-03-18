@@ -1325,8 +1325,8 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
     const netMeteringCostDisplay =
         netMeteringCostValue > 0 ? roundMoney(netMeteringCostValue) : "As Actual To Be Paid By The Customer";
 
-    // Subtotal before GST – same structure as frontend `calculateTotals`.
-    const subtotalBeforeGstRaw =
+    // Payable subtotal (same structure as frontend UI's payable subtotal).
+    const payableSubtotalRaw =
         totalProjectValue +
         netMeteringCostValue +
         stampChargesValue +
@@ -1335,10 +1335,21 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         additionalCost1Value +
         additionalCost2Value -
         discountValueRaw;
-    const subtotalBeforeGst = roundMoney(subtotalBeforeGstRaw);
+    const payableSubtotal = roundMoney(payableSubtotalRaw);
 
-    const gstAmount = roundMoney(subtotalBeforeGst * (gstPercent / 100));
-    const totalPayable = roundMoney(subtotalBeforeGst + gstAmount);
+    // GST taxable base excludes:
+    // - netmeter_amount
+    // - stamp_charges
+    // - state_government_amount
+    const gstTaxableBaseRaw =
+        payableSubtotalRaw -
+        netMeteringCostValue -
+        stampChargesValue -
+        stateGovernmentAmountValue;
+    const gstTaxableBase = Math.max(0, roundMoney(gstTaxableBaseRaw));
+
+    const gstAmount = roundMoney(gstTaxableBase * (gstPercent / 100));
+    const totalPayable = roundMoney(payableSubtotal + gstAmount);
 
     const subsidyAmount = roundMoney(parseMoney(quotation.subsidy_amount));
     const stateSubsidyAmount = roundMoney(parseMoney(quotation.state_subsidy_amount));
@@ -1614,7 +1625,7 @@ const prepareQuotationData = async (quotation, company, bankAccount, productMake
         additional_cost_amount_2: additionalCost2Value,
         additional_cost_details_1: quotation.additional_cost_details_1 || "",
         additional_cost_details_2: quotation.additional_cost_details_2 || "",
-        subtotal_before_gst: subtotalBeforeGst,
+        subtotal_before_gst: payableSubtotal,
         total_payable: totalPayable,
 
         // Payment terms
