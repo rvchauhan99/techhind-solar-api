@@ -12,7 +12,7 @@ const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCac
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 const { resolveOrderVisibilityContext } = require("./orderVisibilityContext.js");
 
-const ORDER_PAGE_MODULE_ROUTES = ["/order", "/confirm-orders", "/closed-orders", "/fabrication-installation"];
+const ORDER_PAGE_MODULE_ROUTES = ["/order", "/confirm-orders", "/closed-orders", "/cancelled-orders", "/fabrication-installation"];
 
 const resolveFabricationInstallationVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
@@ -455,6 +455,25 @@ const forceCompleteDelivery = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, result, "Delivery marked as complete", 200);
 });
 
+const cancelOrder = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const existing = await orderService.getOrderById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Order not found", 404);
+    }
+    const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
+    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
+
+    const payload = { ...req.body };
+    const result = await orderService.cancelOrder({
+        id,
+        payload,
+        transaction: req.transaction,
+        user: req.user,
+    });
+    return responseHandler.sendSuccess(res, result, "Order cancelled", 200);
+});
+
 module.exports = {
     list,
     exportList,
@@ -473,4 +492,5 @@ module.exports = {
     listFabricationInstallation,
     generatePDF,
     forceCompleteDelivery,
+    cancelOrder,
 };

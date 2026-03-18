@@ -40,6 +40,12 @@ router.post(
   orderUpdateAny,
   controller.forceCompleteDelivery
 );
+router.post(
+  "/:id/cancel",
+  ...requireAuthWithTenant,
+  orderUpdateAny,
+  controller.cancelOrder
+);
 router.get("/:id/fabrication", ...requireAuthWithTenant, orderReadAny, fabricationController.getByOrderId);
 router.put("/:id/fabrication", ...requireAuthWithTenant, orderUpdateAny, fabricationController.createOrUpdate);
 router.get("/:id/installation", ...requireAuthWithTenant, orderReadAny, installationController.getByOrderId);
