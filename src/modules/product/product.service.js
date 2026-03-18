@@ -497,7 +497,6 @@ const PRODUCT_IMPORT_CSV_HEADERS = [
   "panel_technology_name",
   "material",
   "warranty",
-  "additional_type",
   "additional_warranty",
   "additional_performance_warranty",
   "ac_quantity",
@@ -551,7 +550,6 @@ function getSampleCsvBuffer() {
     "",
     "",
     "5 Years",
-    "",
     "",
     "",
     "",
@@ -715,17 +713,17 @@ async function importProductsFromCsv({ fileBuffer, req } = {}) {
     const material = trim(row.material ?? row["Material"] ?? null) || null;
     const panelTypeVal = trim(row.panel_type ?? row["Panel Type"] ?? null) || null;
     const panelTechName = trim(row.panel_technology_name ?? row["Panel Technology"] ?? null) || null;
-    const additionalType = trim(row.additional_type ?? row["Additional Type"] ?? null) || null;
     const additionalWarranty = trim(row.additional_warranty ?? row["Additional Warranty"] ?? null) || null;
     const additionalPerfWarranty = trim(row.additional_performance_warranty ?? row["Additional Performance Warranty"] ?? null) || null;
     const acQty = parseNum(row.ac_quantity ?? row["AC Quantity"] ?? null);
     const dcQty = parseNum(row.dc_quantity ?? row["DC Quantity"] ?? null);
 
     const typeKey = typeNameLower.replace(/\s+/g, "_");
-    const payloadProperties = { additional: { type: additionalType, warranty: additionalWarranty, performance_warranty: additionalPerfWarranty } };
+    const canonicalWarranty = additionalWarranty ?? warranty;
+    const payloadProperties = { additional: { warranty: canonicalWarranty, performance_warranty: additionalPerfWarranty } };
 
     if (typeNameLower === "structure") {
-      payloadProperties.structure = { material, warranty };
+      payloadProperties.structure = { material };
     } else if (typeNameLower === "panel") {
       let panelTechnologyId = null;
       if (panelTechName && panelTechByName.size) {
@@ -734,14 +732,14 @@ async function importProductsFromCsv({ fileBuffer, req } = {}) {
       }
       payloadProperties.panel = { type: panelTypeVal, panel_technology_id: panelTechnologyId };
     } else if (["inverter", "hybrid_inverter", "earthing", "acdb", "dcdb", "la"].includes(typeKey)) {
-      payloadProperties[typeKey] = { warranty };
+      payloadProperties[typeKey] = {};
     } else if (typeKey === "battery") {
       const extraType = trim(row.extra_type ?? row["Extra Type"] ?? null) || null;
-      payloadProperties.battery = { type: extraType, warranty };
+      payloadProperties.battery = { type: extraType };
     } else if (typeKey === "ac_cable") {
-      payloadProperties.ac_cable = { ac_quantity: acQty, warranty };
+      payloadProperties.ac_cable = { ac_quantity: acQty };
     } else if (typeKey === "dc_cable") {
-      payloadProperties.dc_cable = { dc_quantity: dcQty, warranty };
+      payloadProperties.dc_cable = { dc_quantity: dcQty };
     }
 
     const payload = {
