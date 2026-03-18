@@ -44,6 +44,7 @@ const b2bInvoicesRoutes = require('../modules/b2bInvoices/b2bInvoices.routes.js'
 const serializedInventoryReportRoutes = require('../modules/reports/serializedInventory/serializedInventory.routes.js');
 const deliveryReportRoutes = require('../modules/reports/deliveryReport/deliveryReport.routes.js');
 const paymentsReportRoutes = require('../modules/reports/payments/paymentsReport.routes.js');
+const paymentOutstandingRoutes = require('../modules/payment-outstanding/payment-outstanding.routes.js');
 const billingRoutes = require('../modules/billing/billing.routes.js');
 const adminRoutes = require('../modules/admin/admin.routes.js');
 const notificationRoutes = require('../modules/notification/notification.routes.js');
@@ -114,6 +115,7 @@ router.use("/b2b-sales-orders", requireAuthWithTenant, requireModulePermissionBy
 router.use("/b2b-shipments", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-shipments" }), b2bShipmentsRoutes);
 router.use("/b2b-invoices", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/b2b-invoices" }), b2bInvoicesRoutes);
 router.use("/reports/payments", paymentsReportRoutes);
+router.use("/payment-outstanding", paymentOutstandingRoutes);
 
 router.get("/", (req, res) => res.send("API Running ✅"));
 

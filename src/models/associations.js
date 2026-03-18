@@ -78,6 +78,7 @@ module.exports = (db) => {
     PurchaseReturn,
     PurchaseReturnItem,
     PurchaseReturnSerial,
+    PaymentFollowUp,
   } = db;
 
   // User ↔ Role
@@ -597,6 +598,16 @@ module.exports = (db) => {
   if (OrderPaymentDetail && User) {
     OrderPaymentDetail.belongsTo(User, { foreignKey: "approved_by", as: "approvedByUser" });
     OrderPaymentDetail.belongsTo(User, { foreignKey: "rejected_by", as: "rejectedByUser" });
+  }
+
+  // PaymentFollowUp associations
+  if (Order && PaymentFollowUp) {
+    Order.hasMany(PaymentFollowUp, { foreignKey: "order_id", as: "paymentFollowUps" });
+    PaymentFollowUp.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  }
+  if (PaymentFollowUp && User) {
+    PaymentFollowUp.belongsTo(User, { foreignKey: "created_by", as: "createdByUser" });
+    User.hasMany(PaymentFollowUp, { foreignKey: "created_by", as: "paymentFollowUps" });
   }
 
   // Purchase Order associations
