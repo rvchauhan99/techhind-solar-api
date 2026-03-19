@@ -53,9 +53,14 @@ const list = asyncHandler(async (req, res) => {
         order_number: orderNumber = null,
         warehouse_name: warehouseName = null,
         transporter = null,
+        delivery_status: deliveryStatus = null,
         created_at_from: createdAtFrom = null,
         created_at_to: createdAtTo = null,
         created_at_op: createdAtOp = null,
+        customer_name: customerName = null,
+        customer_mobile: customerMobile = null,
+        created_by_name: createdByName = null,
+        created_by_name_op: createdByNameOp = null,
     } = req.query;
 
     const { enforcedHandledByIds } = await resolveDeliveryChallanVisibilityContext(req);
@@ -76,10 +81,15 @@ const list = asyncHandler(async (req, res) => {
         order_number: orderNumber,
         warehouse_name: warehouseName,
         transporter,
+        delivery_status: deliveryStatus,
         created_at_from: createdAtFrom,
         created_at_to: createdAtTo,
         created_at_op: createdAtOp,
         enforced_handled_by_ids: enforcedHandledByIds,
+        customer_name: customerName,
+        customer_mobile: customerMobile,
+        created_by_name: createdByName,
+        created_by_name_op: createdByNameOp,
     });
 
     return responseHandler.sendSuccess(res, result, "Challan list fetched", 200);
@@ -183,6 +193,32 @@ const remove = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, result, "Challan deleted", 200);
 });
 
+// Reverse/return an approved delivery challan.
+// This fully restores stock + serials and writes reversal ledger entries.
+const reverse = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const item = await challanService.getChallanById({ id });
+    if (!item) {
+        return responseHandler.sendError(res, "Challan not found", 404);
+    }
+    const context = await resolveDeliveryChallanVisibilityContext(req);
+    const record = item.toJSON ? item.toJSON() : item;
+    assertRecordVisibleByListingCriteria(record, context, {
+        createdByField: "created_by",
+        orderHandledByPath: "order.handled_by",
+    });
+    const { reason_id = null, remarks = null } = req.body || {};
+    const result = await challanService.reverseChallan({
+        id,
+        user_id: req.user?.id,
+        role_id: req.user?.role_id,
+        transaction: req.transaction,
+        reason_id,
+        remarks,
+    });
+    return responseHandler.sendSuccess(res, result, "Challan reversed", 200);
+});
+
 const getNextChallanNumber = asyncHandler(async (req, res) => {
     const challanNumber = await challanService.getNextChallanNumber();
     return responseHandler.sendSuccess(
@@ -236,6 +272,7 @@ module.exports = {
     create,
     update,
     remove,
+    reverse,
     getNextChallanNumber,
     getQuotationProducts,
     getDeliveryStatus,

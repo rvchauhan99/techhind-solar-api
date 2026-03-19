@@ -32,6 +32,16 @@ const Challan = sequelize.define(
             allowNull: true,
         },
 
+        // Audit columns (added via generic audit migration; needed here for Sequelize associations)
+        created_by: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
+        updated_by: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
+
         order_id: {
             type: DataTypes.BIGINT,
             allowNull: false,
