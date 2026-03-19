@@ -681,7 +681,7 @@ const listFollowUps = async ({ lead_id, page = 1, limit = 20 } = {}) => {
   };
 };
 
-const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
+const convertLeadToInquiry = async ({ id, payload, user, transaction } = {}) => {
   if (!id) {
     throw new AppError("Lead id is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
@@ -755,7 +755,7 @@ const convertLeadToInquiry = async ({ id, payload, transaction } = {}) => {
     customer_id: customerId,
     inquiry_source_id: lead.inquiry_source_id || payload?.inquiry_source_id || null,
     date_of_inquiry: payload?.date_of_inquiry || new Date().toISOString().slice(0, 10),
-    inquiry_by: payload?.inquiry_by || null,
+    inquiry_by: user?.id || null,
     handled_by: payload?.handled_by || lead.assigned_to || null,
     channel_partner: payload?.channel_partner || null,
     branch_id: lead.branch_id || payload?.branch_id || null,
