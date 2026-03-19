@@ -35,6 +35,7 @@ const confirmOrdersRoutes = require('../modules/confirmOrders/confirmOrders.rout
 const closedOrdersRoutes = require('../modules/closedOrders/closedOrders.routes.js');
 const cancelledOrdersRoutes = require('../modules/cancelledOrders/cancelledOrders.routes.js');
 const marketingLeadRoutes = require('../modules/marketingLead/marketingLead.routes.js');
+const marketingLeadFollowupRoutes = require('../modules/marketingLeadFollowup/marketingLeadFollowup.routes.js');
 const challanRoutes = require('../modules/challan/challan.routes.js');
 const b2bClientsRoutes = require('../modules/b2bClients/b2bClients.routes.js');
 const b2bSalesQuotesRoutes = require('../modules/b2bSalesQuotes/b2bSalesQuotes.routes.js');
@@ -106,6 +107,7 @@ router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
 router.use("/cancelled-orders", cancelledOrdersRoutes);
 router.use("/marketing-leads", marketingLeadRoutes);
+router.use("/marketing-lead-followup", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/marketing-lead-followup" }), marketingLeadFollowupRoutes);
 router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders", "/delivery-challans"] }), challanRoutes);
 router.use("/order-payments", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders"] }), orderPaymentsRoutes);
 
