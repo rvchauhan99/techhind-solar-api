@@ -17,6 +17,7 @@ router.post("/", controller.create);
 router.get("/:id/pdf", controller.generatePDF);
 router.get("/:id", controller.getById);
 router.put("/:id", controller.update);
+router.post("/:id/reverse", controller.reverse);
 router.delete("/:id", controller.remove);
 
 module.exports = router;

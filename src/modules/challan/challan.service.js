@@ -202,13 +202,18 @@ const listChallans = async ({
     order_number: orderNumber = null,
     warehouse_name: warehouseName = null,
     transporter = null,
+    delivery_status: deliveryStatus = null,
     created_at_from: createdAtFrom = null,
     created_at_to: createdAtTo = null,
     created_at_op: createdAtOp = null,
     enforced_handled_by_ids: enforcedHandledByIds = null,
+    customer_name: customerName = null,
+    customer_mobile: customerMobile = null,
+    created_by_name: createdByName = null,
+    created_by_name_op: createdByNameOp = null,
 } = {}) => {
     const models = getTenantModels();
-    const { Challan, ChallanItems, Order, CompanyWarehouse, User } = models;
+    const { Challan, ChallanItems, Order, CompanyWarehouse, User, Customer } = models;
     const offset = (page - 1) * limit;
     const where = { deleted_at: null };
 
@@ -255,6 +260,24 @@ const listChallans = async ({
     if (transporter) {
         where[Op.and] = where[Op.and] || [];
         const cond = buildStringCondition("transporter", transporter, "contains");
+        if (cond) where[Op.and].push(cond);
+    }
+
+    // delivery_status filter (exact match, case-insensitive)
+    if (deliveryStatus) {
+        where[Op.and] = where[Op.and] || [];
+        const cond = buildStringCondition("$order.delivery_status$", deliveryStatus, "equals");
+        if (cond) where[Op.and].push(cond);
+    }
+
+    // created_by_name filter (on joined creator user)
+    if (createdByName) {
+        where[Op.and] = where[Op.and] || [];
+        const cond = buildStringCondition(
+            "$createdByUser.name$",
+            createdByName,
+            createdByNameOp || "contains"
+        );
         if (cond) where[Op.and].push(cond);
     }
 
@@ -318,6 +341,18 @@ const listChallans = async ({
     }
     const orderWhere = orderWhereAnd.length > 0 ? { [Op.and]: orderWhereAnd } : null;
 
+    // Customer filters (applied via nested association "$order.customer.field$")
+    if (customerName) {
+        where[Op.and] = where[Op.and] || [];
+        const cond = buildStringCondition("$order.customer.customer_name$", customerName, "contains");
+        if (cond) where[Op.and].push(cond);
+    }
+    if (customerMobile) {
+        where[Op.and] = where[Op.and] || [];
+        const cond = buildStringCondition("$order.customer.mobile_number$", customerMobile, "contains");
+        if (cond) where[Op.and].push(cond);
+    }
+
     if (Array.isArray(enforcedHandledByIds)) {
         where[Op.and] = where[Op.and] || [];
         if (enforcedHandledByIds.length === 0) {
@@ -355,9 +390,28 @@ const listChallans = async ({
             {
                 model: Order,
                 as: "order",
-                attributes: ["id", "order_number", "handled_by"],
-                required: !!orderWhere,
+                attributes: ["id", "order_number", "handled_by", "capacity", "consumer_no", "current_stage_key", "delivery_status"],
+                required: !!orderWhere || !!customerName || !!customerMobile || !!deliveryStatus,
                 ...(orderWhere && { where: orderWhere }),
+                include: [
+                    {
+                        model: Customer,
+                        as: "customer",
+                        attributes: ["id", "customer_name", "mobile_number", "address", "district"],
+                        required: !!customerName || !!customerMobile,
+                    },
+                    {
+                        model: User,
+                        as: "handledBy",
+                        attributes: ["id", "name"],
+                    },
+                ],
+            },
+            {
+                model: User,
+                as: "createdByUser",
+                attributes: ["id", "name"],
+                required: !!createdByName,
             },
             {
                 model: CompanyWarehouse,
@@ -377,12 +431,34 @@ const listChallans = async ({
 
     const data = (rows || []).map((c) => {
         const row = c.toJSON();
+        const orderObj = row.order || {};
+        const customer = orderObj.customer || null;
         return {
             id: row.id,
             challan_no: row.challan_no,
             challan_date: row.challan_date,
             transporter: row.transporter,
-            order: row.order ? { id: row.order.id, order_number: row.order.order_number } : null,
+            delivery_status: orderObj.delivery_status ?? null,
+            order: row.order
+                ? {
+                      id: orderObj.id,
+                      order_number: orderObj.order_number,
+                      capacity: orderObj.capacity,
+                      consumer_no: orderObj.consumer_no,
+                      current_stage_key: orderObj.current_stage_key,
+                  }
+                : null,
+            customer: customer
+                ? {
+                      id: customer.id,
+                      customer_name: customer.customer_name,
+                      mobile_number: customer.mobile_number,
+                      address: customer.address,
+                      district: customer.district,
+                  }
+                : null,
+            created_by_name: row.createdByUser?.name ?? null,
+            handled_by_name: orderObj.handledBy?.name || null,
             warehouse: row.warehouse ? { id: row.warehouse.id, name: row.warehouse.name } : null,
             items: row.items || [],
             created_at: row.created_at,
@@ -406,19 +482,49 @@ const listChallans = async ({
  */
 const getChallanById = async ({ id } = {}) => {
     const models = getTenantModels();
-    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit } = models;
+    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, User, ProjectScheme, Discom } = models;
     const challan = await Challan.findOne({
         where: { id, deleted_at: null },
         include: [
             {
                 model: Order,
                 as: "order",
-                attributes: ["id", "order_number", "consumer_no", "capacity", "handled_by"],
+                attributes: [
+                    "id", "order_number", "consumer_no", "capacity", "handled_by",
+                    "order_date", "status", "project_cost", "discount", "delivery_status",
+                    "payment_type", "demand_load",
+                ],
+                include: [
+                    {
+                        model: Customer,
+                        as: "customer",
+                        attributes: [
+                            "id", "customer_name", "mobile_number", "company_name",
+                            "phone_no", "email_id", "pin_code", "address",
+                            "landmark_area", "taluka", "district",
+                        ],
+                    },
+                    {
+                        model: User,
+                        as: "handledBy",
+                        attributes: ["id", "name"],
+                    },
+                    {
+                        model: ProjectScheme,
+                        as: "projectScheme",
+                        attributes: ["id", "name"],
+                    },
+                    {
+                        model: Discom,
+                        as: "discom",
+                        attributes: ["id", "name"],
+                    },
+                ],
             },
             {
                 model: CompanyWarehouse,
                 as: "warehouse",
-                attributes: ["id", "name"],
+                attributes: ["id", "name", "contact_person", "mobile", "phone_no", "email", "address"],
             },
             {
                 model: ChallanItems,
@@ -990,7 +1096,7 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
 /**
  * Delete challan (soft delete)
  */
-const deleteChallan = async ({ id, user_id, transaction } = {}) => {
+const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, Product, StockSerial } = models;
     const challan = await Challan.findOne({
@@ -1010,6 +1116,8 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
 
     const orderId = challan.order_id;
     const warehouseId = challan.warehouse_id;
+    const defaultLedgerReason = `Reversal for delivery challan ${challan.challan_no}`;
+    const effectiveLedgerReason = ledgerReason || defaultLedgerReason;
 
     // Reverse inventory: bring stock back in and, for known serials, mark them AVAILABLE again.
     if (warehouseId && Array.isArray(challan.items) && challan.items.length > 0) {
@@ -1056,6 +1164,8 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                         where: {
                             serial_number: { [Op.iLike]: serial },
                             product_id: item.product_id,
+                            warehouse_id: warehouseId,
+                            status: SERIAL_STATUS.ISSUED,
                         },
                         transaction,
                     });
@@ -1067,7 +1177,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                                 warehouse_id: warehouseId,
                                 stock_id: stock.id,
                                 // keep outward_date as history
-                                source_type: stockSerial.source_type || TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
+                                source_type: TRANSACTION_TYPE.DELIVERY_CHALLAN_CANCEL_IN,
                                 issued_against: null,
                                 reference_number: null,
                             },
@@ -1087,7 +1197,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                             rate: null,
                             gst_percent: null,
                             amount: null,
-                            reason: `Reversal for delivery challan ${challan.challan_no}`,
+                            reason: effectiveLedgerReason,
                             performed_by: user_id,
                             transaction,
                         });
@@ -1106,7 +1216,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                             rate: null,
                             gst_percent: null,
                             amount: null,
-                            reason: `Reversal for delivery challan ${challan.challan_no}`,
+                            reason: effectiveLedgerReason,
                             performed_by: user_id,
                             transaction,
                         });
@@ -1126,7 +1236,7 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
                     rate: null,
                     gst_percent: null,
                     amount: null,
-                    reason: `Reversal for delivery challan ${challan.challan_no}`,
+                    reason: effectiveLedgerReason,
                     performed_by: user_id,
                     transaction,
                 });
@@ -1150,6 +1260,106 @@ const deleteChallan = async ({ id, user_id, transaction } = {}) => {
     }
 
     return { message: "Challan deleted successfully" };
+};
+
+// Reverse/return an approved delivery challan.
+// Currently implemented as a wrapper around `deleteChallan` because
+// `deleteChallan` already performs full stock + ledger reversal and soft-deletes challan.
+const reverseChallan = async ({
+    id,
+    user_id,
+    transaction,
+    role_id = null,
+    reason_id = null,
+    remarks = null,
+} = {}) => {
+    const { Reason } = getTenantModels();
+
+    const { Challan, Order, Role } = getTenantModels();
+
+    // Allowed pipeline stages for reversing a delivery challan.
+    // These are stage keys from the order pipeline (see confirm-orders UI stages).
+    const ALLOWED_STAGE_KEYS = new Set([
+        "delivery",
+        "assign_fabricator_and_installer",
+        "fabrication",
+        "installation",
+        "netmeter_apply",
+    ]);
+
+    const normalizeRoleName = (s) => String(s || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    if (role_id == null) {
+        const error = new Error("SuperAdmin role required");
+        error.statusCode = 403;
+        throw error;
+    }
+
+    // Fetch order from challan for stage validation.
+    const challanRow = await Challan.findOne({
+        where: { id, deleted_at: null },
+        attributes: ["id", "order_id"],
+        transaction,
+    });
+
+    if (!challanRow) {
+        const error = new Error("Challan not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const orderRow = await Order.findOne({
+        where: { id: challanRow.order_id, deleted_at: null },
+        attributes: ["current_stage_key"],
+        transaction,
+    });
+
+    const currentStageKey = String(orderRow?.current_stage_key || "").toLowerCase();
+    if (!ALLOWED_STAGE_KEYS.has(currentStageKey)) {
+        const error = new Error("Reverse not allowed for this order stage");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const roleRow = await Role.findOne({
+        where: { id: role_id, deleted_at: null },
+        attributes: ["name"],
+        transaction,
+    });
+
+    const roleNameNorm = normalizeRoleName(roleRow?.name);
+    if (roleNameNorm !== "superadmin") {
+        const error = new Error("SuperAdmin role required");
+        error.statusCode = 403;
+        throw error;
+    }
+
+    if (reason_id == null || reason_id === "") {
+        const error = new Error("reason_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const reasonRow = await Reason.findOne({
+        where: { id: reason_id, deleted_at: null, is_active: true },
+        transaction,
+    });
+
+    if (!reasonRow) {
+        const error = new Error("Invalid reason_id");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const trimmedRemarks = typeof remarks === "string" ? remarks.trim() : "";
+    const ledgerReason = trimmedRemarks
+        ? `${reasonRow.reason} - ${trimmedRemarks}`
+        : `${reasonRow.reason}`;
+
+    await deleteChallan({ id, user_id, transaction, ledgerReason });
+    return { message: "Challan reversed successfully" };
 };
 
 /**
@@ -1406,6 +1616,7 @@ module.exports = {
     createChallan,
     updateChallan,
     deleteChallan,
+    reverseChallan,
     getNextChallanNumber,
     getQuotationProductsByOrderId,
     getDeliveryStatus,
