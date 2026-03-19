@@ -229,37 +229,71 @@ const getFollowupById = async (id, transaction = null) => {
 
 const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}, transaction = null) => {
   const models = getTenantModels();
-  const { Followup, Inquiry, User } = models;
+  const { Followup, Inquiry, User, Customer } = models;
   const followupWhere = { deleted_at: null };
   let inquiryWhere = { deleted_at: null };
 
-  // Handle search query (q) - search in followup remarks and inquiry fields
+  // Handle search query (q) - search in followup remarks, inquiry fields, customer name/mobile
+  // All q-matches go into inquiryWhere (inquiry + customer). For followup-level (followup id, followup remarks)
+  // we use a subquery in followupWhere so the overall condition is: (followup matches) OR (inquiry matches).
   if (q) {
+    const searchPat = `%${String(q).replace(/[%_\\]/g, "\\$&")}%`;
     const inquirySearchConditions = [
       { status: { [Op.iLike]: `%${q}%` } },
       { remarks: { [Op.iLike]: `%${q}%` } },
+      { inquiry_number: { [Op.iLike]: `%${q}%` } },
     ];
 
-    // If q is a number, also search by followup ID or inquiry ID
     const numericQ = parseInt(q, 10);
     if (!isNaN(numericQ)) {
-      // Search by followup ID
-      followupWhere[Op.or] = [
-        { id: numericQ },
-        { remarks: { [Op.iLike]: `%${q}%` } }
-      ];
-      // Search by inquiry ID
       inquirySearchConditions.push({ id: numericQ });
-    } else {
-      // Search in followup remarks
-      followupWhere[Op.or] = [
-        { remarks: { [Op.iLike]: `%${q}%` } }
-      ];
     }
 
-    // Search in inquiry fields
+    // Search in customer (name, mobile) via EXISTS
+    // Use "inquiry" alias - Sequelize joins inquiries AS "inquiry" in the main query
+    inquirySearchConditions.push(
+      models.sequelize.literal(
+        `EXISTS (SELECT 1 FROM customers WHERE customers.id = inquiry.customer_id AND customers.deleted_at IS NULL AND (customers.customer_name ILIKE '${searchPat.replace(/'/g, "''")}' OR customers.mobile_number ILIKE '${searchPat.replace(/'/g, "''")}'))`
+      )
+    );
+
+    // inquiryWhere: match inquiry status, remarks, inquiry_number, inquiry id, or customer
     inquiryWhere[Op.or] = inquirySearchConditions;
+
+    // followupWhere: match followup id or followup remarks, OR inquiry_id in subquery (inquiry-level match)
+    // This makes the overall filter (followup matches) OR (inquiry/customer matches), so inquiry number search works
+    const inquiryMatchSubquery = `(SELECT i.id FROM inquiries i WHERE i.deleted_at IS NULL AND (i.status ILIKE '%${String(q).replace(/'/g, "''")}%' OR i.remarks ILIKE '%${String(q).replace(/'/g, "''")}%' OR i.inquiry_number ILIKE '%${String(q).replace(/'/g, "''")}%'${!isNaN(numericQ) ? ` OR i.id = ${numericQ}` : ""} OR EXISTS (SELECT 1 FROM customers c WHERE c.id = i.customer_id AND c.deleted_at IS NULL AND (c.customer_name ILIKE '${searchPat.replace(/'/g, "''")}' OR c.mobile_number ILIKE '${searchPat.replace(/'/g, "''")}'))))`;
+    followupWhere[Op.or] = [
+      { remarks: { [Op.iLike]: `%${q}%` } },
+      models.sequelize.literal(`"Followup"."inquiry_id" IN ${inquiryMatchSubquery}`),
+    ];
+    if (!isNaN(numericQ)) {
+      followupWhere[Op.or].unshift({ id: numericQ });
+    }
   }
+
+  // Filter by inquiry_number if provided
+  if (filters.inquiry_number != null && String(filters.inquiry_number).trim() !== "") {
+    inquiryWhere.inquiry_number = { [Op.iLike]: `%${filters.inquiry_number}%` };
+  }
+
+  // Build customer include (for customer_name, mobile_number filters and data fetch)
+  const customerWhere = {};
+  if (filters.customer_name != null && String(filters.customer_name).trim() !== "") {
+    customerWhere.customer_name = { [Op.iLike]: `%${filters.customer_name}%` };
+  }
+  if (filters.mobile_number != null && String(filters.mobile_number).trim() !== "") {
+    customerWhere.mobile_number = { [Op.iLike]: `%${filters.mobile_number}%` };
+  }
+  const hasCustomerFilter = Object.keys(customerWhere).length > 0;
+  const customerInclude = {
+    model: Customer,
+    as: "customer",
+    required: hasCustomerFilter,
+    attributes: ["customer_name", "mobile_number", "phone_no", "email_id", "address"],
+    where: hasCustomerFilter ? customerWhere : undefined,
+    include: [], // Always set - Sequelize _validateIncludedElements throws if undefined
+  };
 
   // Filter by inquiry_id if provided
   if (filters.inquiry_id != null && filters.inquiry_id !== "") {
@@ -382,7 +416,7 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     ),
   };
 
-  // Build the inquiry include configuration
+  // Build the inquiry include configuration (with nested Customer for customer details)
   const inquiryInclude = {
     model: Inquiry,
     as: "inquiry",
@@ -398,7 +432,9 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
       "channel_partner",
       "remarks",
       "handled_by",
+      "customer_id",
     ],
+    include: [customerInclude],
   };
 
   // Build the callByUser include configuration
@@ -408,23 +444,6 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     attributes: ["id", "name", "email"],
     required: false,
   };
-
-  // Build count query options
-  const countOptions = {
-    where: followupWhere,
-    include: [
-      {
-        model: Inquiry,
-        as: "inquiry",
-        required: true,
-        where: Object.keys(inquiryWhere).length > 1 ? inquiryWhere : undefined, // Only add if more than just deleted_at
-      },
-    ],
-    transaction,
-  };
-
-  // Get total count for pagination
-  const total = await Followup.count(countOptions);
 
   // Apply sorting
   const sortByField = filters.sortBy || "id";
@@ -438,23 +457,25 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     }
   }
 
-  // Get paginated followups
+  // Use findAndCountAll to avoid Sequelize count+include validation issues
   const offset = (page - 1) * limit;
-  const followups = await Followup.findAll({
+  const { count: total, rows: followups } = await Followup.findAndCountAll({
     where: followupWhere,
     include: [inquiryInclude, callByUserInclude],
     order: orderClause,
     limit: parseInt(limit),
     offset: offset,
+    distinct: true,
     transaction,
   });
 
-  // Transform the data: flatten followup with inquiry details
+  // Transform the data: flatten followup with inquiry and customer details
   const allResults = followups.map((followup) => {
     const followupData = followup.toJSON();
     const inquiry = followupData.inquiry || {};
+    const customer = inquiry.customer || {};
 
-    // Build result object with inquiry details at root level
+    // Build result object with inquiry and customer details at root level
     const result = {
       // Followup fields
       followup_id: followupData.id,
@@ -477,6 +498,13 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
       channel_partner: inquiry.channel_partner || null,
       inquiry_remarks: inquiry.remarks || null,
       inquiry_handled_by: inquiry.handled_by || null,
+
+      // Customer fields (flattened from inquiry.customer)
+      customer_name: customer.customer_name || null,
+      mobile_number: customer.mobile_number || null,
+      phone_no: customer.phone_no || null,
+      email_id: customer.email_id || null,
+      address: customer.address || null,
     };
 
     return result;
