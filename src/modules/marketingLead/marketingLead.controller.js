@@ -182,6 +182,7 @@ const convertToInquiry = asyncHandler(async (req, res) => {
   const result = await marketingLeadService.convertLeadToInquiry({
     id,
     payload,
+    user: req.user || {},
     transaction: req.transaction,
   });
   return responseHandler.sendSuccess(res, result, "Lead converted to inquiry", 200);
