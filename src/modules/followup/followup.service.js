@@ -274,8 +274,17 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
     followupWhere.remarks = { [Op.iLike]: `%${filters.followup_remarks}%` };
   }
 
-  // Filter by followup next_reminder date range
-  if (filters.followup_next_reminder_from || filters.followup_next_reminder_to) {
+  // Handle reminder_view preset: "overdue" -> next_reminder < today
+  const reminderView = (filters.reminder_view || "").toLowerCase();
+  if (reminderView === "overdue") {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    followupWhere.next_reminder = { [Op.lte]: yesterdayStr };
+  }
+
+  // Filter by followup next_reminder date range (skip if already set by reminder_view)
+  if (reminderView !== "overdue" && (filters.followup_next_reminder_from || filters.followup_next_reminder_to)) {
     followupWhere.next_reminder = followupWhere.next_reminder || {};
     if (filters.followup_next_reminder_from) followupWhere.next_reminder[Op.gte] = filters.followup_next_reminder_from;
     if (filters.followup_next_reminder_to) followupWhere.next_reminder[Op.lte] = filters.followup_next_reminder_to;
@@ -364,6 +373,14 @@ const listFollowups = async ({ page = 1, limit = 20, q = null, ...filters } = {}
   if (filters.is_msg_send_to_customer !== undefined) {
     followupWhere.is_msg_send_to_customer = filters.is_msg_send_to_customer;
   }
+
+  // One follow-up per inquiry: only show the latest (most recent) follow-up per inquiry
+  const tableName = Followup.getTableName ? Followup.getTableName() : Followup.tableName || "followups";
+  followupWhere.id = {
+    [Op.in]: models.sequelize.literal(
+      `(SELECT "max_id" FROM (SELECT MAX(id) AS "max_id" FROM ${models.sequelize.getQueryInterface().queryGenerator.quoteTable(tableName)} WHERE deleted_at IS NULL GROUP BY inquiry_id) AS "latest_sub")`
+    ),
+  };
 
   // Build the inquiry include configuration
   const inquiryInclude = {
