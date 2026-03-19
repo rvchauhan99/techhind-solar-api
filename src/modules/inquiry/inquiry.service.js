@@ -491,6 +491,7 @@ const getInquiryById = async ({ id }) => {
 const createInquiry = async ({ payload, transaction } = {}) => {
   const models = getTenantModels();
   const { Inquiry, Customer, CompanyBranch, Company } = models;
+  const { Op } = models.Sequelize;
 
   const t = transaction || (await models.sequelize.transaction());
   let committedHere = !transaction;
@@ -500,6 +501,50 @@ const createInquiry = async ({ payload, transaction } = {}) => {
       [payload?.inquiry_by, payload?.handled_by, payload?.channel_partner],
       { transaction: t, models, fieldLabel: "Selected user" }
     );
+
+    // Prevent duplicate inquiries by mobile_number only:
+    // - Compare digits-only representation for Customer.mobile_number
+    // - Only consider non-deleted inquiries
+    const digitsOnly = (v) => String(v ?? "").replace(/\D/g, "");
+    const mobileDigits = digitsOnly(payload?.mobile_number);
+
+    if (mobileDigits) {
+      const existing = await Inquiry.findOne({
+        where: { deleted_at: null },
+        include: [
+          {
+            model: Customer,
+            as: "customer",
+            attributes: [],
+            required: true,
+            where: {
+              [Op.and]: [
+                models.sequelize.where(
+                  models.sequelize.fn(
+                    "regexp_replace",
+                    models.sequelize.col("customer.mobile_number"),
+                    "\\D",
+                    "",
+                    "g"
+                  ),
+                  mobileDigits
+                ),
+              ],
+            },
+          },
+        ],
+        transaction: t,
+      });
+
+      if (existing) {
+        const existingInquiryNo = existing?.inquiry_number || existing?.id || "";
+        const err = new Error(
+          `Inquiry already exists for this mobile number. Existing inquiry number: ${existingInquiryNo}. Please open the existing inquiry.`
+        );
+        err.statusCode = 409;
+        throw err;
+      }
+    }
 
     // 1) Create Customer from payload
     const customerPayload = {
