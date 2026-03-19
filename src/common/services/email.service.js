@@ -43,8 +43,8 @@ async function sendEmail(to, subject, text, html = null, attachments = []) {
     console.log("Email sent successfully:", info.messageId);
     return info;
   } catch (error) {
-    console.error("Error sending email:", error.message);
-    throw new Error("Error while sending email");
+    console.error("Error sending email:", error); // Log full error object
+    throw error; // Rethrow original error instead of generic one
   }
 }
 
@@ -121,8 +121,8 @@ async function sendPasswordResetEmail(to, otp, userName = "User") {
 
     return await sendEmail(to, subject, text, html);
   } catch (error) {
-    console.error("Error sending password reset email:", error.message);
-    throw new Error("Error while sending password reset email");
+    console.error("Error sending password reset email:", error); // Log full error object
+    throw error; // Rethrow original error instead of generic one
   }
 }
 

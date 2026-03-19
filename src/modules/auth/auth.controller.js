@@ -496,11 +496,14 @@ const sendPasswordResetOtp = asyncHandler(async (req, res) => {
 
   // Send email with OTP
   try {
-    await emailService.sendPasswordResetEmail(user.email, otp, user.name);
+    const emailInfo = await emailService.sendPasswordResetEmail(user.email, otp, user.name);
+    if (process.env.NODE_ENV === "development") {
+      console.log("Password reset email sent:", emailInfo);
+    }
   } catch (emailError) {
     console.error("Failed to send password reset email:", emailError);
-    // Don't expose email sending failure to user for security
-    // Still return success
+    // Don't expose email sending failure to user for security in production
+    // But for development, logging the full error is necessary
   }
 
   // Return success (don't expose OTP in response)
