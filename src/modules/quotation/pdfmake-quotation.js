@@ -502,10 +502,10 @@ const createBomPage = (data) => {
     ]);
 
     const hybridInverterSection = createBomSection("Hybrid Inverter", [
-        { label: "HI Size:", value: data.hybrid_inverter?.size ? `${data.hybrid_inverter.size} kW` : "" },
-        { label: "HI Qty:", value: data.hybrid_inverter?.quantity ? `${data.hybrid_inverter.quantity} Nos` : "" },
-        { label: "HI Make:", value: data.hybrid_inverter?.make || "" },
-        { label: "HI Warranty:", value: data.hybrid_inverter?.warranty ? `${data.hybrid_inverter.warranty} Year` : "" },
+        { label: "Hybrid Inverter Size:", value: data.hybrid_inverter?.size ? `${data.hybrid_inverter.size} kW` : "" },
+        { label: "Hybrid Inverter Qty:", value: data.hybrid_inverter?.quantity ? `${data.hybrid_inverter.quantity} Nos` : "" },
+        { label: "Hybrid Inverter Make:", value: data.hybrid_inverter?.make || "" },
+        { label: "Hybrid Inverter Warranty:", value: data.hybrid_inverter?.warranty ? `${data.hybrid_inverter.warranty} Year` : "" },
     ]);
 
     const batterySection = createBomSection("Battery", [
