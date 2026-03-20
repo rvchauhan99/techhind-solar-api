@@ -69,6 +69,21 @@ const Challan = sequelize.define(
             type: DataTypes.DATE,
             allowNull: true,
         },
+
+        // Mark delivery challan as reversed (history/search support)
+        is_reversed: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        reversed_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        reversed_by: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
     },
     {
         tableName: "challans",

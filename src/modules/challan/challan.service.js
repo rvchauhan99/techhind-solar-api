@@ -134,6 +134,40 @@ const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
 };
 
 /**
+ * Return warehouse ids where any of `userIds` is a warehouse manager.
+ * Used for warehouse-manager visibility on challan list + actions.
+ *
+ * @param {{ userIds?: number[], transaction?: any }} params
+ * @returns {Promise<number[]>}
+ */
+const getManagedWarehouseIdsForUserIds = async ({ userIds = [], transaction = null } = {}) => {
+    const models = getTenantModels();
+    const { CompanyWarehouse, User } = models;
+
+    const scopedUserIds = Array.isArray(userIds)
+        ? userIds.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
+        : [];
+    if (scopedUserIds.length === 0) return [];
+
+    const managedWarehouses = await CompanyWarehouse.findAll({
+        include: [
+            {
+                model: User,
+                as: "managers",
+                attributes: [],
+                required: true,
+                where: { id: { [Op.in]: scopedUserIds } },
+            },
+        ],
+        attributes: ["id"],
+        where: { deleted_at: null },
+        transaction: transaction || undefined,
+    });
+
+    return [...new Set(managedWarehouses.map((w) => Number(w.id)))];
+};
+
+/**
  * Recompute and persist order.delivery_status ('pending' | 'partial' | 'complete')
  * based on BOM shipped and pending quantities.
  */
@@ -209,22 +243,66 @@ const listChallans = async ({
     enforced_handled_by_ids: enforcedHandledByIds = null,
     customer_name: customerName = null,
     customer_mobile: customerMobile = null,
+        is_reversed: isReversed = null,
     created_by_name: createdByName = null,
     created_by_name_op: createdByNameOp = null,
+    handled_by: handledBy = null,
+    created_by: createdById = null,
 } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, User, Customer } = models;
     const offset = (page - 1) * limit;
-    const where = { deleted_at: null };
+    // Include also soft-deleted challans (e.g. reversed) in listing.
+    // Reverse is implemented via deleteChallan() which soft-deletes challan.
+    const where = {};
+
+    // Compute warehouse ids the current user/team can manage.
+    // When enforcedHandledByIds is present (my_team listing), use it as the team scope;
+    // but when the array is empty, fall back to [user_id] so warehouse managers don't get an empty list.
+    const managerUserIds = Array.isArray(enforcedHandledByIds)
+        ? enforcedHandledByIds.length > 0
+            ? enforcedHandledByIds
+            : user_id
+              ? [user_id]
+              : []
+        : user_id
+          ? [user_id]
+          : [];
+    const scopedManagerUserIds = Array.isArray(managerUserIds)
+        ? managerUserIds.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
+        : [];
+
+    const allowedManagedWarehouseIds =
+        scopedManagerUserIds.length > 0
+            ? await CompanyWarehouse.findAll({
+                  include: [
+                      {
+                          model: User,
+                          as: "managers",
+                          attributes: [],
+                          required: true,
+                          where: { id: { [Op.in]: scopedManagerUserIds } },
+                      },
+                  ],
+                  attributes: ["id"],
+                  where: { deleted_at: null },
+              }).then((rows) => [...new Set(rows.map((w) => Number(w.id)))])
+            : [];
 
     if (order_id) {
         where.order_id = order_id;
+    }
+
+    if (isReversed !== null) {
+        where.is_reversed = !!isReversed;
     }
 
     if (search) {
         where[Op.or] = [
             { challan_no: { [Op.iLike]: `%${search}%` } },
             { transporter: { [Op.iLike]: `%${search}%` } },
+            { "$order.customer.customer_name$": { [Op.iLike]: `%${search}%` } },
+            { "$order.customer.mobile_number$": { [Op.iLike]: `%${search}%` } },
         ];
     }
 
@@ -270,6 +348,12 @@ const listChallans = async ({
         if (cond) where[Op.and].push(cond);
     }
 
+    // created_by filter (exact match on challan.created_by)
+    if (createdById) {
+        where[Op.and] = where[Op.and] || [];
+        where[Op.and].push({ created_by: createdById });
+    }
+
     // created_by_name filter (on joined creator user)
     if (createdByName) {
         where[Op.and] = where[Op.and] || [];
@@ -302,23 +386,9 @@ const listChallans = async ({
         }
     }
 
-    // Scope=my or my_warehouse: restrict to warehouses managed by the current user
+    // Scope=my or my_warehouse: restrict to warehouses managed by the current user/team (warehouse-manager view)
     if ((scope === "my" || scope === "my_warehouse") && user_id) {
-        const managedWarehouses = await CompanyWarehouse.findAll({
-            include: [
-                {
-                    model: User,
-                    as: "managers",
-                    attributes: [],
-                    required: true,
-                    where: { id: user_id },
-                },
-            ],
-            attributes: ["id"],
-        });
-
-        const warehouseIds = managedWarehouses.map((w) => w.id);
-        if (warehouseIds.length === 0) {
+        if (allowedManagedWarehouseIds.length === 0) {
             return {
                 data: [],
                 meta: {
@@ -329,8 +399,7 @@ const listChallans = async ({
                 },
             };
         }
-
-        where.warehouse_id = { [Op.in]: warehouseIds };
+        where.warehouse_id = { [Op.in]: allowedManagedWarehouseIds };
     }
 
     // Related model filters
@@ -338,6 +407,9 @@ const listChallans = async ({
     if (orderNumber) {
         const orderNumberCond = buildStringCondition("order_number", orderNumber, "contains");
         if (orderNumberCond) orderWhereAnd.push(orderNumberCond);
+    }
+    if (handledBy) {
+        orderWhereAnd.push({ handled_by: handledBy });
     }
     const orderWhere = orderWhereAnd.length > 0 ? { [Op.and]: orderWhereAnd } : null;
 
@@ -355,21 +427,21 @@ const listChallans = async ({
 
     if (Array.isArray(enforcedHandledByIds)) {
         where[Op.and] = where[Op.and] || [];
-        if (enforcedHandledByIds.length === 0) {
-            where[Op.and].push({
-                [Op.or]: [
-                    { created_by: { [Op.in]: [-1] } },
-                    { "$order.handled_by$": { [Op.in]: [-1] } },
-                ],
-            });
-        } else {
-            where[Op.and].push({
-                [Op.or]: [
-                    { created_by: { [Op.in]: enforcedHandledByIds } },
-                    { "$order.handled_by$": { [Op.in]: enforcedHandledByIds } },
-                ],
-            });
-        }
+
+        const handledIds = enforcedHandledByIds.length > 0 ? enforcedHandledByIds : [-1];
+        const warehouseIds = allowedManagedWarehouseIds.length > 0 ? allowedManagedWarehouseIds : [-1];
+
+        // Visibility union:
+        // - created_by in team ids
+        // - order.handled_by in team ids
+        // - OR challan.warehouse_id in warehouses managed by team/user
+        where[Op.and].push({
+            [Op.or]: [
+                { created_by: { [Op.in]: handledIds } },
+                { "$order.handled_by$": { [Op.in]: handledIds } },
+                { warehouse_id: { [Op.in]: warehouseIds } },
+            ],
+        });
     }
     const warehouseWhere = warehouseName
         ? buildStringCondition("name", warehouseName, "contains")
@@ -386,19 +458,20 @@ const listChallans = async ({
         offset,
         order: [[sortField, sortDir]],
         subQuery: false,
+        paranoid: false,
         include: [
             {
                 model: Order,
                 as: "order",
                 attributes: ["id", "order_number", "handled_by", "capacity", "consumer_no", "current_stage_key", "delivery_status"],
-                required: !!orderWhere || !!customerName || !!customerMobile || !!deliveryStatus,
+                required: !!orderWhere || !!customerName || !!customerMobile || !!deliveryStatus || !!search,
                 ...(orderWhere && { where: orderWhere }),
                 include: [
                     {
                         model: Customer,
                         as: "customer",
                         attributes: ["id", "customer_name", "mobile_number", "address", "district"],
-                        required: !!customerName || !!customerMobile,
+                        required: !!customerName || !!customerMobile || !!search,
                     },
                     {
                         model: User,
@@ -414,6 +487,12 @@ const listChallans = async ({
                 required: !!createdByName,
             },
             {
+                model: User,
+                as: "reversedByUser",
+                attributes: ["id", "name"],
+                required: false,
+            },
+            {
                 model: CompanyWarehouse,
                 as: "warehouse",
                 attributes: ["id", "name"],
@@ -424,6 +503,9 @@ const listChallans = async ({
                 model: ChallanItems,
                 as: "items",
                 attributes: ["id"],
+                // Avoid pagination mismatch from hasMany join row duplication.
+                // Listing needs only items count/length, and `separate` fetches items per challan.
+                separate: true,
             },
         ],
         distinct: true,
@@ -458,6 +540,9 @@ const listChallans = async ({
                   }
                 : null,
             created_by_name: row.createdByUser?.name ?? null,
+            is_reversed: row.is_reversed ?? false,
+            reversed_at: row.reversed_at ?? null,
+            reversed_by_name: row.reversedByUser?.name ?? null,
             handled_by_name: orderObj.handledBy?.name || null,
             warehouse: row.warehouse ? { id: row.warehouse.id, name: row.warehouse.name } : null,
             items: row.items || [],
@@ -480,11 +565,13 @@ const listChallans = async ({
 /**
  * Get challan by ID with all related data
  */
-const getChallanById = async ({ id } = {}) => {
+const getChallanById = async ({ id, transaction } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, User, ProjectScheme, Discom } = models;
     const challan = await Challan.findOne({
-        where: { id, deleted_at: null },
+        where: { id },
+        paranoid: false,
+        transaction,
         include: [
             {
                 model: Order,
@@ -527,6 +614,12 @@ const getChallanById = async ({ id } = {}) => {
                 attributes: ["id", "name", "contact_person", "mobile", "phone_no", "email", "address"],
             },
             {
+                model: User,
+                as: "reversedByUser",
+                attributes: ["id", "name"],
+                required: false,
+            },
+            {
                 model: ChallanItems,
                 as: "items",
                 include: [
@@ -561,7 +654,8 @@ const getChallanForPdf = async ({ id } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, Quotation, User } = models;
     const challan = await Challan.findOne({
-        where: { id, deleted_at: null },
+        where: { id },
+        paranoid: false,
         include: [
             {
                 model: Order,
@@ -1045,8 +1139,8 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
         await recomputeOrderDeliveryStatus(challanData.order_id, transaction);
     }
 
-    // Fetch created challan with items
-    return await getChallanById({ id: challan.id });
+    // Fetch created challan with items (transaction-safe read)
+    return await getChallanById({ id: challan.id, transaction });
 };
 
 /**
@@ -1096,7 +1190,7 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
 /**
  * Delete challan (soft delete)
  */
-const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null } = {}) => {
+const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null, markReversed = false } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, Product, StockSerial } = models;
     const challan = await Challan.findOne({
@@ -1252,6 +1346,17 @@ const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null } =
         }
     }
 
+    if (markReversed) {
+        await challan.update(
+            {
+                is_reversed: true,
+                reversed_at: new Date(),
+                reversed_by: user_id ?? null,
+            },
+            { transaction }
+        );
+    }
+
     await challan.destroy({ transaction });
 
     if (orderId) {
@@ -1358,7 +1463,7 @@ const reverseChallan = async ({
         ? `${reasonRow.reason} - ${trimmedRemarks}`
         : `${reasonRow.reason}`;
 
-    await deleteChallan({ id, user_id, transaction, ledgerReason });
+    await deleteChallan({ id, user_id, transaction, ledgerReason, markReversed: true });
     return { message: "Challan reversed successfully" };
 };
 
@@ -1612,6 +1717,7 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
 
 module.exports = {
     listChallans,
+    getManagedWarehouseIdsForUserIds,
     getChallanById,
     createChallan,
     updateChallan,
