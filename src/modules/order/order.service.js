@@ -2393,6 +2393,41 @@ const listDeliveryExecutionOrders = async ({
 };
 
 /**
+ * Get warehouse ids managed by any of the provided user ids.
+ * Used to extend list/guard logic for warehouse managers.
+ *
+ * @param {{ userIds?: number[], transaction?: any }} params
+ * @returns {Promise<number[]>}
+ */
+const getManagedWarehouseIdsForUserIds = async ({ userIds = [], transaction = null } = {}) => {
+    const models = getTenantModels();
+    const { CompanyWarehouse, User } = models;
+
+    const scopedUserIds = Array.isArray(userIds)
+        ? userIds.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
+        : [];
+    if (scopedUserIds.length === 0) return [];
+
+    const managedWarehouses = await CompanyWarehouse.findAll({
+        include: [
+            {
+                model: User,
+                as: "managers",
+                attributes: [],
+                required: true,
+                where: { id: { [Op.in]: scopedUserIds } },
+            },
+        ],
+        attributes: ["id"],
+        where: { deleted_at: null },
+        transaction: transaction || undefined,
+    });
+
+    const ids = managedWarehouses.map((w) => w.id).filter((id) => Number.isInteger(Number(id)));
+    return [...new Set(ids.map((id) => Number(id)))];
+};
+
+/**
  * List orders for Fabrication & Installation team: filter by logged-in user as fabricator/installer and tab.
  * Tab: pending_fabrication | pending_installation | completed_fabrication_15d | completed_installation_15d
  */
@@ -2415,6 +2450,13 @@ const listFabricationInstallationOrders = async ({
     const hasScopedUserIds = Array.isArray(scopedUserIds);
     const hasAnyScopedUsers = hasScopedUserIds && scopedUserIds.length > 0;
 
+    const managerUserIds = hasScopedUserIds ? scopedUserIds : [user_id];
+    const managedWarehouseIds = await getManagedWarehouseIdsForUserIds({ userIds: managerUserIds });
+    const managedWarehousePredicate =
+        managedWarehouseIds.length > 0
+            ? { planned_warehouse_id: { [Op.in]: managedWarehouseIds } }
+            : null;
+
     const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
     const where = {
         deleted_at: null,
@@ -2429,10 +2471,13 @@ const listFabricationInstallationOrders = async ({
         const sameAssigneeCond = hasScopedUserIds
             ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
             : { fabricator_installer_id: user_id };
+        const assigneePredicate = { [Op.or]: [fabricatorCond, sameAssigneeCond] };
+        const visibilityPredicate = managedWarehousePredicate
+            ? { [Op.or]: [assigneePredicate, managedWarehousePredicate] }
+            : assigneePredicate;
         where[Op.and] = [
-            { [Op.or]: [fabricatorCond, sameAssigneeCond] },
-            models.sequelize.literal("(stages->>'planner') = 'completed'"),
-            models.sequelize.literal("(stages->>'fabrication') IS DISTINCT FROM 'completed'"),
+            visibilityPredicate,
+            { current_stage_key: "fabrication" },
         ];
     } else if (tabVal === "pending_installation") {
         const installerCond = hasScopedUserIds
@@ -2442,9 +2487,10 @@ const listFabricationInstallationOrders = async ({
             ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
             : { fabricator_installer_id: user_id };
         where[Op.and] = [
-            { [Op.or]: [installerCond, sameAssigneeCond] },
-            models.sequelize.literal("(stages->>'fabrication') = 'completed'"),
-            models.sequelize.literal("(stages->>'installation') IS DISTINCT FROM 'completed'"),
+            (managedWarehousePredicate
+                ? { [Op.or]: [{ [Op.or]: [installerCond, sameAssigneeCond] }, managedWarehousePredicate] }
+                : { [Op.or]: [installerCond, sameAssigneeCond] }),
+            { current_stage_key: "installation" },
         ];
     } else if (tabVal === "completed_fabrication_15d") {
         const fabricatorCond = hasScopedUserIds
@@ -2453,8 +2499,12 @@ const listFabricationInstallationOrders = async ({
         const sameAssigneeCond = hasScopedUserIds
             ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
             : { fabricator_installer_id: user_id };
+        const assigneePredicate = { [Op.or]: [fabricatorCond, sameAssigneeCond] };
+        const visibilityPredicate = managedWarehousePredicate
+            ? { [Op.or]: [assigneePredicate, managedWarehousePredicate] }
+            : assigneePredicate;
         where[Op.and] = [
-            { [Op.or]: [fabricatorCond, sameAssigneeCond] },
+            visibilityPredicate,
             models.sequelize.literal("(stages->>'fabrication') = 'completed'"),
             { fabrication_completed_at: { [Op.gte]: fifteenDaysAgo } },
         ];
@@ -2465,9 +2515,22 @@ const listFabricationInstallationOrders = async ({
         const sameAssigneeCond = hasScopedUserIds
             ? (hasAnyScopedUsers ? { fabricator_installer_id: { [Op.in]: scopedUserIds } } : { fabricator_installer_id: { [Op.in]: [-1] } })
             : { fabricator_installer_id: user_id };
+        const assigneePredicate = { [Op.or]: [installerCond, sameAssigneeCond] };
+        const visibilityPredicate = managedWarehousePredicate
+            ? { [Op.or]: [assigneePredicate, managedWarehousePredicate] }
+            : assigneePredicate;
         where[Op.and] = [
-            { [Op.or]: [installerCond, sameAssigneeCond] },
-            models.sequelize.literal("(stages->>'installation') = 'completed'"),
+            visibilityPredicate,
+            {
+                current_stage_key: {
+                    [Op.in]: [
+                        "netmeter_apply",
+                        "netmeter_installed",
+                        "subsidy_claim",
+                        "subsidy_disbursed",
+                    ],
+                },
+            },
             { installation_completed_at: { [Op.gte]: fifteenDaysAgo } },
         ];
     } else {
@@ -2548,6 +2611,9 @@ const listFabricationInstallationOrders = async ({
             { model: Discom, as: "discom", attributes: ["id", "name"], required: false },
             { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
             { model: User, as: "handledBy", attributes: ["id", "name"], required: false },
+            { model: User, as: "orderFabricator", attributes: ["id", "name"], required: false },
+            { model: User, as: "orderInstaller", attributes: ["id", "name"], required: false },
+            { model: User, as: "orderFabricatorInstaller", attributes: ["id", "name"], required: false },
             { model: Product, as: "solarPanel", attributes: ["id", "product_name"], required: false },
             { model: Product, as: "inverter", attributes: ["id", "product_name"], required: false },
             { model: CompanyWarehouse, as: "plannedWarehouse", attributes: ["id", "name"], required: false },
@@ -2593,6 +2659,8 @@ const listFabricationInstallationOrders = async ({
             discom_name: row.discom?.name || null,
             branch_name: row.branch?.name || null,
             handled_by_name: row.handledBy?.name || null,
+            fabricator_name: row.orderFabricator?.name || row.orderFabricatorInstaller?.name || null,
+            installer_name: row.orderInstaller?.name || row.orderFabricatorInstaller?.name || null,
             solar_panel_name: row.solarPanel?.product_name || null,
             inverter_name: row.inverter?.product_name || null,
             planned_delivery_date: row.planned_delivery_date,
@@ -2735,6 +2803,7 @@ module.exports = {
     listPendingDeliveryOrders,
     listDeliveryExecutionOrders,
     listFabricationInstallationOrders,
+    getManagedWarehouseIdsForUserIds,
     getOrdersDashboardKpis,
     getOrdersDashboardPipeline,
     getOrdersDashboardTrend,
