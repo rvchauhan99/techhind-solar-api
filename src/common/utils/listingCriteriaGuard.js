@@ -10,7 +10,7 @@ const { RESPONSE_STATUS_CODES } = require("./constants.js");
  *
  * @param {object} record - Loaded entity (plain object or Sequelize model).
  * @param {{ listingCriteria: string, enforcedHandledByIds: number[] | null }} context - From resolve*VisibilityContext(req).
- * @param {{ handledByField?: string, createdByField?: string, orderHandledByPath?: string }} options - Which field(s) to check.
+ * @param {{ handledByField?: string, createdByField?: string, orderHandledByPath?: string, plannedWarehouseField?: string, allowedManagedWarehouseIds?: number[] | null }} options - Which field(s) to check.
  *   - handledByField: e.g. 'handled_by' for inquiry/order (record must have handled_by in enforcedHandledByIds).
  *   - createdByField + orderHandledByPath: for challan (allow if created_by OR order.handled_by in list).
  * @throws {AppError} 403 when listingCriteria is my_team and record is not in scope (do not use 404 to avoid leaking existence).
@@ -52,6 +52,27 @@ function assertRecordVisibleByListingCriteria(record, context, options = {}) {
     if (handledBy !== undefined && allowedSet.has(handledBy)) {
       return;
     }
+
+    // Warehouse manager bypass: allow when record planned_warehouse_id is managed
+    // by the scoped team (computed by controllers using company_warehouse_managers).
+    const plannedWarehouseField = options.plannedWarehouseField || "planned_warehouse_id";
+    const allowedManagedWarehouseIds =
+      Array.isArray(options.allowedManagedWarehouseIds) && options.allowedManagedWarehouseIds.length > 0
+        ? new Set(
+            options.allowedManagedWarehouseIds
+              .map((id) => (id != null ? Number(id) : null))
+              .filter((id) => Number.isInteger(id))
+          )
+        : null;
+    if (allowedManagedWarehouseIds) {
+      const plannedWarehouseId = record?.[plannedWarehouseField] != null
+        ? Number(record[plannedWarehouseField])
+        : undefined;
+      if (plannedWarehouseId !== undefined && allowedManagedWarehouseIds.has(plannedWarehouseId)) {
+        return;
+      }
+    }
+
     throw new AppError(
       "Forbidden: you do not have access to this record",
       RESPONSE_STATUS_CODES.FORBIDDEN

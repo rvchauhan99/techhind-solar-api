@@ -14,7 +14,19 @@ const getByOrderId = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Order not found", 404);
     }
     const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
-    assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team" &&
+        Array.isArray(context?.enforcedHandledByIds) &&
+        context.enforcedHandledByIds.length > 0
+            ? await orderService.getManagedWarehouseIdsForUserIds({
+                  userIds: context.enforcedHandledByIds,
+                  transaction: req.transaction,
+              })
+            : null;
+    assertRecordVisibleByListingCriteria(order, context, {
+        handledByField: "handled_by",
+        allowedManagedWarehouseIds,
+    });
     const installation = await installationService.getByOrderId(orderId);
     if (!installation) {
         return responseHandler.sendSuccess(res, null, "No installation record for this order", 200);
@@ -29,7 +41,19 @@ const createOrUpdate = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Order not found", 404);
     }
     const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
-    assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team" &&
+        Array.isArray(context?.enforcedHandledByIds) &&
+        context.enforcedHandledByIds.length > 0
+            ? await orderService.getManagedWarehouseIdsForUserIds({
+                  userIds: context.enforcedHandledByIds,
+                  transaction: req.transaction,
+              })
+            : null;
+    assertRecordVisibleByListingCriteria(order, context, {
+        handledByField: "handled_by",
+        allowedManagedWarehouseIds,
+    });
     const payload = { ...req.body };
     const result = await installationService.createOrUpdate(orderId, payload, {
         transaction: req.transaction,

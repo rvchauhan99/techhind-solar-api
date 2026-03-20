@@ -507,6 +507,10 @@ module.exports = (db) => {
     Order.belongsTo(User, { foreignKey: "handled_by", as: "handledBy" });
     Order.belongsTo(User, { foreignKey: "channel_partner_id", as: "channelPartner" });
     Order.belongsTo(User, { foreignKey: "cancelled_by", as: "cancelledByUser" });
+    // Order-level fabrication/installation assignees (used in Fabrication & Installation listing)
+    Order.belongsTo(User, { foreignKey: "fabricator_id", as: "orderFabricator" });
+    Order.belongsTo(User, { foreignKey: "installer_id", as: "orderInstaller" });
+    Order.belongsTo(User, { foreignKey: "fabricator_installer_id", as: "orderFabricatorInstaller" });
   }
   if (Order && InquirySource) {
     Order.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });

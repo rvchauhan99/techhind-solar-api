@@ -317,7 +317,19 @@ const getById = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Order not found", 404);
     }
     const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
-    assertRecordVisibleByListingCriteria(item, context, { handledByField: "handled_by" });
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team" &&
+        Array.isArray(context?.enforcedHandledByIds) &&
+        context.enforcedHandledByIds.length > 0
+            ? await orderService.getManagedWarehouseIdsForUserIds({
+                  userIds: context.enforcedHandledByIds,
+                  transaction: req.transaction,
+              })
+            : null;
+    assertRecordVisibleByListingCriteria(item, context, {
+        handledByField: "handled_by",
+        allowedManagedWarehouseIds,
+    });
     return responseHandler.sendSuccess(res, item, "Order fetched", 200);
 });
 
@@ -328,7 +340,19 @@ const generatePDF = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Order not found", 404);
     }
     const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
-    assertRecordVisibleByListingCriteria(order, context, { handledByField: "handled_by" });
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team" &&
+        Array.isArray(context?.enforcedHandledByIds) &&
+        context.enforcedHandledByIds.length > 0
+            ? await orderService.getManagedWarehouseIdsForUserIds({
+                  userIds: context.enforcedHandledByIds,
+                  transaction: req.transaction,
+              })
+            : null;
+    assertRecordVisibleByListingCriteria(order, context, {
+        handledByField: "handled_by",
+        allowedManagedWarehouseIds,
+    });
 
     const { Company, CompanyBankAccount } = getTenantModels();
     const company = await Company.findOne({ where: { deleted_at: null } });
@@ -378,7 +402,19 @@ const update = asyncHandler(async (req, res) => {
         return responseHandler.sendError(res, "Order not found", 404);
     }
     const context = await resolveOrderVisibilityContext(req, { useAnyOrderPage: true });
-    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team" &&
+        Array.isArray(context?.enforcedHandledByIds) &&
+        context.enforcedHandledByIds.length > 0
+            ? await orderService.getManagedWarehouseIdsForUserIds({
+                  userIds: context.enforcedHandledByIds,
+                  transaction: req.transaction,
+              })
+            : null;
+    assertRecordVisibleByListingCriteria(existing, context, {
+        handledByField: "handled_by",
+        allowedManagedWarehouseIds,
+    });
     const payload = { ...req.body };
 
     // Warehouse manager check only when explicitly assigning fabricator/installer (not when saving planner or other stages)
