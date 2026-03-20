@@ -63,13 +63,16 @@ const list = asyncHandler(async (req, res) => {
         created_by_name_op: createdByNameOp = null,
     } = req.query;
 
-    const { enforcedHandledByIds } = await resolveDeliveryChallanVisibilityContext(req);
+    const visibilityContext = await resolveDeliveryChallanVisibilityContext(req);
+    const { enforcedHandledByIds, listingCriteria } = visibilityContext;
+    // If role-module listing criteria is `all`, bypass warehouse scoping even if frontend sends `scope=my_warehouse`.
+    const effectiveScope = listingCriteria === "all" ? "all" : scope;
     const result = await challanService.listChallans({
         order_id: order_id ? parseInt(order_id, 10) : undefined,
         page: parseInt(page, 10),
         limit: parseInt(limit, 10),
         search: q,
-        scope,
+        scope: effectiveScope,
         user_id: req.user?.id,
         sortBy,
         sortOrder,
@@ -103,9 +106,21 @@ const getById = asyncHandler(async (req, res) => {
     }
     const context = await resolveDeliveryChallanVisibilityContext(req);
     const record = item.toJSON ? item.toJSON() : item;
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team"
+            ? await challanService.getManagedWarehouseIdsForUserIds({
+                  userIds:
+                      Array.isArray(context?.enforcedHandledByIds) && context.enforcedHandledByIds.length > 0
+                          ? context.enforcedHandledByIds
+                          : [req.user?.id],
+                  transaction: req.transaction,
+              })
+            : null;
     assertRecordVisibleByListingCriteria(record, context, {
         createdByField: "created_by",
         orderHandledByPath: "order.handled_by",
+        plannedWarehouseField: "warehouse_id",
+        allowedManagedWarehouseIds,
     });
     return responseHandler.sendSuccess(res, item, "Challan fetched", 200);
 });
@@ -118,9 +133,21 @@ const generatePDF = asyncHandler(async (req, res) => {
     }
     const context = await resolveDeliveryChallanVisibilityContext(req);
     const record = challan.toJSON ? challan.toJSON() : challan;
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team"
+            ? await challanService.getManagedWarehouseIdsForUserIds({
+                  userIds:
+                      Array.isArray(context?.enforcedHandledByIds) && context.enforcedHandledByIds.length > 0
+                          ? context.enforcedHandledByIds
+                          : [req.user?.id],
+                  transaction: req.transaction,
+              })
+            : null;
     assertRecordVisibleByListingCriteria(record, context, {
         createdByField: "created_by",
         orderHandledByPath: "order.handled_by",
+        plannedWarehouseField: "warehouse_id",
+        allowedManagedWarehouseIds,
     });
 
     const { Company } = getTenantModels();
@@ -181,9 +208,21 @@ const remove = asyncHandler(async (req, res) => {
     }
     const context = await resolveDeliveryChallanVisibilityContext(req);
     const record = item.toJSON ? item.toJSON() : item;
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team"
+            ? await challanService.getManagedWarehouseIdsForUserIds({
+                  userIds:
+                      Array.isArray(context?.enforcedHandledByIds) && context.enforcedHandledByIds.length > 0
+                          ? context.enforcedHandledByIds
+                          : [req.user?.id],
+                  transaction: req.transaction,
+              })
+            : null;
     assertRecordVisibleByListingCriteria(record, context, {
         createdByField: "created_by",
         orderHandledByPath: "order.handled_by",
+        plannedWarehouseField: "warehouse_id",
+        allowedManagedWarehouseIds,
     });
     const result = await challanService.deleteChallan({
         id,
@@ -203,9 +242,21 @@ const reverse = asyncHandler(async (req, res) => {
     }
     const context = await resolveDeliveryChallanVisibilityContext(req);
     const record = item.toJSON ? item.toJSON() : item;
+    const allowedManagedWarehouseIds =
+        context?.listingCriteria === "my_team"
+            ? await challanService.getManagedWarehouseIdsForUserIds({
+                  userIds:
+                      Array.isArray(context?.enforcedHandledByIds) && context.enforcedHandledByIds.length > 0
+                          ? context.enforcedHandledByIds
+                          : [req.user?.id],
+                  transaction: req.transaction,
+              })
+            : null;
     assertRecordVisibleByListingCriteria(record, context, {
         createdByField: "created_by",
         orderHandledByPath: "order.handled_by",
+        plannedWarehouseField: "warehouse_id",
+        allowedManagedWarehouseIds,
     });
     const { reason_id = null, remarks = null } = req.body || {};
     const result = await challanService.reverseChallan({

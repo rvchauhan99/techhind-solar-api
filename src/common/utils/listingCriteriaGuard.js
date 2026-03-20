@@ -23,6 +23,26 @@ function assertRecordVisibleByListingCriteria(record, context, options = {}) {
   if (!Array.isArray(enforcedHandledByIds)) {
     return;
   }
+  // Optional warehouse-manager bypass (used by challan + fabrication/installation flows).
+  // When provided, allow access if record[plannedWarehouseField] is inside allowedManagedWarehouseIds,
+  // regardless of which field the caller uses for created_by/handled_by checks.
+  const plannedWarehouseField = options.plannedWarehouseField || "planned_warehouse_id";
+  const allowedManagedWarehouseIds =
+    Array.isArray(options.allowedManagedWarehouseIds) && options.allowedManagedWarehouseIds.length > 0
+      ? new Set(
+          options.allowedManagedWarehouseIds
+            .map((id) => (id != null ? Number(id) : null))
+            .filter((id) => Number.isInteger(id))
+        )
+      : null;
+  if (allowedManagedWarehouseIds) {
+    const plannedWarehouseId =
+      record?.[plannedWarehouseField] != null ? Number(record[plannedWarehouseField]) : undefined;
+    if (plannedWarehouseId !== undefined && allowedManagedWarehouseIds.has(plannedWarehouseId)) {
+      return;
+    }
+  }
+
   if (enforcedHandledByIds.length === 0) {
     throw new AppError(
       "Forbidden: you do not have access to this record",
@@ -51,26 +71,6 @@ function assertRecordVisibleByListingCriteria(record, context, options = {}) {
       : undefined;
     if (handledBy !== undefined && allowedSet.has(handledBy)) {
       return;
-    }
-
-    // Warehouse manager bypass: allow when record planned_warehouse_id is managed
-    // by the scoped team (computed by controllers using company_warehouse_managers).
-    const plannedWarehouseField = options.plannedWarehouseField || "planned_warehouse_id";
-    const allowedManagedWarehouseIds =
-      Array.isArray(options.allowedManagedWarehouseIds) && options.allowedManagedWarehouseIds.length > 0
-        ? new Set(
-            options.allowedManagedWarehouseIds
-              .map((id) => (id != null ? Number(id) : null))
-              .filter((id) => Number.isInteger(id))
-          )
-        : null;
-    if (allowedManagedWarehouseIds) {
-      const plannedWarehouseId = record?.[plannedWarehouseField] != null
-        ? Number(record[plannedWarehouseField])
-        : undefined;
-      if (plannedWarehouseId !== undefined && allowedManagedWarehouseIds.has(plannedWarehouseId)) {
-        return;
-      }
     }
 
     throw new AppError(

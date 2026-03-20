@@ -134,6 +134,40 @@ const updateOrderBomShippedQuantities = async (orderId, transaction = null) => {
 };
 
 /**
+ * Return warehouse ids where any of `userIds` is a warehouse manager.
+ * Used for warehouse-manager visibility on challan list + actions.
+ *
+ * @param {{ userIds?: number[], transaction?: any }} params
+ * @returns {Promise<number[]>}
+ */
+const getManagedWarehouseIdsForUserIds = async ({ userIds = [], transaction = null } = {}) => {
+    const models = getTenantModels();
+    const { CompanyWarehouse, User } = models;
+
+    const scopedUserIds = Array.isArray(userIds)
+        ? userIds.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
+        : [];
+    if (scopedUserIds.length === 0) return [];
+
+    const managedWarehouses = await CompanyWarehouse.findAll({
+        include: [
+            {
+                model: User,
+                as: "managers",
+                attributes: [],
+                required: true,
+                where: { id: { [Op.in]: scopedUserIds } },
+            },
+        ],
+        attributes: ["id"],
+        where: { deleted_at: null },
+        transaction: transaction || undefined,
+    });
+
+    return [...new Set(managedWarehouses.map((w) => Number(w.id)))];
+};
+
+/**
  * Recompute and persist order.delivery_status ('pending' | 'partial' | 'complete')
  * based on BOM shipped and pending quantities.
  */
@@ -215,7 +249,42 @@ const listChallans = async ({
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, User, Customer } = models;
     const offset = (page - 1) * limit;
-    const where = { deleted_at: null };
+    // Include also soft-deleted challans (e.g. reversed) in listing.
+    // Reverse is implemented via deleteChallan() which soft-deletes challan.
+    const where = {};
+
+    // Compute warehouse ids the current user/team can manage.
+    // When enforcedHandledByIds is present (my_team listing), use it as the team scope;
+    // but when the array is empty, fall back to [user_id] so warehouse managers don't get an empty list.
+    const managerUserIds = Array.isArray(enforcedHandledByIds)
+        ? enforcedHandledByIds.length > 0
+            ? enforcedHandledByIds
+            : user_id
+              ? [user_id]
+              : []
+        : user_id
+          ? [user_id]
+          : [];
+    const scopedManagerUserIds = Array.isArray(managerUserIds)
+        ? managerUserIds.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0).map((id) => Number(id))
+        : [];
+
+    const allowedManagedWarehouseIds =
+        scopedManagerUserIds.length > 0
+            ? await CompanyWarehouse.findAll({
+                  include: [
+                      {
+                          model: User,
+                          as: "managers",
+                          attributes: [],
+                          required: true,
+                          where: { id: { [Op.in]: scopedManagerUserIds } },
+                      },
+                  ],
+                  attributes: ["id"],
+                  where: { deleted_at: null },
+              }).then((rows) => [...new Set(rows.map((w) => Number(w.id)))])
+            : [];
 
     if (order_id) {
         where.order_id = order_id;
@@ -302,23 +371,9 @@ const listChallans = async ({
         }
     }
 
-    // Scope=my or my_warehouse: restrict to warehouses managed by the current user
+    // Scope=my or my_warehouse: restrict to warehouses managed by the current user/team (warehouse-manager view)
     if ((scope === "my" || scope === "my_warehouse") && user_id) {
-        const managedWarehouses = await CompanyWarehouse.findAll({
-            include: [
-                {
-                    model: User,
-                    as: "managers",
-                    attributes: [],
-                    required: true,
-                    where: { id: user_id },
-                },
-            ],
-            attributes: ["id"],
-        });
-
-        const warehouseIds = managedWarehouses.map((w) => w.id);
-        if (warehouseIds.length === 0) {
+        if (allowedManagedWarehouseIds.length === 0) {
             return {
                 data: [],
                 meta: {
@@ -329,8 +384,7 @@ const listChallans = async ({
                 },
             };
         }
-
-        where.warehouse_id = { [Op.in]: warehouseIds };
+        where.warehouse_id = { [Op.in]: allowedManagedWarehouseIds };
     }
 
     // Related model filters
@@ -355,21 +409,21 @@ const listChallans = async ({
 
     if (Array.isArray(enforcedHandledByIds)) {
         where[Op.and] = where[Op.and] || [];
-        if (enforcedHandledByIds.length === 0) {
-            where[Op.and].push({
-                [Op.or]: [
-                    { created_by: { [Op.in]: [-1] } },
-                    { "$order.handled_by$": { [Op.in]: [-1] } },
-                ],
-            });
-        } else {
-            where[Op.and].push({
-                [Op.or]: [
-                    { created_by: { [Op.in]: enforcedHandledByIds } },
-                    { "$order.handled_by$": { [Op.in]: enforcedHandledByIds } },
-                ],
-            });
-        }
+
+        const handledIds = enforcedHandledByIds.length > 0 ? enforcedHandledByIds : [-1];
+        const warehouseIds = allowedManagedWarehouseIds.length > 0 ? allowedManagedWarehouseIds : [-1];
+
+        // Visibility union:
+        // - created_by in team ids
+        // - order.handled_by in team ids
+        // - OR challan.warehouse_id in warehouses managed by team/user
+        where[Op.and].push({
+            [Op.or]: [
+                { created_by: { [Op.in]: handledIds } },
+                { "$order.handled_by$": { [Op.in]: handledIds } },
+                { warehouse_id: { [Op.in]: warehouseIds } },
+            ],
+        });
     }
     const warehouseWhere = warehouseName
         ? buildStringCondition("name", warehouseName, "contains")
@@ -386,6 +440,7 @@ const listChallans = async ({
         offset,
         order: [[sortField, sortDir]],
         subQuery: false,
+        paranoid: false,
         include: [
             {
                 model: Order,
@@ -484,7 +539,8 @@ const getChallanById = async ({ id } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, User, ProjectScheme, Discom } = models;
     const challan = await Challan.findOne({
-        where: { id, deleted_at: null },
+        where: { id },
+        paranoid: false,
         include: [
             {
                 model: Order,
@@ -561,7 +617,8 @@ const getChallanForPdf = async ({ id } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, Quotation, User } = models;
     const challan = await Challan.findOne({
-        where: { id, deleted_at: null },
+        where: { id },
+        paranoid: false,
         include: [
             {
                 model: Order,
@@ -1612,6 +1669,7 @@ const getDeliveryStatus = async ({ order_id } = {}) => {
 
 module.exports = {
     listChallans,
+    getManagedWarehouseIdsForUserIds,
     getChallanById,
     createChallan,
     updateChallan,
