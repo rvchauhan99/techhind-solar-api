@@ -59,12 +59,32 @@ const list = asyncHandler(async (req, res) => {
         created_at_op: createdAtOp = null,
         customer_name: customerName = null,
         customer_mobile: customerMobile = null,
+        is_reversed: isReversed = null,
         created_by_name: createdByName = null,
         created_by_name_op: createdByNameOp = null,
+        handled_by: handledBy = null,
+        created_by: createdBy = null,
     } = req.query;
 
     const visibilityContext = await resolveDeliveryChallanVisibilityContext(req);
     const { enforcedHandledByIds, listingCriteria } = visibilityContext;
+
+    const parsedIsReversed =
+        isReversed == null || String(isReversed).trim() === ""
+            ? null
+            : ["true", "1", "yes"].includes(String(isReversed).toLowerCase());
+
+    const parsedIntOrNull = (v) => {
+        if (v == null) return null;
+        const s = String(v).trim();
+        if (s === "") return null;
+        const n = parseInt(s, 10);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    };
+
+    const parsedHandledBy = parsedIntOrNull(handledBy);
+    const parsedCreatedBy = parsedIntOrNull(createdBy);
+
     // If role-module listing criteria is `all`, bypass warehouse scoping even if frontend sends `scope=my_warehouse`.
     const effectiveScope = listingCriteria === "all" ? "all" : scope;
     const result = await challanService.listChallans({
@@ -91,8 +111,11 @@ const list = asyncHandler(async (req, res) => {
         enforced_handled_by_ids: enforcedHandledByIds,
         customer_name: customerName,
         customer_mobile: customerMobile,
+        is_reversed: parsedIsReversed,
         created_by_name: createdByName,
         created_by_name_op: createdByNameOp,
+        handled_by: parsedHandledBy,
+        created_by: parsedCreatedBy,
     });
 
     return responseHandler.sendSuccess(res, result, "Challan list fetched", 200);

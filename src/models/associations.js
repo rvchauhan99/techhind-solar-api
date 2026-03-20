@@ -842,6 +842,10 @@ module.exports = (db) => {
     Challan.belongsTo(CompanyWarehouse, { foreignKey: "warehouse_id", as: "warehouse" });
     CompanyWarehouse.hasMany(Challan, { foreignKey: "warehouse_id", as: "challans" });
   }
+  if (Challan && User) {
+    // Used to display "reversed by" metadata in history drawer.
+    Challan.belongsTo(User, { foreignKey: "reversed_by", as: "reversedByUser" });
+  }
   if (Challan && ChallanItems) {
     Challan.hasMany(ChallanItems, { foreignKey: "challan_id", as: "items" });
     ChallanItems.belongsTo(Challan, { foreignKey: "challan_id", as: "challan" });

@@ -243,8 +243,11 @@ const listChallans = async ({
     enforced_handled_by_ids: enforcedHandledByIds = null,
     customer_name: customerName = null,
     customer_mobile: customerMobile = null,
+        is_reversed: isReversed = null,
     created_by_name: createdByName = null,
     created_by_name_op: createdByNameOp = null,
+    handled_by: handledBy = null,
+    created_by: createdById = null,
 } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, User, Customer } = models;
@@ -290,10 +293,16 @@ const listChallans = async ({
         where.order_id = order_id;
     }
 
+    if (isReversed !== null) {
+        where.is_reversed = !!isReversed;
+    }
+
     if (search) {
         where[Op.or] = [
             { challan_no: { [Op.iLike]: `%${search}%` } },
             { transporter: { [Op.iLike]: `%${search}%` } },
+            { "$order.customer.customer_name$": { [Op.iLike]: `%${search}%` } },
+            { "$order.customer.mobile_number$": { [Op.iLike]: `%${search}%` } },
         ];
     }
 
@@ -337,6 +346,12 @@ const listChallans = async ({
         where[Op.and] = where[Op.and] || [];
         const cond = buildStringCondition("$order.delivery_status$", deliveryStatus, "equals");
         if (cond) where[Op.and].push(cond);
+    }
+
+    // created_by filter (exact match on challan.created_by)
+    if (createdById) {
+        where[Op.and] = where[Op.and] || [];
+        where[Op.and].push({ created_by: createdById });
     }
 
     // created_by_name filter (on joined creator user)
@@ -393,6 +408,9 @@ const listChallans = async ({
         const orderNumberCond = buildStringCondition("order_number", orderNumber, "contains");
         if (orderNumberCond) orderWhereAnd.push(orderNumberCond);
     }
+    if (handledBy) {
+        orderWhereAnd.push({ handled_by: handledBy });
+    }
     const orderWhere = orderWhereAnd.length > 0 ? { [Op.and]: orderWhereAnd } : null;
 
     // Customer filters (applied via nested association "$order.customer.field$")
@@ -446,14 +464,14 @@ const listChallans = async ({
                 model: Order,
                 as: "order",
                 attributes: ["id", "order_number", "handled_by", "capacity", "consumer_no", "current_stage_key", "delivery_status"],
-                required: !!orderWhere || !!customerName || !!customerMobile || !!deliveryStatus,
+                required: !!orderWhere || !!customerName || !!customerMobile || !!deliveryStatus || !!search,
                 ...(orderWhere && { where: orderWhere }),
                 include: [
                     {
                         model: Customer,
                         as: "customer",
                         attributes: ["id", "customer_name", "mobile_number", "address", "district"],
-                        required: !!customerName || !!customerMobile,
+                        required: !!customerName || !!customerMobile || !!search,
                     },
                     {
                         model: User,
@@ -469,6 +487,12 @@ const listChallans = async ({
                 required: !!createdByName,
             },
             {
+                model: User,
+                as: "reversedByUser",
+                attributes: ["id", "name"],
+                required: false,
+            },
+            {
                 model: CompanyWarehouse,
                 as: "warehouse",
                 attributes: ["id", "name"],
@@ -479,6 +503,9 @@ const listChallans = async ({
                 model: ChallanItems,
                 as: "items",
                 attributes: ["id"],
+                // Avoid pagination mismatch from hasMany join row duplication.
+                // Listing needs only items count/length, and `separate` fetches items per challan.
+                separate: true,
             },
         ],
         distinct: true,
@@ -513,6 +540,9 @@ const listChallans = async ({
                   }
                 : null,
             created_by_name: row.createdByUser?.name ?? null,
+            is_reversed: row.is_reversed ?? false,
+            reversed_at: row.reversed_at ?? null,
+            reversed_by_name: row.reversedByUser?.name ?? null,
             handled_by_name: orderObj.handledBy?.name || null,
             warehouse: row.warehouse ? { id: row.warehouse.id, name: row.warehouse.name } : null,
             items: row.items || [],
@@ -535,12 +565,13 @@ const listChallans = async ({
 /**
  * Get challan by ID with all related data
  */
-const getChallanById = async ({ id } = {}) => {
+const getChallanById = async ({ id, transaction } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, CompanyWarehouse, Product, ProductType, MeasurementUnit, Customer, User, ProjectScheme, Discom } = models;
     const challan = await Challan.findOne({
         where: { id },
         paranoid: false,
+        transaction,
         include: [
             {
                 model: Order,
@@ -581,6 +612,12 @@ const getChallanById = async ({ id } = {}) => {
                 model: CompanyWarehouse,
                 as: "warehouse",
                 attributes: ["id", "name", "contact_person", "mobile", "phone_no", "email", "address"],
+            },
+            {
+                model: User,
+                as: "reversedByUser",
+                attributes: ["id", "name"],
+                required: false,
             },
             {
                 model: ChallanItems,
@@ -1102,8 +1139,8 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
         await recomputeOrderDeliveryStatus(challanData.order_id, transaction);
     }
 
-    // Fetch created challan with items
-    return await getChallanById({ id: challan.id });
+    // Fetch created challan with items (transaction-safe read)
+    return await getChallanById({ id: challan.id, transaction });
 };
 
 /**
@@ -1153,7 +1190,7 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
 /**
  * Delete challan (soft delete)
  */
-const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null } = {}) => {
+const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null, markReversed = false } = {}) => {
     const models = getTenantModels();
     const { Challan, ChallanItems, Order, Product, StockSerial } = models;
     const challan = await Challan.findOne({
@@ -1309,6 +1346,17 @@ const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null } =
         }
     }
 
+    if (markReversed) {
+        await challan.update(
+            {
+                is_reversed: true,
+                reversed_at: new Date(),
+                reversed_by: user_id ?? null,
+            },
+            { transaction }
+        );
+    }
+
     await challan.destroy({ transaction });
 
     if (orderId) {
@@ -1415,7 +1463,7 @@ const reverseChallan = async ({
         ? `${reasonRow.reason} - ${trimmedRemarks}`
         : `${reasonRow.reason}`;
 
-    await deleteChallan({ id, user_id, transaction, ledgerReason });
+    await deleteChallan({ id, user_id, transaction, ledgerReason, markReversed: true });
     return { message: "Challan reversed successfully" };
 };
 
