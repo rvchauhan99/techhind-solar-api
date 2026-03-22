@@ -65,7 +65,9 @@ const listInquiries = async ({
   if (inquiryNumber) {
     where.inquiry_number = { [Op.iLike]: `%${inquiryNumber}%` };
   }
-  if (status) {
+  if (status === "all") {
+    // No status filter (e.g. global search includes converted inquiries)
+  } else if (status) {
     where.status = status;
   } else {
     where.status = { [Op.ne]: INQUIRY_STATUS.CONVERTED };
@@ -277,6 +279,7 @@ const listInquiries = async ({
       assigned_on: row.date_of_inquiry,
       next_reminder_date: row.next_reminder_date,
       created_at: row.created_at,
+      updated_at: row.updated_at,
       branch_name: row.branch?.name || null,
       branch_id: row.branch_id ?? row.branch?.id ?? null,
       email_id: row.customer?.email_id || null,

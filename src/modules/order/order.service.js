@@ -588,6 +588,8 @@ const listOrders = async ({
             project_phase_name: row.projectPhase?.name || null,
             order_remarks: row.order_remarks || null,
             application_no: row.application_no || null,
+            guvnl_no: row.guvnl_no || null,
+            netmeter_installed_on: row.netmeter_installed_on || null,
             date_of_registration_gov: row.date_of_registration_gov || null,
             payment_type: row.payment_type || null,
             estimate_due_date: row.estimate_due_date || null,
