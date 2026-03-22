@@ -1,99 +1,13 @@
 "use strict";
 
-const roleModuleService = require("../roleModule/roleModule.service.js");
 const marketingLeadService = require("../marketingLead/marketingLead.service.js");
 const inquiryService = require("../inquiry/inquiry.service.js");
 const orderService = require("../order/order.service.js");
 const quotationService = require("../quotation/quotation.service.js");
-const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
-const { resolveOrderVisibilityContext } = require("../order/orderVisibilityContext.js");
-
-const MODULE_MARKETING = "/marketing-leads";
-const MODULE_INQUIRY = "/inquiry";
-const MODULE_ORDER = "/order";
-const MODULE_QUOTATION = "/quotation";
 
 const MIN_Q_LEN = 2;
 const DEFAULT_PER_MODULE = 25;
 const DEFAULT_MAX_TOTAL = 100;
-
-function canRead(permission) {
-  if (!permission) return false;
-  const v = permission.can_read;
-  return v === true || v === 1;
-}
-
-async function resolveMarketingLeadVisibilityContext(req) {
-  const roleId = Number(req.user?.role_id);
-  const userId = Number(req.user?.id);
-  const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
-    {
-      roleId,
-      moduleRoute: MODULE_MARKETING,
-      moduleKey: "marketing_leads",
-    },
-    req.transaction
-  );
-
-  if (listingCriteria !== "my_team") {
-    return { listingCriteria, enforcedAssignedToIds: null };
-  }
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return { listingCriteria, enforcedAssignedToIds: [] };
-  }
-  const teamUserIds = await getTeamHierarchyUserIds(userId, {
-    transaction: req.transaction,
-  });
-  return { listingCriteria, enforcedAssignedToIds: teamUserIds };
-}
-
-async function resolveInquiryVisibilityContext(req) {
-  const roleId = Number(req.user?.role_id);
-  const userId = Number(req.user?.id);
-  const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
-    {
-      roleId,
-      moduleRoute: MODULE_INQUIRY,
-      moduleKey: "inquiry",
-    },
-    req.transaction
-  );
-
-  if (listingCriteria !== "my_team") {
-    return { listingCriteria, enforcedHandledByIds: null };
-  }
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return { listingCriteria, enforcedHandledByIds: [] };
-  }
-  const teamUserIds = await getTeamHierarchyUserIds(userId, {
-    transaction: req.transaction,
-  });
-  return { listingCriteria, enforcedHandledByIds: teamUserIds };
-}
-
-async function resolveQuotationVisibilityContext(req) {
-  const roleId = Number(req.user?.role_id);
-  const userId = Number(req.user?.id);
-  const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
-    {
-      roleId,
-      moduleRoute: MODULE_QUOTATION,
-      moduleKey: "quotation",
-    },
-    req.transaction
-  );
-
-  if (listingCriteria !== "my_team") {
-    return { listingCriteria, enforcedHandledByIds: null };
-  }
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return { listingCriteria, enforcedHandledByIds: [] };
-  }
-  const teamUserIds = await getTeamHierarchyUserIds(userId, {
-    transaction: req.transaction,
-  });
-  return { listingCriteria, enforcedHandledByIds: teamUserIds };
-}
 
 function ts(row) {
   const u = row.updated_at || row.sort_at;
@@ -217,102 +131,63 @@ async function runGlobalSearch(req, { q, perModuleLimit, maxTotal }) {
     200
   );
 
-  const roleId = Number(req.user?.role_id);
-  const tx = req.transaction;
-
-  const [permM, permI, permO, permQ] = await Promise.all([
-    roleModuleService.getPermissionForRoleAndModule(
-      { roleId, moduleRoute: MODULE_MARKETING },
-      tx
-    ),
-    roleModuleService.getPermissionForRoleAndModule(
-      { roleId, moduleRoute: MODULE_INQUIRY },
-      tx
-    ),
-    roleModuleService.getPermissionForRoleAndModule(
-      { roleId, moduleRoute: MODULE_ORDER },
-      tx
-    ),
-    roleModuleService.getPermissionForRoleAndModule(
-      { roleId, moduleRoute: MODULE_QUOTATION },
-      tx
-    ),
-  ]);
-
   const jobs = [];
 
-  if (canRead(permM)) {
-    jobs.push(
-      (async () => {
-        const { enforcedAssignedToIds } =
-          await resolveMarketingLeadVisibilityContext(req);
-        const result = await marketingLeadService.listLeads({
-          page: 1,
-          limit: limitEach,
-          search: trimmed,
-          sortBy: "updated_at",
-          sortOrder: "DESC",
-          enforced_assigned_to_ids: enforcedAssignedToIds,
-        });
-        return (result?.data || []).map(normalizeMarketingRow);
-      })()
-    );
-  }
+  jobs.push(
+    (async () => {
+      const result = await marketingLeadService.listLeads({
+        page: 1,
+        limit: limitEach,
+        search: trimmed,
+        sortBy: "updated_at",
+        sortOrder: "DESC",
+      });
+      return (result?.data || []).map(normalizeMarketingRow);
+    })()
+  );
 
-  if (canRead(permI)) {
-    jobs.push(
-      (async () => {
-        const { enforcedHandledByIds } = await resolveInquiryVisibilityContext(req);
-        const result = await inquiryService.listInquiries({
-          search: trimmed,
-          page: 1,
-          limit: limitEach,
-          sortBy: "updated_at",
-          sortOrder: "DESC",
-          status: "all",
-          enforced_handled_by_ids: enforcedHandledByIds,
-        });
-        return (result?.data || []).map(normalizeInquiryRow);
-      })()
-    );
-  }
+  jobs.push(
+    (async () => {
+      const result = await inquiryService.listInquiries({
+        search: trimmed,
+        page: 1,
+        limit: limitEach,
+        sortBy: "updated_at",
+        sortOrder: "DESC",
+        status: "all",
+      });
+      return (result?.data || []).map(normalizeInquiryRow);
+    })()
+  );
 
-  if (canRead(permO)) {
-    jobs.push(
-      (async () => {
-        const { enforcedHandledByIds } = await resolveOrderVisibilityContext(req);
-        const result = await orderService.listOrders({
-          page: 1,
-          limit: limitEach,
-          search: trimmed,
-          status: "all",
-          sortBy: "updated_at",
-          sortOrder: "DESC",
-          enforced_handled_by_ids: enforcedHandledByIds,
-        });
-        return (result?.data || []).map(normalizeOrderRow);
-      })()
-    );
-  }
+  jobs.push(
+    (async () => {
+      const result = await orderService.listOrders({
+        page: 1,
+        limit: limitEach,
+        search: trimmed,
+        status: "all",
+        sortBy: "updated_at",
+        sortOrder: "DESC",
+      });
+      return (result?.data || []).map(normalizeOrderRow);
+    })()
+  );
 
-  if (canRead(permQ)) {
-    jobs.push(
-      (async () => {
-        const { enforcedHandledByIds } = await resolveQuotationVisibilityContext(req);
-        const result = await quotationService.listQuotations({
-          search: trimmed,
-          page: 1,
-          limit: limitEach,
-          sortBy: "updated_at",
-          sortOrder: "DESC",
-          include_converted: true,
-          enforced_user_ids: enforcedHandledByIds,
-        });
-        const data = Array.isArray(result) ? result : result?.data || [];
-        return data.map(normalizeQuotationRow);
-      })()
-    );
-  }
+  jobs.push(
+    (async () => {
+      const result = await quotationService.listQuotations({
+        search: trimmed,
+        page: 1,
+        limit: limitEach,
+        sortBy: "updated_at",
+        sortOrder: "DESC",
+        include_converted: true,
+      });
+      const data = Array.isArray(result) ? result : result?.data || [];
+      return data.map(normalizeQuotationRow);
+    })()
+  );
 
   const settled = await Promise.allSettled(jobs);
   const chunks = [];
