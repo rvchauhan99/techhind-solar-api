@@ -2,6 +2,7 @@ const { Router } = require("express");
 const db = require("../models/index.js");
 const { requireAuthWithTenant } = require("../common/middlewares/auth.js");
 const { requireModulePermissionByMethod, requireModulePermissionAnyByMethod, STOCK_API_CONSUMER_ROUTES } = require("../common/middlewares/modulePermission.js");
+const globalSearchRoutes = require("../modules/globalSearch/globalSearch.routes.js");
 const authRoutes = require("../modules/auth/auth.routes.js");
 const moduleMasterRoutes = require("../modules/moduleMaster/moduleMaster.routes.js");
 const roleMasterRoutes = require("../modules/roleMaster/roleMaster.routes.js");
@@ -106,6 +107,10 @@ router.use("/home", homeRoutes);
 router.use("/confirm-orders", confirmOrdersRoutes);
 router.use("/closed-orders", closedOrdersRoutes);
 router.use("/cancelled-orders", cancelledOrdersRoutes);
+router.use(
+  "/global-search",
+  globalSearchRoutes
+);
 router.use("/marketing-leads", marketingLeadRoutes);
 router.use("/marketing-lead-followup", requireAuthWithTenant, requireModulePermissionByMethod({ moduleRoute: "/marketing-lead-followup" }), marketingLeadFollowupRoutes);
 router.use("/challan", requireAuthWithTenant, requireModulePermissionAnyByMethod({ moduleRoutes: ["/order", "/confirm-orders", "/closed-orders", "/delivery-challans"] }), challanRoutes);

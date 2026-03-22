@@ -145,9 +145,13 @@ const listQuotations = async ({
     ];
 
     if (search) {
+        const pat = `%${search}%`;
         where[Op.or] = [
-            { quotation_number: { [Op.iLike]: `%${search}%` } },
-            { customer_name: { [Op.iLike]: `%${search}%` } },
+            { quotation_number: { [Op.iLike]: pat } },
+            { customer_name: { [Op.iLike]: pat } },
+            { mobile_number: { [Op.iLike]: pat } },
+            { address: { [Op.iLike]: pat } },
+            { email: { [Op.iLike]: pat } },
         ];
     }
 
@@ -304,7 +308,9 @@ const listQuotations = async ({
             order_type_name: row.orderType?.name,
             project_scheme_name: row.projectScheme?.name,
             inquiry_number: row.inquiry?.inquiry_number,
+            address: row.address || null,
             created_at: row.created_at,
+            updated_at: row.updated_at,
             status: row.status,
             status_on: row.status_on,
             panel_make: row.panel_make,
