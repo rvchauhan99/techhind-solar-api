@@ -5,6 +5,7 @@ const responseHandler = require("../../common/utils/responseHandler.js");
 const marketingLeadService = require("./marketingLead.service.js");
 const roleModuleService = require("../roleModule/roleModule.service.js");
 const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 
 const MODULE_ROUTE = "/marketing-leads";
 const MODULE_KEY = "marketing_leads";
@@ -121,6 +122,8 @@ const getById = asyncHandler(async (req, res) => {
   if (!lead) {
     return responseHandler.sendError(res, "Marketing lead not found", 404);
   }
+  const context = await resolveMarketingLeadVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(lead, context, { handledByField: "assigned_to" });
   return responseHandler.sendSuccess(res, lead, "Marketing lead fetched", 200);
 });
 
@@ -138,6 +141,13 @@ const create = asyncHandler(async (req, res) => {
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const existing = await marketingLeadService.getLeadById({ id });
+  if (!existing) {
+    return responseHandler.sendError(res, "Marketing lead not found", 404);
+  }
+  const context = await resolveMarketingLeadVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(existing, context, { handledByField: "assigned_to" });
+
   const payload = req.body || {};
   const lead = await marketingLeadService.updateLead({
     id,
@@ -149,12 +159,26 @@ const update = asyncHandler(async (req, res) => {
 
 const remove = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const existing = await marketingLeadService.getLeadById({ id });
+  if (!existing) {
+    return responseHandler.sendError(res, "Marketing lead not found", 404);
+  }
+  const context = await resolveMarketingLeadVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(existing, context, { handledByField: "assigned_to" });
+
   await marketingLeadService.deleteLead({ id, transaction: req.transaction });
   return responseHandler.sendSuccess(res, true, "Marketing lead deleted", 200);
 });
 
 const addFollowUp = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const existing = await marketingLeadService.getLeadById({ id });
+  if (!existing) {
+    return responseHandler.sendError(res, "Marketing lead not found", 404);
+  }
+  const context = await resolveMarketingLeadVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(existing, context, { handledByField: "assigned_to" });
+
   const payload = req.body || {};
   const followUp = await marketingLeadService.addFollowUp({
     lead_id: id,
@@ -167,6 +191,13 @@ const addFollowUp = asyncHandler(async (req, res) => {
 
 const listFollowUps = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const existing = await marketingLeadService.getLeadById({ id });
+  if (!existing) {
+    return responseHandler.sendError(res, "Marketing lead not found", 404);
+  }
+  const context = await resolveMarketingLeadVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(existing, context, { handledByField: "assigned_to" });
+
   const { page = 1, limit = 20 } = req.query;
   const result = await marketingLeadService.listFollowUps({
     lead_id: id,
@@ -178,6 +209,13 @@ const listFollowUps = asyncHandler(async (req, res) => {
 
 const convertToInquiry = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const existing = await marketingLeadService.getLeadById({ id });
+  if (!existing) {
+    return responseHandler.sendError(res, "Marketing lead not found", 404);
+  }
+  const context = await resolveMarketingLeadVisibilityContext(req);
+  assertRecordVisibleByListingCriteria(existing, context, { handledByField: "assigned_to" });
+
   const payload = req.body || {};
   const result = await marketingLeadService.convertLeadToInquiry({
     id,
