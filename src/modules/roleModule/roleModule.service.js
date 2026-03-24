@@ -591,6 +591,27 @@ const getPermissionForRoleAndModule = async (
 };
 
 /**
+ * Resolve role name for diagnostics/logging only.
+ * Never throws so authorization behavior remains unchanged.
+ */
+const resolveRoleNameForLog = async (roleId, transaction = null) => {
+  const roleIdNum = Number(roleId);
+  if (!Number.isInteger(roleIdNum) || roleIdNum <= 0) return null;
+
+  try {
+    const { Role } = getTenantModels();
+    const role = await Role.findOne({
+      where: { id: roleIdNum, deleted_at: null },
+      attributes: ["id", "name"],
+      transaction,
+    });
+    return role?.name || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Assert that a role has permission on a module for a given action.
  * requiredAction: 'read' | 'create' | 'update' | 'delete'
  * Throws AppError(FORBIDDEN) on failure. Returns the permission row on success.
@@ -605,14 +626,17 @@ const assertModulePermission = async (
   } = {},
   transaction = null
 ) => {
+  const roleIdNum = Number(roleId) || null;
   const permission = await getPermissionForRoleAndModule(
     { roleId, moduleId, moduleRoute, moduleKey },
     transaction
   );
 
   if (!permission) {
+    const roleName = await resolveRoleNameForLog(roleId, transaction);
     console.warn("[rbac] Missing role-module mapping", {
-      roleId: Number(roleId) || null,
+      roleId: roleIdNum,
+      roleName,
       moduleId: moduleId ?? null,
       moduleRoute: moduleRoute || null,
       moduleKey: moduleKey || null,
@@ -634,8 +658,10 @@ const assertModulePermission = async (
   const allowed = permission[flagKey];
 
   if (!allowed) {
+    const roleName = await resolveRoleNameForLog(roleId, transaction);
     console.warn("[rbac] Action denied by role-module flags", {
-      roleId: Number(roleId) || null,
+      roleId: roleIdNum,
+      roleName,
       moduleId: permission?.module_id ?? moduleId ?? null,
       moduleRoute: moduleRoute || null,
       moduleKey: moduleKey || null,
