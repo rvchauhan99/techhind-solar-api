@@ -1,5 +1,6 @@
 "use strict";
 
+const path = require("path");
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const AppError = require("../../common/errors/AppError.js");
@@ -155,6 +156,56 @@ const getDocumentUrl = asyncHandler(async (req, res) => {
   }
 });
 
+const sanitizeFilename = (name) =>
+  String(name || "document")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180) || "document";
+
+const downloadDocument = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const document = await orderDocumentsService.getOrderDocumentById(id, null, req);
+  if (!document) {
+    return responseHandler.sendError(res, "Document not found", 404);
+  }
+  if (!document.document_path) {
+    return responseHandler.sendError(res, "Document path not found", 404);
+  }
+  if (document.document_path.startsWith("/")) {
+    return responseHandler.sendError(res, "Legacy document; use static URL", 400);
+  }
+
+  const ext = path.extname(document.document_path || "");
+  const baseName = sanitizeFilename(document.doc_type || `order-document-${id}`);
+  const filename = ext ? `${baseName}${ext}` : baseName;
+
+  try {
+    const bucketClient = bucketService.getBucketForRequest(req);
+    let object;
+    try {
+      object = await bucketService.getObjectWithClient(bucketClient, document.document_path);
+    } catch (tenantErr) {
+      if (bucketClient && req.tenant?.bucket) {
+        object = await bucketService.getObject(document.document_path);
+      } else {
+        throw tenantErr;
+      }
+    }
+
+    const body = object?.body;
+    if (!body) {
+      return responseHandler.sendError(res, "Document not found", 404);
+    }
+    res.setHeader("Content-Type", object?.contentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/"/g, '\\"')}"`);
+    res.send(body);
+  } catch (error) {
+    console.error("Error downloading document from bucket:", error);
+    return responseHandler.sendError(res, FILE_UNAVAILABLE_MESSAGE, 503);
+  }
+});
+
 const listOrderDocuments = asyncHandler(async (req, res) => {
   const { page, limit, q, order_id } = req.query;
   const result = await orderDocumentsService.listOrderDocuments(
@@ -176,5 +227,6 @@ module.exports = {
   deleteOrderDocument,
   getOrderDocumentById,
   getDocumentUrl,
+  downloadDocument,
   listOrderDocuments,
 };
