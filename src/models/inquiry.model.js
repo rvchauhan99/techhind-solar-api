@@ -126,6 +126,11 @@ const Inquiry = sequelize.define(
   }
 );
 
+// Duplicate inquiry prevention by customer mobile is enforced in
+// common/utils/assertNoDuplicateInquiryByMobile.js (used by inquiry create,
+// marketing lead convert, and quotation auto-inquiry). Not suitable here—mobile
+// lives on Customer, not Inquiry.
+
 Inquiry.beforeCreate(async (inquiry, options) => {
   if (!inquiry.inquiry_number) {
     const seq = (options?.transaction?.sequelize) || inquiry.sequelize;

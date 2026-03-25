@@ -7,6 +7,9 @@ const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const { QUOTATION_STATUS, INQUIRY_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { buildBomSnapshotFromProjectPrice, sortBomSnapshotByProductTypeDisplayOrder } = require("../../common/utils/bomFromProjectPrice.js");
+const {
+    assertNoDuplicateInquiryByMobile,
+} = require("../../common/utils/assertNoDuplicateInquiryByMobile.js");
 
 /** Derive panel_product and inverter_product from bom_snapshot when present (for response consistency). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -496,6 +499,21 @@ const createQuotation = async ({ payload, transaction } = {}) => {
             }
 
             if (customerId) {
+                let mobileForDuplicateCheck = created.mobile_number;
+                if (!mobileForDuplicateCheck) {
+                    const cust = await Customer.findOne({
+                        where: { id: customerId, deleted_at: null },
+                        attributes: ["mobile_number"],
+                        transaction: t,
+                    });
+                    mobileForDuplicateCheck = cust?.mobile_number;
+                }
+                await assertNoDuplicateInquiryByMobile({
+                    mobile_number: mobileForDuplicateCheck,
+                    models,
+                    transaction: t,
+                });
+
                 const newInquiry = await Inquiry.create({
                     customer_id: customerId,
                     date_of_inquiry: new Date(),
