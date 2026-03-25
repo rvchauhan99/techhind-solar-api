@@ -526,6 +526,32 @@ async function copyObject(sourceKey, destKey, options = {}) {
 }
 
 /**
+ * Copy object within a specific client bucket.
+ * Useful for tenant-scoped bucket operations.
+ * @param {{ s3: AWS.S3, bucketName: string }} client
+ * @param {string} sourceKey
+ * @param {string} destKey
+ * @param {object} options - { acl?, metadata? }
+ * @returns {Promise<object>}
+ */
+async function copyObjectWithClient(client, sourceKey, destKey, options = {}) {
+  if (!client) throw new Error("client is required");
+  if (!sourceKey || !destKey) throw new Error("sourceKey and destKey are required");
+  const { s3, bucketName: bucket } = client;
+  const copySource = `${bucket}/${sourceKey}`;
+  const params = {
+    Bucket: bucket,
+    Key: destKey,
+    CopySource: copySource,
+  };
+  if (options.acl) params.ACL = options.acl;
+  if (options.metadata) params.Metadata = options.metadata;
+  const result = await s3.copyObject(params).promise();
+  logBucketAction("COPY", bucket, `${sourceKey} -> ${destKey} (client)`);
+  return result;
+}
+
+/**
  * Get bucket client for the current request. Use req.tenant.bucket when available (tenant context), else default from env.
  * @param {object} req - Express request (may have req.tenant.bucket)
  * @returns {{ s3: AWS.S3, bucketName: string }}
@@ -586,4 +612,5 @@ module.exports = {
   fileExistsWithClient,
   listObjects,
   copyObject,
+  copyObjectWithClient,
 };

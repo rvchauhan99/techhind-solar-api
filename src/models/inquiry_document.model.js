@@ -15,6 +15,16 @@ const InquiryDocument = sequelize.define(
     doc_type: { type: DataTypes.STRING, allowNull: false },
     document_path: { type: DataTypes.STRING, allowNull: false },
     remarks: { type: DataTypes.TEXT, allowNull: true },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    },
+    updated_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "users", key: "id" },
+    },
     created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     deleted_at: { type: DataTypes.DATE, allowNull: true },

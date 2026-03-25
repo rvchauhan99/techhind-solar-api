@@ -4,7 +4,19 @@ const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const { getCurrentUser } = require("../../common/utils/requestContext.js");
 const bucketService = require("../../common/services/bucket.service.js");
+
+function parseAllowMultiple(value) {
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
+  if (typeof value === "string") {
+    const s = value.trim().toLowerCase();
+    if (["true", "yes", "y", "allow", "multiple"].includes(s)) return true;
+    if (["false", "no", "n", "deny"].includes(s)) return false;
+  }
+  return Boolean(value);
+}
 
 const createInquiryDocument = async (payload, transaction = null, req = null) => {
   const models = getTenantModels(req);
@@ -42,26 +54,33 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
     throw new AppError("Document type not found", RESPONSE_STATUS_CODES.NOT_FOUND);
   }
 
+  const userId = req?.user?.id ?? getCurrentUser();
+
   // Check if multiple documents are allowed for this type
-  if (!docType.allow_multiple) {
+  if (!parseAllowMultiple(docType.allow_multiple)) {
     // Check if a document of this type already exists for this inquiry
-    const existingDoc = await InquiryDocument.findOne({
+    // (use findAll so we can collapse duplicates created by older behavior)
+    const existingDocs = await InquiryDocument.findAll({
       where: {
         inquiry_id: payload.inquiry_id,
         doc_type: payload.doc_type,
         deleted_at: null,
       },
+      order: [["created_at", "DESC"]],
       transaction,
     });
 
-    if (existingDoc) {
+    if (existingDocs && existingDocs.length > 0) {
+      const target = existingDocs[0];
       // Replace existing document: delete old bucket object (best-effort) and soft-delete DB row.
       try {
         if (req) {
           const bucketClient = bucketService.getBucketForRequest(req);
-          const oldKey = existingDoc.document_path;
-          if (oldKey && !String(oldKey).startsWith("/")) {
-            await bucketService.deleteFileWithClient(bucketClient, oldKey);
+          for (const d of existingDocs) {
+            const oldKey = d?.document_path;
+            if (oldKey && !String(oldKey).startsWith("/")) {
+              await bucketService.deleteFileWithClient(bucketClient, oldKey);
+            }
           }
         }
       } catch (err) {
@@ -69,7 +88,36 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
         // Continue replacement even if bucket deletion fails.
       }
 
-      await existingDoc.destroy({ transaction });
+      await target.update(
+        {
+          document_path: payload.document_path,
+          remarks: payload.remarks || null,
+          // Ensure audit reflects the latest uploader.
+          ...(userId != null ? { updated_by: userId } : {}),
+        },
+        { transaction }
+      );
+
+      // Soft-delete any additional duplicates (keep only the latest row we updated).
+      for (const extra of existingDocs.slice(1)) {
+        await extra.destroy({ transaction });
+      }
+
+      // Return updated document (with inquiry reference) without creating a new row.
+      const updatedDocument = await InquiryDocument.findOne({
+        where: { id: target.id },
+        include: [
+          {
+            model: Inquiry,
+            as: "inquiry",
+            attributes: ["id", "inquiry_number"],
+            required: false,
+          },
+        ],
+        transaction,
+      });
+
+      return updatedDocument.toJSON();
     }
   }
 
@@ -79,6 +127,12 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
     document_path: payload.document_path,
     remarks: payload.remarks || null,
   };
+
+  if (userId != null) {
+    // Keep created_by stable when supplied by caller; always set updated_by for latest editor.
+    if (createPayload.created_by == null) createPayload.created_by = userId;
+    createPayload.updated_by = userId;
+  }
 
   const document = await InquiryDocument.create(createPayload, { transaction });
   
@@ -115,6 +169,11 @@ const updateInquiryDocument = async (id, payload, transaction = null, req = null
   if (payload.doc_type !== undefined) updatePayload.doc_type = payload.doc_type;
   if (payload.document_path !== undefined) updatePayload.document_path = payload.document_path;
   if (payload.remarks !== undefined) updatePayload.remarks = payload.remarks;
+
+  const userId = req?.user?.id ?? getCurrentUser();
+  if (userId != null) {
+    updatePayload.updated_by = userId;
+  }
 
   await document.update(updatePayload, { transaction });
 
@@ -175,7 +234,7 @@ const getInquiryDocumentById = async (id, transaction = null, req = null) => {
 
 const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null }, transaction = null, req = null) => {
   const models = getTenantModels(req);
-  const { InquiryDocument, Inquiry } = models;
+  const { InquiryDocument, Inquiry, User } = models;
   const where = { deleted_at: null };
 
   if (inquiry_id) {
@@ -200,6 +259,18 @@ const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null
         attributes: ["id", "inquiry_number"],
         required: false,
       },
+      {
+        model: User,
+        as: "updatedByUser",
+        attributes: ["id", "name"],
+        required: false,
+      },
+      {
+        model: User,
+        as: "createdByUser",
+        attributes: ["id", "name"],
+        required: false,
+      },
     ],
     order: [["created_at", "DESC"]],
     limit,
@@ -208,7 +279,11 @@ const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null
   });
 
   return {
-    data: rows.map((row) => row.toJSON()),
+    data: rows.map((row) => {
+      const obj = row.toJSON();
+      obj.updated_by_name = obj.updatedByUser?.name ?? obj.createdByUser?.name ?? null;
+      return obj;
+    }),
     total: count,
     page,
     limit,
