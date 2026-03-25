@@ -2,11 +2,21 @@
 
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const { getCurrentUser } = require("../../common/utils/requestContext.js");
 
 const createOrderDocument = async (payload, transaction, req) => {
     const models = getTenantModels(req);
     const { OrderDocument } = models;
-    const document = await OrderDocument.create(payload, { transaction });
+    const userId = req?.user?.id ?? getCurrentUser();
+    const createPayload = { ...payload };
+
+    if (userId != null) {
+        if (createPayload.created_by == null) createPayload.created_by = userId;
+        // Always reflect the last editor on create.
+        createPayload.updated_by = userId;
+    }
+
+    const document = await OrderDocument.create(createPayload, { transaction });
     return document;
 };
 
@@ -16,6 +26,11 @@ const updateOrderDocument = async (id, updates, transaction, req) => {
     const document = await OrderDocument.findByPk(id);
     if (!document) {
         throw new Error("Document not found");
+    }
+    const userId = req?.user?.id ?? getCurrentUser();
+    if (userId != null) {
+        // Always reflect the last editor on update.
+        updates.updated_by = userId;
     }
     await document.update(updates, { transaction });
     return document;
@@ -58,17 +73,37 @@ const listOrderDocuments = async ({ order_id, page = 1, limit = 20, q = null }, 
     }
 
     const models = getTenantModels(req);
-    const { OrderDocument } = models;
+    const { OrderDocument, User } = models;
     const { count, rows } = await OrderDocument.findAndCountAll({
         where,
         limit,
         offset,
         order: [["created_at", "DESC"]],
+        include: [
+            {
+                model: User,
+                as: "updatedByUser",
+                attributes: ["id", "name"],
+                required: false,
+            },
+            {
+                model: User,
+                as: "createdByUser",
+                attributes: ["id", "name"],
+                required: false,
+            },
+        ],
         transaction,
     });
 
+    const rowsData = rows.map((row) => {
+        const obj = row?.toJSON ? row.toJSON() : row;
+        obj.updated_by_name = obj.updatedByUser?.name ?? obj.createdByUser?.name ?? null;
+        return obj;
+    });
+
     return {
-        data: rows,
+        data: rowsData,
         meta: {
             page,
             limit,

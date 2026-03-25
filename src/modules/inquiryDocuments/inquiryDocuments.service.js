@@ -4,6 +4,7 @@ const { Op } = require("sequelize");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const { getCurrentUser } = require("../../common/utils/requestContext.js");
 const bucketService = require("../../common/services/bucket.service.js");
 
 const createInquiryDocument = async (payload, transaction = null, req = null) => {
@@ -80,6 +81,13 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
     remarks: payload.remarks || null,
   };
 
+  const userId = req?.user?.id ?? getCurrentUser();
+  if (userId != null) {
+    // Keep created_by stable when supplied by caller; always set updated_by for latest editor.
+    if (createPayload.created_by == null) createPayload.created_by = userId;
+    createPayload.updated_by = userId;
+  }
+
   const document = await InquiryDocument.create(createPayload, { transaction });
   
   // Fetch with associations
@@ -115,6 +123,11 @@ const updateInquiryDocument = async (id, payload, transaction = null, req = null
   if (payload.doc_type !== undefined) updatePayload.doc_type = payload.doc_type;
   if (payload.document_path !== undefined) updatePayload.document_path = payload.document_path;
   if (payload.remarks !== undefined) updatePayload.remarks = payload.remarks;
+
+  const userId = req?.user?.id ?? getCurrentUser();
+  if (userId != null) {
+    updatePayload.updated_by = userId;
+  }
 
   await document.update(updatePayload, { transaction });
 
@@ -175,7 +188,7 @@ const getInquiryDocumentById = async (id, transaction = null, req = null) => {
 
 const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null }, transaction = null, req = null) => {
   const models = getTenantModels(req);
-  const { InquiryDocument, Inquiry } = models;
+  const { InquiryDocument, Inquiry, User } = models;
   const where = { deleted_at: null };
 
   if (inquiry_id) {
@@ -200,6 +213,18 @@ const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null
         attributes: ["id", "inquiry_number"],
         required: false,
       },
+      {
+        model: User,
+        as: "updatedByUser",
+        attributes: ["id", "name"],
+        required: false,
+      },
+      {
+        model: User,
+        as: "createdByUser",
+        attributes: ["id", "name"],
+        required: false,
+      },
     ],
     order: [["created_at", "DESC"]],
     limit,
@@ -208,7 +233,11 @@ const listInquiryDocuments = async ({ inquiry_id, page = 1, limit = 20, q = null
   });
 
   return {
-    data: rows.map((row) => row.toJSON()),
+    data: rows.map((row) => {
+      const obj = row.toJSON();
+      obj.updated_by_name = obj.updatedByUser?.name ?? obj.createdByUser?.name ?? null;
+      return obj;
+    }),
     total: count,
     page,
     limit,
