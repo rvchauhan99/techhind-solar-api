@@ -8,6 +8,9 @@ const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const notificationService = require("../notification/notification.service.js");
 const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
+const {
+  assertNoDuplicateInquiryByMobile,
+} = require("../../common/utils/assertNoDuplicateInquiryByMobile.js");
 
 const normalizeLike = (s) => {
   if (s == null) return null;
@@ -706,6 +709,23 @@ const convertLeadToInquiry = async ({ id, payload, user, transaction } = {}) => 
       inquiry_id: inquiry?.id || lead.converted_inquiry_id,
     };
   }
+
+  let mobileForDuplicateCheck = lead.mobile_number;
+  if (payload?.customer_id) {
+    const existingCustomer = await Customer.findOne({
+      where: { id: payload.customer_id, deleted_at: null },
+      attributes: ["mobile_number"],
+      transaction,
+    });
+    if (existingCustomer) {
+      mobileForDuplicateCheck = existingCustomer.mobile_number;
+    }
+  }
+  await assertNoDuplicateInquiryByMobile({
+    mobile_number: mobileForDuplicateCheck,
+    models,
+    transaction,
+  });
 
   // create or reuse customer
   let customerId = payload?.customer_id || null;
