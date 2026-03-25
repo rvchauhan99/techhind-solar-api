@@ -398,6 +398,7 @@ const create = asyncHandler(async (req, res) => {
     const created = await orderService.createOrder({
         payload,
         transaction: req.transaction,
+        req,
     });
     return responseHandler.sendSuccess(res, created, "Order created", 201);
 });

@@ -202,7 +202,8 @@ const orderPaymentsController = {
                             document_path: payment.receipt_cheque_file,
                             remarks: payment.receipt_number || `Payment #${payment.id}`,
                         },
-                        req.transaction
+                        req.transaction,
+                        req
                     );
                 }
             }

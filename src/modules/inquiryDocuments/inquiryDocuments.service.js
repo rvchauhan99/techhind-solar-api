@@ -7,6 +7,17 @@ const { getTenantModels } = require("../tenant/tenantModels.js");
 const { getCurrentUser } = require("../../common/utils/requestContext.js");
 const bucketService = require("../../common/services/bucket.service.js");
 
+function parseAllowMultiple(value) {
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
+  if (typeof value === "string") {
+    const s = value.trim().toLowerCase();
+    if (["true", "yes", "y", "allow", "multiple"].includes(s)) return true;
+    if (["false", "no", "n", "deny"].includes(s)) return false;
+  }
+  return Boolean(value);
+}
+
 const createInquiryDocument = async (payload, transaction = null, req = null) => {
   const models = getTenantModels(req);
   const { InquiryDocument, Inquiry, OrderDocumentType } = models;
@@ -43,26 +54,33 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
     throw new AppError("Document type not found", RESPONSE_STATUS_CODES.NOT_FOUND);
   }
 
+  const userId = req?.user?.id ?? getCurrentUser();
+
   // Check if multiple documents are allowed for this type
-  if (!docType.allow_multiple) {
+  if (!parseAllowMultiple(docType.allow_multiple)) {
     // Check if a document of this type already exists for this inquiry
-    const existingDoc = await InquiryDocument.findOne({
+    // (use findAll so we can collapse duplicates created by older behavior)
+    const existingDocs = await InquiryDocument.findAll({
       where: {
         inquiry_id: payload.inquiry_id,
         doc_type: payload.doc_type,
         deleted_at: null,
       },
+      order: [["created_at", "DESC"]],
       transaction,
     });
 
-    if (existingDoc) {
+    if (existingDocs && existingDocs.length > 0) {
+      const target = existingDocs[0];
       // Replace existing document: delete old bucket object (best-effort) and soft-delete DB row.
       try {
         if (req) {
           const bucketClient = bucketService.getBucketForRequest(req);
-          const oldKey = existingDoc.document_path;
-          if (oldKey && !String(oldKey).startsWith("/")) {
-            await bucketService.deleteFileWithClient(bucketClient, oldKey);
+          for (const d of existingDocs) {
+            const oldKey = d?.document_path;
+            if (oldKey && !String(oldKey).startsWith("/")) {
+              await bucketService.deleteFileWithClient(bucketClient, oldKey);
+            }
           }
         }
       } catch (err) {
@@ -70,7 +88,36 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
         // Continue replacement even if bucket deletion fails.
       }
 
-      await existingDoc.destroy({ transaction });
+      await target.update(
+        {
+          document_path: payload.document_path,
+          remarks: payload.remarks || null,
+          // Ensure audit reflects the latest uploader.
+          ...(userId != null ? { updated_by: userId } : {}),
+        },
+        { transaction }
+      );
+
+      // Soft-delete any additional duplicates (keep only the latest row we updated).
+      for (const extra of existingDocs.slice(1)) {
+        await extra.destroy({ transaction });
+      }
+
+      // Return updated document (with inquiry reference) without creating a new row.
+      const updatedDocument = await InquiryDocument.findOne({
+        where: { id: target.id },
+        include: [
+          {
+            model: Inquiry,
+            as: "inquiry",
+            attributes: ["id", "inquiry_number"],
+            required: false,
+          },
+        ],
+        transaction,
+      });
+
+      return updatedDocument.toJSON();
     }
   }
 
@@ -81,7 +128,6 @@ const createInquiryDocument = async (payload, transaction = null, req = null) =>
     remarks: payload.remarks || null,
   };
 
-  const userId = req?.user?.id ?? getCurrentUser();
   if (userId != null) {
     // Keep created_by stable when supplied by caller; always set updated_by for latest editor.
     if (createPayload.created_by == null) createPayload.created_by = userId;

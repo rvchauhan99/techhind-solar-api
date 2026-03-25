@@ -3,10 +3,22 @@
 const { Op } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const { getCurrentUser } = require("../../common/utils/requestContext.js");
+const bucketService = require("../../common/services/bucket.service.js");
+
+function parseAllowMultiple(value) {
+    if (value === true || value === 1 || value === "1") return true;
+    if (value === false || value === 0 || value === "0") return false;
+    if (typeof value === "string") {
+        const s = value.trim().toLowerCase();
+        if (["true", "yes", "y", "allow", "multiple"].includes(s)) return true;
+        if (["false", "no", "n", "deny"].includes(s)) return false;
+    }
+    return Boolean(value);
+}
 
 const createOrderDocument = async (payload, transaction, req) => {
     const models = getTenantModels(req);
-    const { OrderDocument } = models;
+    const { OrderDocument, OrderDocumentType } = models;
     const userId = req?.user?.id ?? getCurrentUser();
     const createPayload = { ...payload };
 
@@ -14,6 +26,57 @@ const createOrderDocument = async (payload, transaction, req) => {
         if (createPayload.created_by == null) createPayload.created_by = userId;
         // Always reflect the last editor on create.
         createPayload.updated_by = userId;
+    }
+
+    // Master config: allow_multiple controls whether duplicates are allowed for this doc_type.
+    const docTypeRow = await OrderDocumentType.findOne({
+        where: { type: payload.doc_type, deleted_at: null },
+        transaction,
+    });
+    const allowMultiple = parseAllowMultiple(docTypeRow?.allow_multiple);
+
+    if (!allowMultiple) {
+        // Find the latest existing doc for this (order_id, doc_type), then update in place.
+        const existingDocs = await OrderDocument.findAll({
+            where: { order_id: payload.order_id, doc_type: payload.doc_type, deleted_at: null },
+            order: [["created_at", "DESC"]],
+            transaction,
+        });
+
+        if (existingDocs && existingDocs.length > 0) {
+            const target = existingDocs[0];
+            const bucketClient = req ? bucketService.getBucketForRequest(req) : null;
+
+            // Delete bucket objects for all previous docs (best-effort).
+            await Promise.all(
+                existingDocs.map(async (d) => {
+                    const key = d?.document_path;
+                    if (!bucketClient) return;
+                    if (!key || String(key).startsWith("/")) return; // legacy/static
+                    try {
+                        await bucketService.deleteFileWithClient(bucketClient, key);
+                    } catch (e) {
+                        // ignore deletion failure; DB will still point to new document_path
+                    }
+                })
+            );
+
+            await target.update(
+                {
+                    document_path: createPayload.document_path,
+                    remarks: createPayload.remarks ?? null,
+                    updated_by: userId ?? target.updated_by,
+                },
+                { transaction }
+            );
+
+            // Remove any additional duplicates (we keep only the latest row, which we updated above).
+            for (const extra of existingDocs.slice(1)) {
+                await extra.destroy({ transaction });
+            }
+
+            return target;
+        }
     }
 
     const document = await OrderDocument.create(createPayload, { transaction });

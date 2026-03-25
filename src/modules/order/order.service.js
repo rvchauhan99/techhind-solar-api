@@ -10,6 +10,7 @@ const { buildBomSnapshotFromProjectPrice } = require("../../common/utils/bomFrom
 const notificationService = require("../notification/notification.service.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
+const bucketService = require("../../common/services/bucket.service.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -1209,12 +1210,13 @@ const getOrderById = async ({ id } = {}) => {
     };
 };
 
-const createOrder = async ({ payload, transaction } = {}) => {
-    const models = getTenantModels();
+const createOrder = async ({ payload, transaction, req } = {}) => {
+    const models = getTenantModels(req);
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
         State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        InquiryDocument, OrderDocument, OrderDocumentType,
     } = models;
     const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
@@ -1383,6 +1385,104 @@ const createOrder = async ({ payload, transaction } = {}) => {
                         transaction: t,
                     }
                 );
+            }
+        }
+
+        // Carry-forward inquiry documents to order_documents.
+        // Rules:
+        // - If allow_multiple=false for a doc_type: carry only the latest inquiry document (created_at DESC).
+        // - If allow_multiple=true: carry all inquiry documents for that doc_type.
+        // - If order_documents already has rows for order_id+doc_type: replace them with the carried-forward set.
+        const inquiryIdForDocs = payload.inquiry_id || quotationForStatus?.inquiry_id;
+        if (inquiryIdForDocs != null) {
+            const orderId = created?.id;
+            if (orderId != null) {
+                const parseAllowMultiple = (value) => {
+                    if (value === true || value === 1 || value === "1") return true;
+                    if (value === false || value === 0 || value === "0") return false;
+                    if (typeof value === "string") {
+                        const s = value.trim().toLowerCase();
+                        if (["true", "yes", "y", "allow", "multiple"].includes(s)) return true;
+                        if (["false", "no", "n", "deny"].includes(s)) return false;
+                    }
+                    return Boolean(value);
+                };
+
+                const allowMultipleRows = await OrderDocumentType.findAll({
+                    where: { deleted_at: null },
+                    attributes: ["type", "allow_multiple"],
+                    transaction: t,
+                });
+                const allowMultipleByDocType = {};
+                (allowMultipleRows || []).forEach((r) => {
+                    allowMultipleByDocType[r.type] = parseAllowMultiple(r.allow_multiple);
+                });
+
+                const inquiryDocs = await InquiryDocument.findAll({
+                    where: { inquiry_id: inquiryIdForDocs, deleted_at: null },
+                    order: [["created_at", "DESC"]],
+                    transaction: t,
+                });
+
+                // Group by doc_type. For allow_multiple=false, first doc is already the latest.
+                const docsByType = new Map();
+                for (const d of inquiryDocs || []) {
+                    const dt = d.doc_type;
+                    const allowMultiple = allowMultipleByDocType[dt] ?? false;
+                    if (!docsByType.has(dt)) docsByType.set(dt, []);
+                    if (!allowMultiple) {
+                        if (docsByType.get(dt).length === 0) docsByType.set(dt, [d]);
+                    } else {
+                        docsByType.get(dt).push(d);
+                    }
+                }
+
+                const bucketClient = req ? bucketService.getBucketForRequest(req) : bucketService.getClient();
+
+                for (const [docType, docs] of docsByType.entries()) {
+                    const copiedDocs = [];
+                    for (const inquiryDoc of docs) {
+                        const rawSourceKey = String(inquiryDoc.document_path || "").replace(/^\/+/, "");
+                        if (!rawSourceKey) continue;
+
+                        const destKey = rawSourceKey.startsWith("inquiry-documents/")
+                            ? rawSourceKey.replace(/^inquiry-documents\//, "order-documents/")
+                            : rawSourceKey;
+
+                        try {
+                            if (destKey !== rawSourceKey) {
+                                await bucketService.copyObjectWithClient(bucketClient, rawSourceKey, destKey);
+                            }
+                            copiedDocs.push({ destKey, inquiryDoc });
+                        } catch (err) {
+                            console.warn(
+                                "[order] Failed to copy inquiry document to order bucket:",
+                                docType,
+                                err?.message || err
+                            );
+                        }
+                    }
+
+                    if (copiedDocs.length > 0) {
+                        // Replace existing rows for this order+doc_type.
+                        await OrderDocument.destroy({
+                            where: { order_id: orderId, doc_type: docType },
+                            transaction: t,
+                        });
+
+                        for (const { destKey, inquiryDoc } of copiedDocs) {
+                            await OrderDocument.create(
+                                {
+                                    order_id: orderId,
+                                    doc_type: docType,
+                                    document_path: destKey,
+                                    remarks: inquiryDoc.remarks ?? null,
+                                },
+                                { transaction: t }
+                            );
+                        }
+                    }
+                }
             }
         }
 
