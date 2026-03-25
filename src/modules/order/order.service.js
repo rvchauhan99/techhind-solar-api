@@ -188,6 +188,7 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         handled_by,
         branch_id,
         inquiry_source_id,
+        project_scheme_id,
         order_number,
         consumer_no,
         application_no,
@@ -228,6 +229,11 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
     if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
         const sid = parseInt(inquiry_source_id, 10);
         if (!Number.isNaN(sid)) where.inquiry_source_id = sid;
+    }
+
+    if (project_scheme_id != null && String(project_scheme_id).trim() !== "") {
+        const psid = parseInt(project_scheme_id, 10);
+        if (!Number.isNaN(psid)) where.project_scheme_id = psid;
     }
 
     if (consumer_no) {
@@ -305,6 +311,7 @@ const listOrders = async ({
     mobile_number,
     branch_id,
     inquiry_source_id,
+    project_scheme_id,
     consumer_no,
     application_no,
     reference_from,
@@ -357,6 +364,11 @@ const listOrders = async ({
     if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
         const sid = parseInt(inquiry_source_id, 10);
         if (!Number.isNaN(sid)) where.inquiry_source_id = sid;
+    }
+
+    if (project_scheme_id != null && String(project_scheme_id).trim() !== "") {
+        const psid = parseInt(project_scheme_id, 10);
+        if (!Number.isNaN(psid)) where.project_scheme_id = psid;
     }
 
     if (consumer_no) {
