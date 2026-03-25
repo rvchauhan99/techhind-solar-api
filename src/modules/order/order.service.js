@@ -1533,6 +1533,30 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
 
         if (!order) throw new Error("Order not found");
 
+        // Normalize payload for Sequelize/Postgres:
+        // - Many UI form fields submit `""` for "not selected" (or `"Invalid date"`).
+        // - Passing `""` into BIGINT/DATE/NUMBER columns causes Postgres cast errors.
+        const normalizePayloadForSequelize = (input) => {
+            if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+            const normalized = { ...input };
+
+            for (const [key, value] of Object.entries(normalized)) {
+                if (value === "" || (typeof value === "string" && value.trim() === "")) {
+                    normalized[key] = null;
+                    continue;
+                }
+
+                if (typeof value === "string" && value.trim().toLowerCase() === "invalid date") {
+                    normalized[key] = null;
+                    continue;
+                }
+            }
+
+            return normalized;
+        };
+
+        payload = normalizePayloadForSequelize(payload);
+
         // When Planner sends project_price_id and order has no BOM, build BOM from project and set on order
         let bomSnapshotFromProject = null;
         let derivedSolarPanelId = null;
