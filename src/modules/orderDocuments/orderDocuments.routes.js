@@ -10,6 +10,7 @@ const router = Router();
 // Order Documents Routes
 router.get("/", ...requireAuthWithTenant, controller.listOrderDocuments);
 router.get("/:id/url", ...requireAuthWithTenant, controller.getDocumentUrl);
+router.get("/:id/download", ...requireAuthWithTenant, controller.downloadDocument);
 router.get("/:id", ...requireAuthWithTenant, controller.getOrderDocumentById);
 router.post("/", ...requireAuthWithTenant, uploadMemory.single("document"), controller.createOrderDocument);
 router.put("/:id", ...requireAuthWithTenant, uploadMemory.single("document"), controller.updateOrderDocument);

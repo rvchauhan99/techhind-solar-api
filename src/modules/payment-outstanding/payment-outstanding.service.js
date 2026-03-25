@@ -40,6 +40,8 @@ function buildCommonFilters(query = {}) {
     reference_from,
     order_date_from,
     order_date_to,
+    delivery_date_from,
+    delivery_date_to,
     current_stage_key,
     customer_name,
     mobile_number,
@@ -97,6 +99,11 @@ function buildCommonFilters(query = {}) {
     where.order_date = {};
     if (order_date_from) where.order_date[Op.gte] = order_date_from;
     if (order_date_to) where.order_date[Op.lte] = order_date_to;
+  }
+  if (delivery_date_from || delivery_date_to) {
+    where.planned_delivery_date = {};
+    if (delivery_date_from) where.planned_delivery_date[Op.gte] = delivery_date_from;
+    if (delivery_date_to) where.planned_delivery_date[Op.lte] = delivery_date_to;
   }
 
   if (current_stage_key != null && String(current_stage_key).trim() !== "") {
@@ -163,6 +170,9 @@ async function listOutstanding(query) {
     "order_date",
     "branch_id",
     "handled_by",
+    "planned_delivery_date",
+    "netmeter_applied_on",
+    "disbursed_date",
     "project_cost",
     [Sequelize.literal(paidSubquerySql), "total_paid"],
     [Sequelize.literal(`"Order"."project_cost" - ${paidSubquerySql}`), "outstanding"],
@@ -239,6 +249,8 @@ async function kpis(query) {
   if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
   if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
+  if (where.planned_delivery_date?.[Op.gte]) { whereClauses.push("o.planned_delivery_date >= :delivery_date_from"); replacements.delivery_date_from = where.planned_delivery_date[Op.gte]; }
+  if (where.planned_delivery_date?.[Op.lte]) { whereClauses.push("o.planned_delivery_date <= :delivery_date_to"); replacements.delivery_date_to = where.planned_delivery_date[Op.lte]; }
   // NOTE: Trend must always show full history; ignore order_date filters here.
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
@@ -327,6 +339,8 @@ async function trend(query) {
   if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
   if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
+  if (where.planned_delivery_date?.[Op.gte]) { whereClauses.push("o.planned_delivery_date >= :delivery_date_from"); replacements.delivery_date_from = where.planned_delivery_date[Op.gte]; }
+  if (where.planned_delivery_date?.[Op.lte]) { whereClauses.push("o.planned_delivery_date <= :delivery_date_to"); replacements.delivery_date_to = where.planned_delivery_date[Op.lte]; }
   // NOTE: Trend must always show full history; ignore order_date filters here.
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
@@ -410,6 +424,8 @@ async function analysis(query) {
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
   if (where.order_date?.[Op.gte]) { whereClauses.push("o.order_date >= :order_date_from"); replacements.order_date_from = where.order_date[Op.gte]; }
   if (where.order_date?.[Op.lte]) { whereClauses.push("o.order_date <= :order_date_to"); replacements.order_date_to = where.order_date[Op.lte]; }
+  if (where.planned_delivery_date?.[Op.gte]) { whereClauses.push("o.planned_delivery_date >= :delivery_date_from"); replacements.delivery_date_from = where.planned_delivery_date[Op.gte]; }
+  if (where.planned_delivery_date?.[Op.lte]) { whereClauses.push("o.planned_delivery_date <= :delivery_date_to"); replacements.delivery_date_to = where.planned_delivery_date[Op.lte]; }
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
   if (query.q) {

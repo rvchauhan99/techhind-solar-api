@@ -2791,6 +2791,80 @@ const cancelOrder = async ({ id, payload = {}, transaction, user }) => {
     return order.toJSON ? order.toJSON() : order;
 };
 
+const reassignHandledByForConfirmedOrder = async ({
+    id,
+    new_handled_by,
+    reason: _reason = null,
+    user: _user,
+    transaction,
+} = {}) => {
+    const models = getTenantModels();
+    const { Order, User } = models;
+    const txOptions = transaction ? { transaction } : {};
+    const parsedOrderId = Number.parseInt(id, 10);
+    const targetHandledBy = Number.parseInt(new_handled_by, 10);
+
+    if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+        const error = new Error("Valid order id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+    if (!Number.isInteger(targetHandledBy) || targetHandledBy <= 0) {
+        const error = new Error("Valid handled_by is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const order = await Order.findOne({
+        where: { id: parsedOrderId, deleted_at: null },
+        ...txOptions,
+    });
+    if (!order) {
+        const error = new Error("Order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (String(order.status || "").toLowerCase() !== "confirmed") {
+        const error = new Error("Handled By can be changed only for confirmed orders");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    await assertActiveUserIds([targetHandledBy], {
+        transaction,
+        models,
+        fieldLabel: "Handled By user",
+    });
+
+    const currentHandledBy = Number.parseInt(order.handled_by, 10);
+    if (currentHandledBy === targetHandledBy) {
+        const enrichedNoop = await Order.findOne({
+            where: { id: parsedOrderId, deleted_at: null },
+            include: [{ model: User, as: "handledBy", attributes: ["id", "name"], required: false }],
+            ...txOptions,
+        });
+        return {
+            ...(enrichedNoop?.toJSON ? enrichedNoop.toJSON() : order.toJSON ? order.toJSON() : order),
+            reassignment_noop: true,
+        };
+    }
+
+    await order.update(
+        {
+            handled_by: targetHandledBy,
+        },
+        txOptions
+    );
+
+    const enriched = await Order.findOne({
+        where: { id: parsedOrderId, deleted_at: null },
+        include: [{ model: User, as: "handledBy", attributes: ["id", "name"], required: false }],
+        ...txOptions,
+    });
+    return enriched?.toJSON ? enriched.toJSON() : order.toJSON ? order.toJSON() : order;
+};
+
 module.exports = {
     listOrders,
     exportOrders,
@@ -2802,6 +2876,7 @@ module.exports = {
     getSolarPanels,
     getInverters,
     cancelOrder,
+    reassignHandledByForConfirmedOrder,
     listPendingDeliveryOrders,
     listDeliveryExecutionOrders,
     listFabricationInstallationOrders,
