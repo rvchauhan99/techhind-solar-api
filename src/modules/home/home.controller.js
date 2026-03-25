@@ -19,6 +19,7 @@ const normalizeDashboardFilters = (query = {}) => {
         order_date_to = null,
         status = null,
         current_stage_key = null,
+        project_scheme_id = null,
     } = query;
 
     let from = order_date_from;
@@ -46,6 +47,7 @@ const normalizeDashboardFilters = (query = {}) => {
         order_date_to: to,
         status,
         current_stage_key,
+        project_scheme_id,
     };
 };
 
@@ -107,6 +109,7 @@ const dashboardOrders = asyncHandler(async (req, res) => {
         application_no: filters.application_no,
         reference_from: filters.reference_from,
         current_stage_key: filters.current_stage_key,
+        project_scheme_id: filters.project_scheme_id,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
 
