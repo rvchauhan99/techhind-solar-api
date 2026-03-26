@@ -79,6 +79,9 @@ module.exports = (db) => {
     PurchaseReturnItem,
     PurchaseReturnSerial,
     PaymentFollowUp,
+    FacebookAccount,
+    FacebookPage,
+    FacebookLeadForm,
   } = db;
 
   // User ↔ Role
@@ -1016,6 +1019,26 @@ module.exports = (db) => {
 
   if (User) {
     Object.values(db).forEach(ensureAuditAssociations);
+  }
+
+  // ─── Facebook Lead Ads associations ───────────────────────────────────────
+
+  // FacebookAccount ↔ User (who connected the account)
+  if (FacebookAccount && User) {
+    FacebookAccount.belongsTo(User, { foreignKey: "user_id", as: "user" });
+    User.hasMany(FacebookAccount, { foreignKey: "user_id", as: "facebookAccounts" });
+  }
+
+  // FacebookPage ↔ FacebookAccount (One account → many pages)
+  if (FacebookPage && FacebookAccount) {
+    FacebookPage.belongsTo(FacebookAccount, { foreignKey: "account_id", as: "account" });
+    FacebookAccount.hasMany(FacebookPage, { foreignKey: "account_id", as: "pages" });
+  }
+
+  // FacebookLeadForm ↔ FacebookPage (One page → many forms)
+  if (FacebookLeadForm && FacebookPage) {
+    FacebookLeadForm.belongsTo(FacebookPage, { foreignKey: "page_id", as: "page" });
+    FacebookPage.hasMany(FacebookLeadForm, { foreignKey: "page_id", as: "leadForms" });
   }
 
 };
