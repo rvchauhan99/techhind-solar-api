@@ -18,8 +18,27 @@ const bucketService = require("../../common/services/bucket.service.js");
 function getTenantKeyForPublicRequest(req) {
   const fromBody = req.body?.tenant_key != null ? String(req.body.tenant_key).trim() : "";
   if (fromBody) return fromBody;
+
+  const fromQuery = req.query?.tenant_key != null ? String(req.query.tenant_key).trim() : "";
+  if (fromQuery) return fromQuery;
+
   const fromHeader = req.get("x-tenant-key");
   if (fromHeader && String(fromHeader).trim()) return String(fromHeader).trim();
+
+  // Fallback: Check for Meta 'state' parameter (OAuth redirect)
+  const fromStateStr = req.query?.state;
+  console.log(`[tenant/public] req.query:`, JSON.stringify(req.query));
+  
+  if (fromStateStr) {
+    try {
+      const state = JSON.parse(Buffer.from(fromStateStr, "base64").toString());
+      console.log(`[tenant/public] Parsed state from query:`, JSON.stringify(state));
+      if (state.tenant_key) return String(state.tenant_key).trim();
+    } catch (err) {
+      console.error(`[tenant/public] Failed to parse state:`, err.message);
+    }
+  }
+
   const domain = (process.env.APP_DOMAIN || "").replace(/^\.|\.$/g, "");
   if (domain && req.hostname) {
     const host = req.hostname.toLowerCase();
@@ -46,7 +65,7 @@ async function tenantContextForPublicAuthMiddleware(req, res, next) {
       if (!tenantKey) {
         return next(
           new AppError(
-            "tenant_key is required for password reset (send in request body or X-Tenant-Key header)",
+            "tenant_key is required (send in request body, X-Tenant-Key header, or resolve via subdomain/state)",
             RESPONSE_STATUS_CODES.BAD_REQUEST
           )
         );
