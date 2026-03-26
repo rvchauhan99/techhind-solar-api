@@ -20,7 +20,8 @@ const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     for (const line of bom_snapshot) {
         const product = getBomLineProduct(line);
         const typeName = norm(product?.product_type_name || "");
-        if (typeName === "panel" && out.solar_panel_id == null) out.solar_panel_id = line.product_id;
+        const isPanel = typeName === "panel" || typeName === "solar_panel";
+        if (isPanel && out.solar_panel_id == null) out.solar_panel_id = line.product_id;
         if (typeName === "inverter" && out.inverter_id == null) out.inverter_id = line.product_id;
         if (out.solar_panel_id != null && out.inverter_id != null) break;
     }
@@ -1559,17 +1560,26 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
 
         // When Planner sends project_price_id and order has no BOM, build BOM from project and set on order
         let bomSnapshotFromProject = null;
-        let derivedSolarPanelId = null;
-        let derivedInverterId = null;
         if (payload.project_price_id != null && (!order.bom_snapshot || order.bom_snapshot.length === 0)) {
             const built = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t, models);
             if (built && built.length > 0) {
                 bomSnapshotFromProject = normalizeOrderBomSnapshot(built);
-                const derived = derivePanelAndInverterFromBomSnapshot(built);
-                derivedSolarPanelId = derived.solar_panel_id;
-                derivedInverterId = derived.inverter_id;
             }
         }
+
+        /** BOM snapshot used this request to sync order-level panel/inverter product ids (planner PATCH or project import). */
+        let snapshotForProductIds = null;
+        if (bomSnapshotFromProject && bomSnapshotFromProject.length > 0) {
+            snapshotForProductIds = bomSnapshotFromProject;
+        } else if (payload.bom_snapshot != null && Array.isArray(payload.bom_snapshot)) {
+            snapshotForProductIds = normalizeOrderBomSnapshot(payload.bom_snapshot);
+        }
+        const bomDerived =
+            snapshotForProductIds != null
+                ? derivePanelAndInverterFromBomSnapshot(snapshotForProductIds)
+                : { solar_panel_id: null, inverter_id: null };
+        const bomDerivedPanelId = bomDerived.solar_panel_id;
+        const bomDerivedInverterId = bomDerived.inverter_id;
 
         const previousStatus = order.status;
         const previousPlannedWarehouseId = order.planned_warehouse_id;
@@ -1709,8 +1719,12 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 geda_registration_date: payload.geda_registration_date ?? order.geda_registration_date,
                 payment_type: payload.payment_type ?? order.payment_type,
                 loan_type_id: payload.loan_type_id ?? order.loan_type_id,
-                solar_panel_id: payload.solar_panel_id ?? derivedSolarPanelId ?? order.solar_panel_id,
-                inverter_id: payload.inverter_id ?? derivedInverterId ?? order.inverter_id,
+                solar_panel_id:
+                    payload.solar_panel_id ??
+                    (snapshotForProductIds != null ? bomDerivedPanelId : order.solar_panel_id),
+                inverter_id:
+                    payload.inverter_id ??
+                    (snapshotForProductIds != null ? bomDerivedInverterId : order.inverter_id),
                 project_phase_id: payload.project_phase_id ?? order.project_phase_id,
                 project_price_id: payload.project_price_id ?? order.project_price_id,
                 order_remarks: payload.order_remarks ?? order.order_remarks,
