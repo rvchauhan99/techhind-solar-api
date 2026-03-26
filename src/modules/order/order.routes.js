@@ -6,6 +6,7 @@ const { requireModulePermission, requireModulePermissionAny } = require("../../c
 const controller = require("./order.controller.js");
 const fabricationController = require("../fabrication/fabrication.controller.js");
 const installationController = require("../installation/installation.controller.js");
+const orderImportRoutes = require("./orderImport/orderImport.routes.js");
 
 const router = Router();
 
@@ -54,5 +55,8 @@ router.get("/:id/pdf", ...requireAuthWithTenant, orderReadAny, controller.genera
 router.get("/:id", ...requireAuthWithTenant, orderReadAny, controller.getById);
 router.put("/:id", ...requireAuthWithTenant, orderUpdateAny, controller.update);
 router.delete("/:id", ...requireAuthWithTenant, pendingOrders("delete"), controller.remove);
+
+// Order Import (CSV)
+router.use("/import", orderImportRoutes);
 
 module.exports = router;
