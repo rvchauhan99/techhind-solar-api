@@ -95,6 +95,33 @@ function trim(s) {
     return typeof s === "string" ? s.trim() : (s == null ? "" : String(s));
 }
 
+// Some CSV exports include UTF-8 BOM at the start of the first header column.
+// Example: header becomes "\ufefforder_number" instead of "order_number".
+const ORDER_NUMBER_BOM_KEY = "\ufefforder_number";
+function getOrderNumberFromRow(row) {
+    if (!row || typeof row !== "object") return undefined;
+    const direct = row.order_number;
+    if (direct != null && trim(direct) !== "") return direct;
+
+    const bom = row[ORDER_NUMBER_BOM_KEY];
+    if (bom != null && trim(bom) !== "") return bom;
+
+    // Fallback for unexpected header variants like "Order Number" or stray whitespace/BOM.
+    for (const k of Object.keys(row)) {
+        const normalizedKey = String(k)
+            .replace(/\ufeff/g, "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "_");
+        if (normalizedKey === "order_number") {
+            const v = row[k];
+            if (v != null && trim(v) !== "") return v;
+        }
+    }
+
+    return undefined;
+}
+
 function parseBool(v) {
     const s = String(v || "").toLowerCase().trim();
     return s === "true" || s === "1" || s === "yes";
@@ -103,6 +130,29 @@ function parseBool(v) {
 function parseDate(v) {
     const s = trim(v);
     if (!s) return null;
+    // Handle common CSV/Excel formats explicitly (JS `new Date()` is inconsistent for `DD.MM.YYYY`).
+    // Examples:
+    // - 31.12.2025
+    // - 08-05.2025
+    // - 01/12/2025
+    // - 02/07/25
+    const dot = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/);
+    const dash = s.match(/^(\d{1,2})-(\d{1,2})\.(\d{2}|\d{4})$/); // e.g. 08-05.2025
+    const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+
+    const pick = dot || dash || slash;
+    if (pick) {
+        const day = Number(pick[1]);
+        const month = Number(pick[2]);
+        let year = Number(pick[3]);
+        if (year < 100) year += 2000; // treat `25` as 2025
+
+        // Use UTC to avoid timezone shifting of the date portion.
+        const d = new Date(Date.UTC(year, month - 1, day));
+        return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    }
+
+    // Fallback: ISO/other formats that Date can parse reliably.
     const d = new Date(s);
     return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
@@ -139,6 +189,15 @@ function normalizeCsvRow(row) {
     if (row["Payment Type"] !== undefined) row.payment_type = row.payment_type ?? row["Payment Type"];
     if (row["Status"] !== undefined) row.status = row.status ?? row["Status"];
     if (row["Order Status"] !== undefined) row.order_status = row.order_status ?? row["Order Status"];
+
+    // Normalize possible UTF-8 BOM header.
+    if (
+        row[ORDER_NUMBER_BOM_KEY] != null &&
+        (row.order_number == null || (typeof row.order_number === "string" && row.order_number.trim() === ""))
+    ) {
+        row.order_number = row[ORDER_NUMBER_BOM_KEY];
+        delete row[ORDER_NUMBER_BOM_KEY];
+    }
 }
 
 async function resolveReferences() {
@@ -489,7 +548,7 @@ function buildStagePayload(row, currentStageKey, status = "confirmed") {
 
 async function processRow(row, status, refs, dryRun, errorsOut, context = {}) {
     const rowNum = (row._rowIndex || 0) + 2; // 1-based + header
-    const orderNumber = trim(row.order_number);
+    const orderNumber = trim(getOrderNumberFromRow(row));
     const existingOrdersByNumber = context.existingOrdersByNumber;
     const customerCache = context.customerCache;
     const sharedTransaction = context.transaction;
@@ -749,7 +808,7 @@ async function processOneBatch(
     for (let i = 0; i < batch.length; i++) {
         const row = batch[i];
         const rowNum = (row._rowIndex || 0) + 2;
-        const orderNumber = trim(row.order_number) || "(no order_number)";
+        const orderNumber = trim(getOrderNumberFromRow(row)) || "(no order_number)";
         let result;
         try {
             result = await processRow(row, status, refs, false, batchErrors, batchContext);
@@ -908,7 +967,7 @@ async function main() {
 
         let existingOrdersByNumber = new Map();
         if (rows.length > 0) {
-            const orderNumbers = rows.map((r) => trim(r.order_number)).filter(Boolean);
+            const orderNumbers = rows.map((r) => trim(getOrderNumberFromRow(r))).filter(Boolean);
             existingOrdersByNumber = await loadExistingOrdersByNumber(orderNumbers);
             console.log(`Pre-loaded ${existingOrdersByNumber.size} existing order(s) for this file (by order_number).`);
             if (dryRun) {
