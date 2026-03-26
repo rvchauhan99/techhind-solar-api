@@ -9,6 +9,9 @@
  *   node scripts/order-import/import-orders.js --file open-orders.csv
  *   node scripts/order-import/import-orders.js --file completed-orders.csv --dry-run
  *   node scripts/order-import/import-orders.js --file open.csv --file completed.csv
+ *
+ * By default, rows whose order_number already exists in the database are skipped (no update, no touch).
+ * Use --update-existing to upsert existing orders from CSV (previous behavior).
  */
 
 const path = require("path");
@@ -490,10 +493,35 @@ async function processRow(row, status, refs, dryRun, errorsOut, context = {}) {
     const existingOrdersByNumber = context.existingOrdersByNumber;
     const customerCache = context.customerCache;
     const sharedTransaction = context.transaction;
+    const updateExisting = context.updateExisting === true;
 
     if (!orderNumber) {
         errorsOut.push({ row: rowNum, order_number: "", error: "order_number is required" });
         return { ok: false, skipped: false };
+    }
+
+    if (dryRun) {
+        const preloaded = existingOrdersByNumber?.get(orderNumber);
+        if (!updateExisting && preloaded) {
+            return {
+                ok: true,
+                skipped: true,
+                skipReason: "already_in_db",
+                dryRun: true,
+                orderId: preloaded.id,
+                order_number: orderNumber,
+            };
+        }
+        const idsDry = resolveRowReferences(row, refs);
+        if (idsDry.errors.length) {
+            errorsOut.push({ row: rowNum, order_number: orderNumber, error: idsDry.errors.join("; ") });
+            return { ok: false, skipped: false };
+        }
+        if (!idsDry.inquiryById || !idsDry.handledById) {
+            errorsOut.push({ row: rowNum, order_number: orderNumber, error: "inquiry_by_email and handled_by_email are required" });
+            return { ok: false, skipped: false };
+        }
+        return { ok: true, skipped: false, dryRun: true };
     }
 
     const ids = resolveRowReferences(row, refs);
@@ -511,10 +539,6 @@ async function processRow(row, status, refs, dryRun, errorsOut, context = {}) {
         return { ok: false, skipped: false };
     }
 
-    if (dryRun) {
-        return { ok: true, skipped: false, dryRun: true };
-    }
-
     const runInTransaction = async (t) => {
         let existingOrder = existingOrdersByNumber ? existingOrdersByNumber.get(orderNumber) : null;
         if (!existingOrder && !existingOrdersByNumber) {
@@ -522,6 +546,16 @@ async function processRow(row, status, refs, dryRun, errorsOut, context = {}) {
                 where: { order_number: orderNumber, deleted_at: null },
                 transaction: t,
             });
+        }
+
+        if (existingOrder && !updateExisting) {
+            return {
+                ok: true,
+                skipped: true,
+                skipReason: "already_in_db",
+                orderId: existingOrder.id,
+                order_number: orderNumber,
+            };
         }
 
         const mobile = trim(row.mobile_number);
@@ -610,7 +644,7 @@ async function processRow(row, status, refs, dryRun, errorsOut, context = {}) {
     }
 }
 
-function writeResultExcel(errors, createdRows, updatedRows, outputPath) {
+function writeResultExcel(errors, createdRows, updatedRows, skippedExistingRows, outputPath) {
     const workbook = new ExcelJS.Workbook();
 
     const errorsSheet = workbook.addWorksheet("errors", { headerRow: true });
@@ -646,6 +680,23 @@ function writeResultExcel(errors, createdRows, updatedRows, outputPath) {
         updatedSheet.addRow({ row: r.row, order_number: r.order_number || "", order_id: r.order_id ?? "" });
     });
 
+    const skippedSheet = workbook.addWorksheet("skipped_existing", { headerRow: true });
+    skippedSheet.columns = [
+        { header: "row", key: "row", width: 8 },
+        { header: "order_number", key: "order_number", width: 22 },
+        { header: "order_id", key: "order_id", width: 12 },
+        { header: "reason", key: "reason", width: 20 },
+    ];
+    skippedSheet.getRow(1).font = { bold: true };
+    (skippedExistingRows || []).forEach((r) => {
+        skippedSheet.addRow({
+            row: r.row,
+            order_number: r.order_number || "",
+            order_id: r.order_id ?? "",
+            reason: r.reason || "already_in_db",
+        });
+    });
+
     return workbook.xlsx.writeFile(outputPath);
 }
 
@@ -656,7 +707,17 @@ function inferStatusFromFilename(filePath) {
 }
 
 /** Process a single batch in its own transaction; returns counts and rows for merging. */
-async function processOneBatch(batch, batchStart, batchNum, totalBatches, totalInFile, status, refs, existingOrdersByNumber) {
+async function processOneBatch(
+    batch,
+    batchStart,
+    batchNum,
+    totalBatches,
+    totalInFile,
+    status,
+    refs,
+    existingOrdersByNumber,
+    updateExisting
+) {
     const batchStartTime = Date.now();
     const rowRange = `${batchStart + 1}-${batchStart + batch.length}`;
     console.log(`  [Batch ${batchNum}/${totalBatches}] Started (rows ${rowRange}, ${batch.length} orders)…`);
@@ -664,10 +725,11 @@ async function processOneBatch(batch, batchStart, batchNum, totalBatches, totalI
     const batchErrors = [];
     const batchCreated = [];
     const batchUpdated = [];
+    const batchSkippedExisting = [];
     let batchCreatedCount = 0;
     let batchUpdatedCount = 0;
     let batchFailedCount = 0;
-    let batchSkippedCount = 0;
+    let batchSkippedExistingCount = 0;
 
     for (let i = 0; i < batch.length; i++) {
         batch[i]._rowIndex = batchStart + i;
@@ -680,6 +742,7 @@ async function processOneBatch(batch, batchStart, batchNum, totalBatches, totalI
         existingOrdersByNumber,
         customerCache,
         transaction: t,
+        updateExisting,
     };
     let batchRolledBack = false;
 
@@ -702,8 +765,14 @@ async function processOneBatch(batch, batchStart, batchNum, totalBatches, totalI
         if (result.updated) {
             batchUpdatedCount++;
             batchUpdated.push({ row: rowNum, order_number: result.order_number || "", order_id: result.orderId ?? "" });
-        } else if (result.skipped) {
-            batchSkippedCount++;
+        } else if (result.skipped && result.skipReason === "already_in_db") {
+            batchSkippedExistingCount++;
+            batchSkippedExisting.push({
+                row: rowNum,
+                order_number: result.order_number || "",
+                order_id: result.orderId ?? "",
+                reason: result.skipReason,
+            });
         } else if (result.ok) {
             batchCreatedCount++;
             batchCreated.push({ row: rowNum, order_number: result.order_number || "", order_id: result.orderId ?? "" });
@@ -727,7 +796,7 @@ async function processOneBatch(batch, batchStart, batchNum, totalBatches, totalI
 
     const elapsedSec = ((Date.now() - batchStartTime) / 1000).toFixed(1);
     console.log(
-        `  [Batch ${batchNum}/${totalBatches}] Done in ${elapsedSec}s – created: ${batchCreatedCount}, updated: ${batchUpdatedCount}, failed: ${batchFailedCount}`
+        `  [Batch ${batchNum}/${totalBatches}] Done in ${elapsedSec}s – created: ${batchCreatedCount}, updated: ${batchUpdatedCount}, skipped_existing: ${batchSkippedExistingCount}, failed: ${batchFailedCount}`
     );
 
     return {
@@ -735,10 +804,11 @@ async function processOneBatch(batch, batchStart, batchNum, totalBatches, totalI
         created: batchCreatedCount,
         updated: batchUpdatedCount,
         failed: batchFailedCount,
-        skipped: batchSkippedCount,
+        skippedExisting: batchSkippedExistingCount,
         errors: batchErrors,
         createdRows: batchCreated,
         updatedRows: batchUpdated,
+        skippedExistingRows: batchSkippedExisting,
         batchNum,
         totalBatches,
     };
@@ -769,30 +839,41 @@ async function main() {
     const args = process.argv.slice(2);
     const files = [];
     let dryRun = false;
+    let updateExisting = false;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === "--file" && args[i + 1]) {
             files.push(args[++i]);
         } else if (args[i] === "--dry-run") {
             dryRun = true;
+        } else if (args[i] === "--update-existing") {
+            updateExisting = true;
         }
     }
 
     if (files.length === 0) {
-        console.error("Usage: node scripts/order-import/import-orders.js --file <path> [--file <path>...] [--dry-run]");
+        console.error(
+            "Usage: node scripts/order-import/import-orders.js --file <path> [--file <path>...] [--dry-run] [--update-existing]"
+        );
         process.exit(1);
     }
 
     console.log("Order Import – Go Live Migration");
     if (dryRun) console.log("DRY RUN – no changes will be written.\n");
+    if (updateExisting) {
+        console.log("Mode: existing order_numbers will be UPDATED from CSV.\n");
+    } else {
+        console.log("Mode: existing order_numbers will be SKIPPED (not touched). Use --update-existing to upsert.\n");
+    }
 
     const errors = [];
     const createdRows = [];
     const updatedRows = [];
+    const skippedExistingRows = [];
     let total = 0;
     let created = 0;
     let updated = 0;
-    let skipped = 0;
+    let skippedExisting = 0;
     let failed = 0;
 
     const refs = await resolveReferences();
@@ -826,16 +907,26 @@ async function main() {
         console.log(`Records to process: ${totalInFile}\n`);
 
         let existingOrdersByNumber = new Map();
-        if (!dryRun && rows.length > 0) {
+        if (rows.length > 0) {
             const orderNumbers = rows.map((r) => trim(r.order_number)).filter(Boolean);
             existingOrdersByNumber = await loadExistingOrdersByNumber(orderNumbers);
-            console.log(`Pre-loaded ${existingOrdersByNumber.size} existing order(s) for this file.`);
-            console.log(
-                `Existing orders will be UPDATED; new orders will be created. Starting ${Math.ceil(rows.length / BATCH_SIZE)} batches (${PARALLEL_BATCH_CONCURRENCY} parallel)…\n`
-            );
+            console.log(`Pre-loaded ${existingOrdersByNumber.size} existing order(s) for this file (by order_number).`);
+            if (dryRun) {
+                console.log("");
+            } else {
+                console.log(
+                    updateExisting
+                        ? "Existing orders will be UPDATED; new orders will be created."
+                        : "Existing orders will be SKIPPED; only new order_numbers will be imported."
+                );
+                console.log(
+                    `Starting ${Math.ceil(rows.length / BATCH_SIZE)} batches (${PARALLEL_BATCH_CONCURRENCY} parallel)…\n`
+                );
+            }
         }
 
         if (dryRun) {
+            let drySkippedExisting = 0;
             for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH_SIZE) {
                 const batch = rows.slice(batchStart, Math.min(batchStart + BATCH_SIZE, rows.length));
                 const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
@@ -844,11 +935,23 @@ async function main() {
                     batch[i]._rowIndex = batchStart + i;
                     normalizeCsvRow(batch[i]);
                     total++;
-                    const result = await processRow(batch[i], status, refs, true, errors);
+                    const dryContext = { existingOrdersByNumber, updateExisting };
+                    const result = await processRow(batch[i], status, refs, true, errors, dryContext);
+                    if (result.skipped && result.skipReason === "already_in_db") {
+                        drySkippedExisting++;
+                        skippedExistingRows.push({
+                            row: (batch[i]._rowIndex || 0) + 2,
+                            order_number: result.order_number || "",
+                            order_id: result.orderId ?? "",
+                            reason: result.skipReason,
+                        });
+                    }
                     if (!result.ok) console.log(`  Row ${(batch[i]._rowIndex || 0) + 2} FAILED: ${errors[errors.length - 1]?.error ?? "Unknown"}`);
                 }
                 if (batch.length > 0) console.log(`  Dry run batch ${batchNum}/${totalBatches}: ${batch.length} rows`);
             }
+            skippedExisting += drySkippedExisting;
+            if (drySkippedExisting > 0) console.log(`  Dry run – would skip (already in DB): ${drySkippedExisting}`);
             continue;
         }
 
@@ -859,7 +962,17 @@ async function main() {
             const batch = rows.slice(batchStart, batchEnd);
             const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
             batchTasks.push(() =>
-                processOneBatch(batch, batchStart, batchNum, totalBatches, rows.length, status, refs, existingOrdersByNumber)
+                processOneBatch(
+                    batch,
+                    batchStart,
+                    batchNum,
+                    totalBatches,
+                    rows.length,
+                    status,
+                    refs,
+                    existingOrdersByNumber,
+                    updateExisting
+                )
             );
         }
 
@@ -870,10 +983,11 @@ async function main() {
             created += r.created;
             updated += r.updated;
             failed += r.failed;
-            skipped += r.skipped;
+            skippedExisting += r.skippedExisting;
             errors.push(...r.errors);
             createdRows.push(...r.createdRows);
             updatedRows.push(...r.updatedRows);
+            skippedExistingRows.push(...(r.skippedExistingRows || []));
         }
     }
 
@@ -881,12 +995,12 @@ async function main() {
     console.log("Total rows:", total);
     console.log("Created:", created);
     console.log("Updated:", updated);
-    console.log("Skipped:", skipped);
+    console.log("Skipped (already in database):", skippedExisting);
     console.log("Failed:", failed);
 
     const resultPath = path.resolve(process.cwd(), "import-result.xlsx");
-    await writeResultExcel(errors, createdRows, updatedRows, resultPath);
-    console.log("Result file (errors, created, updated):", resultPath);
+    await writeResultExcel(errors, createdRows, updatedRows, skippedExistingRows, resultPath);
+    console.log("Result file (errors, created, updated, skipped_existing):", resultPath);
 
     await db.sequelize.close();
     process.exit(failed > 0 ? 1 : 0);
