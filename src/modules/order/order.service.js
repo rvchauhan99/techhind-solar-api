@@ -2,7 +2,7 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
@@ -151,6 +151,102 @@ const normalizeOrderBomSnapshot = (bom_snapshot) => {
             delivered_qty: shipped_qty,
         };
     });
+};
+
+const GST_MODE = {
+    INCLUDING_GST: "INCLUDING_GST",
+    EXCLUDING_GST: "EXCLUDING_GST",
+};
+
+const toNumber = (value, fallback = 0) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+};
+
+const roundMoney = (value) => Math.round((toNumber(value) + Number.EPSILON) * 100) / 100;
+
+const normalizeGstMode = (value) => {
+    const raw = String(value || "").trim().toUpperCase();
+    return raw === GST_MODE.EXCLUDING_GST ? GST_MODE.EXCLUDING_GST : GST_MODE.INCLUDING_GST;
+};
+
+const mapCostAmendmentRows = (rows = []) =>
+    rows.map((row) => ({
+        id: row.id,
+        order_id: row.order_id,
+        product_id: row.product_id,
+        product_name: row.product?.product_name || null,
+        actor_user_id: row.actor_user_id,
+        actor_user_name: row.actorUser?.name || null,
+        change_type: row.change_type,
+        qty_delta: toNumber(row.qty_delta),
+        unit_price_base: toNumber(row.unit_price_base),
+        gst_mode: row.gst_mode,
+        gst_rate: toNumber(row.gst_rate),
+        line_amount_excluding_gst: toNumber(row.line_amount_excluding_gst),
+        line_amount_including_gst: toNumber(row.line_amount_including_gst),
+        project_cost_before: toNumber(row.project_cost_before),
+        project_cost_after: toNumber(row.project_cost_after),
+        final_payable_before: toNumber(row.final_payable_before),
+        final_payable_after: toNumber(row.final_payable_after),
+        note: row.note || null,
+        metadata: row.metadata || null,
+        created_at: row.created_at,
+    }));
+
+const getLatestPurchasePriceByProductId = async ({ productId, transaction, models }) => {
+    const parsedProductId = Number.parseInt(productId, 10);
+    if (!Number.isInteger(parsedProductId) || parsedProductId <= 0) {
+        return null;
+    }
+    const rows = await models.sequelize.query(
+        `SELECT poi.id,
+                poi.product_id,
+                poi.rate,
+                poi.gst_percent,
+                poi.amount_excluding_gst,
+                poi.amount,
+                poi.received_quantity,
+                poi.created_at
+         FROM purchase_order_items poi
+         WHERE poi.product_id = :productId
+           AND COALESCE(poi.received_quantity, 0) > 0
+         ORDER BY poi.created_at DESC, poi.id DESC
+         LIMIT 1`,
+        {
+            replacements: { productId: parsedProductId },
+            type: QueryTypes.SELECT,
+            transaction,
+        }
+    );
+
+    const row = rows?.[0];
+    if (!row) return null;
+
+    const rate = toNumber(row.rate, 0);
+    const gstRate = toNumber(row.gst_percent, 0);
+    const amountExcl = toNumber(row.amount_excluding_gst, 0);
+    const amountIncl = toNumber(row.amount, 0);
+
+    let derivedRateExcluding = rate;
+    let derivedRateIncluding = roundMoney(rate * (1 + gstRate / 100));
+    if (amountExcl > 0 && amountIncl > 0) {
+        const qtyHint = rate > 0 ? amountExcl / rate : 1;
+        if (qtyHint > 0) {
+            derivedRateExcluding = roundMoney(amountExcl / qtyHint);
+            derivedRateIncluding = roundMoney(amountIncl / qtyHint);
+        }
+    }
+
+    return {
+        product_id: parsedProductId,
+        purchase_order_item_id: row.id,
+        received_quantity: toNumber(row.received_quantity, 0),
+        unit_price_excluding_gst: roundMoney(derivedRateExcluding),
+        unit_price_including_gst: roundMoney(derivedRateIncluding),
+        gst_rate: gstRate,
+        created_at: row.created_at,
+    };
 };
 
 /** Escape string for safe use in SQL LIKE pattern (%, _) and in string literal (single quote). */
@@ -333,7 +429,7 @@ const listOrders = async ({
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
-        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
     } = models;
     const offset = (page - 1) * limit;
 
@@ -946,7 +1042,7 @@ const getOrderById = async ({ id } = {}) => {
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
-        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
     } = models;
     const order = await Order.findOne({
         where: { id, deleted_at: null },
@@ -1209,6 +1305,66 @@ const getOrderById = async ({ id } = {}) => {
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
+};
+
+const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
+    const models = getTenantModels();
+    const parsedProductIds = Array.isArray(product_ids)
+        ? product_ids
+            .map((id) => Number.parseInt(id, 10))
+            .filter((id) => Number.isInteger(id) && id > 0)
+        : [];
+    const uniqueProductIds = [...new Set(parsedProductIds)];
+    if (uniqueProductIds.length === 0) {
+        return [];
+    }
+
+    const results = [];
+    for (const productId of uniqueProductIds) {
+        const latest = await getLatestPurchasePriceByProductId({
+            productId,
+            transaction,
+            models,
+        });
+        if (latest) {
+            results.push(latest);
+        }
+    }
+    return results;
+};
+
+const getOrderCostAmendments = async ({ order_id, transaction } = {}) => {
+    const models = getTenantModels();
+    const { Order, OrderCostAmendmentLog, Product, User } = models;
+    const parsedOrderId = Number.parseInt(order_id, 10);
+    if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+        const error = new Error("Valid order id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const txOptions = transaction ? { transaction } : {};
+    const order = await Order.findOne({
+        where: { id: parsedOrderId, deleted_at: null },
+        attributes: ["id"],
+        ...txOptions,
+    });
+    if (!order) {
+        const error = new Error("Order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const rows = await OrderCostAmendmentLog.findAll({
+        where: { order_id: parsedOrderId, deleted_at: null },
+        include: [
+            { model: Product, as: "product", attributes: ["id", "product_name"], required: false },
+            { model: User, as: "actorUser", attributes: ["id", "name"], required: false },
+        ],
+        order: [["created_at", "DESC"], ["id", "DESC"]],
+        ...txOptions,
+    });
+    return mapCostAmendmentRows(rows);
 };
 
 const createOrder = async ({ payload, transaction, req } = {}) => {
@@ -1521,7 +1677,7 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
-        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
     } = models;
     const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
@@ -1592,6 +1748,8 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
         const previousNetmeterInstalledCompletedAt = order.netmeter_installed_completed_at;
         const previousSubsidyClaimCompletedAt = order.subsidy_claim_completed_at;
         const previousSubsidyDisbursedCompletedAt = order.subsidy_disbursed_completed_at;
+        const currentProjectCost = toNumber(order.project_cost);
+        const currentDiscount = toNumber(order.discount);
 
         const normalizeNullableId = (value, existing) => {
             if (value === "") return null;
@@ -1622,6 +1780,137 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 },
             ];
         }
+
+        const costAdjustmentPayload = Array.isArray(payload.cost_adjustments) ? payload.cost_adjustments : [];
+        let computedProjectCost = currentProjectCost;
+        const amendmentLogs = [];
+        const costAdjustmentActivity = [];
+        const previousProjectCost = currentProjectCost;
+
+        for (const adjustment of costAdjustmentPayload) {
+            const productId = Number.parseInt(adjustment?.product_id, 10);
+            const qtyDelta = toNumber(adjustment?.qty_delta, 0);
+            if (!Number.isInteger(productId) || productId <= 0 || qtyDelta === 0) {
+                continue;
+            }
+
+            const latestPrice = await getLatestPurchasePriceByProductId({
+                productId,
+                transaction: t,
+                models,
+            });
+            if (!latestPrice) {
+                const err = new Error(`Latest purchase price not found for product ${productId} with received quantity > 0`);
+                err.statusCode = 400;
+                throw err;
+            }
+
+            const gstMode = normalizeGstMode(adjustment?.gst_mode);
+            const gstRate = toNumber(adjustment?.gst_rate, latestPrice.gst_rate);
+            const unitExcl = toNumber(latestPrice.unit_price_excluding_gst);
+            const unitIncl = toNumber(latestPrice.unit_price_including_gst);
+            const changeAmountExcluding = roundMoney(qtyDelta * unitExcl);
+            const changeAmountIncluding = roundMoney(qtyDelta * unitIncl);
+            const deltaAmount =
+                gstMode === GST_MODE.EXCLUDING_GST ? changeAmountExcluding : changeAmountIncluding;
+            const beforeCost = computedProjectCost;
+            const afterCost = roundMoney(beforeCost + deltaAmount);
+            computedProjectCost = afterCost;
+
+            amendmentLogs.push({
+                order_id: order.id,
+                product_id: productId,
+                actor_user_id: user?.id ?? null,
+                change_type: qtyDelta > 0 ? "ADD_QTY" : "DEDUCT_QTY",
+                qty_delta: qtyDelta,
+                unit_price_base: gstMode === GST_MODE.EXCLUDING_GST ? unitExcl : unitIncl,
+                gst_mode: gstMode,
+                gst_rate: gstRate,
+                line_amount_excluding_gst: changeAmountExcluding,
+                line_amount_including_gst: changeAmountIncluding,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+                final_payable_before: roundMoney(beforeCost - currentDiscount),
+                final_payable_after: roundMoney(afterCost - currentDiscount),
+                note: adjustment?.note || null,
+                metadata: {
+                    purchase_order_item_id: latestPrice.purchase_order_item_id,
+                    purchase_price_created_at: latestPrice.created_at,
+                    received_quantity: latestPrice.received_quantity,
+                    requested_gst_mode: adjustment?.gst_mode ?? null,
+                },
+            });
+
+            costAdjustmentActivity.push({
+                action: qtyDelta > 0 ? "cost_added_by_qty" : "cost_deducted_by_qty",
+                at: new Date().toISOString(),
+                user_id: user?.id ?? null,
+                user_name: user?.name ?? null,
+                product_id: productId,
+                qty_delta: qtyDelta,
+                gst_mode: gstMode,
+                line_amount_excluding_gst: changeAmountExcluding,
+                line_amount_including_gst: changeAmountIncluding,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+            });
+        }
+
+        const hasManualProjectCostOverride = payload.manual_project_cost_override != null
+            && payload.manual_project_cost_override !== "";
+        const manualProjectCostOverride = hasManualProjectCostOverride
+            ? roundMoney(payload.manual_project_cost_override)
+            : null;
+        if (manualProjectCostOverride != null) {
+            const beforeCost = computedProjectCost;
+            const afterCost = manualProjectCostOverride;
+            computedProjectCost = afterCost;
+            amendmentLogs.push({
+                order_id: order.id,
+                product_id: null,
+                actor_user_id: user?.id ?? null,
+                change_type: "FINAL_OVERRIDE",
+                qty_delta: null,
+                unit_price_base: null,
+                gst_mode: null,
+                gst_rate: null,
+                line_amount_excluding_gst: null,
+                line_amount_including_gst: null,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+                final_payable_before: roundMoney(beforeCost - currentDiscount),
+                final_payable_after: roundMoney(afterCost - currentDiscount),
+                note: payload.manual_project_cost_override_note || "Manual final payable override",
+                metadata: {
+                    source: "planner_manual_override",
+                },
+            });
+            costAdjustmentActivity.push({
+                action: "final_payable_override",
+                at: new Date().toISOString(),
+                user_id: user?.id ?? null,
+                user_name: user?.name ?? null,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+            });
+        }
+
+        const effectiveProjectCost =
+            hasManualProjectCostOverride || amendmentLogs.length > 0
+                ? computedProjectCost
+                : (payload.project_cost ?? order.project_cost);
+        const autoCalculatedProjectCost = roundMoney(
+            hasManualProjectCostOverride ? (amendmentLogs.find((item) => item.change_type === "FINAL_OVERRIDE")?.project_cost_before ?? computedProjectCost) : computedProjectCost
+        );
+        const finalSavedProjectCost = roundMoney(effectiveProjectCost);
+        const overrideApplied = hasManualProjectCostOverride && manualProjectCostOverride != null;
+        const costUpdateSummary = {
+            previous_project_cost: roundMoney(previousProjectCost),
+            auto_calculated_project_cost: autoCalculatedProjectCost,
+            final_saved_project_cost: finalSavedProjectCost,
+            total_delta: roundMoney(finalSavedProjectCost - previousProjectCost),
+            override_applied: overrideApplied,
+        };
 
         // Auto-transition order to completed when final stage is completed.
         // Rule: if Subsidy Disbursed stage is completed AND subsidy_disbursed is true, close the order.
@@ -1703,7 +1992,7 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 project_scheme_id: payload.project_scheme_id ?? order.project_scheme_id,
                 capacity: payload.capacity ?? order.capacity,
                 existing_pv_capacity: payload.existing_pv_capacity ?? order.existing_pv_capacity,
-                project_cost: payload.project_cost ?? order.project_cost,
+                project_cost: effectiveProjectCost,
                 discount: payload.discount ?? order.discount,
                 order_type_id: payload.order_type_id ?? order.order_type_id,
                 discom_id: payload.discom_id ?? order.discom_id,
@@ -1822,6 +2111,32 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             },
             { transaction: t }
         );
+
+        const shouldAppendCostSummaryActivity =
+            Array.isArray(payload.cost_adjustments) || payload.manual_project_cost_override !== undefined;
+        if (amendmentLogs.length > 0 || shouldAppendCostSummaryActivity) {
+            if (amendmentLogs.length > 0) {
+                await OrderCostAmendmentLog.bulkCreate(amendmentLogs, { transaction: t });
+            }
+            const existingLog = Array.isArray(plannerActivityLogUpdate)
+                ? plannerActivityLogUpdate
+                : (Array.isArray(order.planner_activity_log) ? order.planner_activity_log : []);
+            const mergedActivity = [
+                ...existingLog,
+                ...costAdjustmentActivity,
+                {
+                    action: "cost_update_summary",
+                    at: new Date().toISOString(),
+                    user_id: user?.id ?? null,
+                    user_name: user?.name ?? null,
+                    ...costUpdateSummary,
+                },
+            ];
+            await order.update(
+                { planner_activity_log: mergedActivity },
+                { transaction: t }
+            );
+        }
 
         if (committedHere) {
             await t.commit();
@@ -1993,7 +2308,10 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             });
         }
 
-        return orderJson;
+        return {
+            ...orderJson,
+            cost_update_summary: costUpdateSummary,
+        };
     } catch (err) {
         if (committedHere) {
             await t.rollback();
@@ -3034,4 +3352,6 @@ module.exports = {
     getOrdersDashboardKpis,
     getOrdersDashboardPipeline,
     getOrdersDashboardTrend,
+    getLatestPurchasePrices,
+    getOrderCostAmendments,
 };

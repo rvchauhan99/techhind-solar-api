@@ -82,6 +82,7 @@ module.exports = (db) => {
     FacebookAccount,
     FacebookPage,
     FacebookLeadForm,
+    OrderCostAmendmentLog,
   } = db;
 
   // User ↔ Role
@@ -514,6 +515,18 @@ module.exports = (db) => {
     Order.belongsTo(User, { foreignKey: "fabricator_id", as: "orderFabricator" });
     Order.belongsTo(User, { foreignKey: "installer_id", as: "orderInstaller" });
     Order.belongsTo(User, { foreignKey: "fabricator_installer_id", as: "orderFabricatorInstaller" });
+  }
+  if (Order && OrderCostAmendmentLog) {
+    Order.hasMany(OrderCostAmendmentLog, { foreignKey: "order_id", as: "costAmendments" });
+    OrderCostAmendmentLog.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  }
+  if (OrderCostAmendmentLog && Product) {
+    OrderCostAmendmentLog.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(OrderCostAmendmentLog, { foreignKey: "product_id", as: "orderCostAmendments" });
+  }
+  if (OrderCostAmendmentLog && User) {
+    OrderCostAmendmentLog.belongsTo(User, { foreignKey: "actor_user_id", as: "actorUser" });
+    User.hasMany(OrderCostAmendmentLog, { foreignKey: "actor_user_id", as: "orderCostAmendmentsActed" });
   }
   if (Order && InquirySource) {
     Order.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
