@@ -4,6 +4,45 @@ const metaService = require("./meta.service.js");
 const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const roleModuleService = require("../roleModule/roleModule.service.js");
+const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCache.js");
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const MODULE_ROUTE = "/meta-setup";
+const MODULE_KEY = "meta_lead_ads";
+
+/**
+ * Resolve the visibility context for Meta accounts based on role listing criteria.
+ */
+const resolveMetaAccountVisibilityContext = async (req) => {
+  const roleId = Number(req.user?.role_id);
+  const userId = Number(req.user?.id);
+
+  const listingCriteria = await roleModuleService.getListingCriteriaForRoleAndModule(
+    {
+      roleId,
+      moduleRoute: MODULE_ROUTE,
+      moduleKey: MODULE_KEY,
+    },
+    req.transaction
+  );
+
+  if (listingCriteria !== "my_team") {
+    // "all" or fallback -> no enforcement (null)
+    return { listingCriteria, enforcedUserIds: null };
+  }
+
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return { listingCriteria, enforcedUserIds: [] };
+  }
+
+  const teamUserIds = await getTeamHierarchyUserIds(userId, {
+    transaction: req.transaction,
+  });
+
+  return { listingCriteria, enforcedUserIds: teamUserIds };
+};
 
 // ─── OAuth ────────────────────────────────────────────────────────────────────
 
@@ -133,14 +172,10 @@ const handleOAuthCallback = async (req, res, next) => {
 
 // ─── Account management ───────────────────────────────────────────────────────
 
-/**
- * GET /meta/accounts
- * List all Facebook accounts linked by the current user.
- */
 const listAccounts = async (req, res, next) => {
   try {
-    const userId = req.user?.id;
-    const accounts = await metaService.listAccounts({ userId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const accounts = await metaService.listAccounts({ enforcedUserIds });
     return res.status(200).json({ success: true, data: accounts });
   } catch (err) {
     return next(err);
@@ -154,13 +189,12 @@ const listAccounts = async (req, res, next) => {
 const disconnectAccount = async (req, res, next) => {
   try {
     const accountId = parseInt(req.params.id, 10);
-    const userId = req.user?.id;
-
     if (Number.isNaN(accountId)) {
       return next(new AppError("Invalid account id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    await metaService.disconnectAccount({ accountId, userId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    await metaService.disconnectAccount({ accountId, enforcedUserIds });
 
     return res.status(200).json({
       success: true,
@@ -184,7 +218,8 @@ const syncPages = async (req, res, next) => {
       return next(new AppError("Invalid account id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const pages = await metaService.syncPages({ accountId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const pages = await metaService.syncPages({ accountId, enforcedUserIds });
 
     return res.status(200).json({
       success: true,
@@ -207,7 +242,8 @@ const listPages = async (req, res, next) => {
       return next(new AppError("Invalid account id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const pages = await metaService.listPages({ accountId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const pages = await metaService.listPages({ accountId, enforcedUserIds });
     return res.status(200).json({ success: true, data: pages });
   } catch (err) {
     return next(err);
@@ -227,7 +263,8 @@ const syncForms = async (req, res, next) => {
       return next(new AppError("Invalid page id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const forms = await metaService.syncForms({ dbPageId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const forms = await metaService.syncForms({ dbPageId, enforcedUserIds });
 
     return res.status(200).json({
       success: true,
@@ -250,7 +287,8 @@ const listForms = async (req, res, next) => {
       return next(new AppError("Invalid page id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const forms = await metaService.listForms({ dbPageId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const forms = await metaService.listForms({ dbPageId, enforcedUserIds });
     return res.status(200).json({ success: true, data: forms });
   } catch (err) {
     return next(err);
@@ -270,7 +308,8 @@ const syncLeads = async (req, res, next) => {
       return next(new AppError("Invalid form id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const result = await metaService.syncLeads({ dbFormId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const result = await metaService.syncLeads({ dbFormId, enforcedUserIds });
 
     return res.status(200).json({
       success: true,
@@ -295,7 +334,8 @@ const subscribeWebhook = async (req, res, next) => {
       return next(new AppError("Invalid page id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const page = await metaService.subscribePageWebhook({ dbPageId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const page = await metaService.subscribePageWebhook({ dbPageId, enforcedUserIds });
 
     return res.status(200).json({
       success: true,
@@ -318,7 +358,8 @@ const unsubscribeWebhook = async (req, res, next) => {
       return next(new AppError("Invalid page id", RESPONSE_STATUS_CODES.BAD_REQUEST));
     }
 
-    const page = await metaService.unsubscribePageWebhook({ dbPageId });
+    const { enforcedUserIds } = await resolveMetaAccountVisibilityContext(req);
+    const page = await metaService.unsubscribePageWebhook({ dbPageId, enforcedUserIds });
 
     return res.status(200).json({
       success: true,
