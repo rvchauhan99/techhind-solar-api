@@ -249,6 +249,7 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
       // Optional: prefetch template config images for active tenants (set PDF_WARMUP_ENABLED=true)
       setImmediate(() => {
         const pdfWarmup = require("./modules/quotation/pdfWarmup.service.js");
+        const configCacheService = require("./modules/config-master/configCache.service.js");
         pdfWarmup
           .warmupTemplateAssetCache()
           .then((result) => {
@@ -261,6 +262,14 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
             }
           })
           .catch((err) => console.warn("[PDF] Warmup error:", err?.message));
+        configCacheService
+          .warmupAllTenantConfigs()
+          .then(() => {
+            if (NODE_ENV === "development" || NODE_ENV === "test") {
+              console.info("[Config] Tenant config cache warmup finished.");
+            }
+          })
+          .catch((err) => console.warn("[Config] Warmup error:", err?.message));
         const pdfRunner = require("./modules/quotation/pdfRunner.service.js");
         pdfRunner.startRunner();
       });
