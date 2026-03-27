@@ -1309,6 +1309,7 @@ const getOrderById = async ({ id } = {}) => {
 
 const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
     const models = getTenantModels();
+    const { Product } = models;
     const parsedProductIds = Array.isArray(product_ids)
         ? product_ids
             .map((id) => Number.parseInt(id, 10))
@@ -1319,6 +1320,19 @@ const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
         return [];
     }
 
+    const productRows = await Product.findAll({
+        where: {
+            id: uniqueProductIds,
+            deleted_at: null,
+        },
+        attributes: ["id", "gst_percent"],
+        ...(transaction ? { transaction } : {}),
+    });
+    const gstByProductId = {};
+    (productRows || []).forEach((p) => {
+        gstByProductId[p.id] = toNumber(p.gst_percent, 0);
+    });
+
     const results = [];
     for (const productId of uniqueProductIds) {
         const latest = await getLatestPurchasePriceByProductId({
@@ -1327,7 +1341,21 @@ const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
             models,
         });
         if (latest) {
-            results.push(latest);
+            results.push({
+                ...latest,
+                missing_price: false,
+            });
+        } else {
+            results.push({
+                product_id: productId,
+                purchase_order_item_id: null,
+                received_quantity: 0,
+                unit_price_excluding_gst: null,
+                unit_price_including_gst: null,
+                gst_rate: toNumber(gstByProductId[productId], 0),
+                created_at: null,
+                missing_price: true,
+            });
         }
     }
     return results;
@@ -1799,16 +1827,51 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 transaction: t,
                 models,
             });
+            const gstMode = normalizeGstMode(adjustment?.gst_mode);
+            let gstRate = toNumber(adjustment?.gst_rate, latestPrice?.gst_rate);
+            let unitExcl = toNumber(latestPrice?.unit_price_excluding_gst);
+            let unitIncl = toNumber(latestPrice?.unit_price_including_gst);
+            let priceSource = "LATEST_PURCHASE";
+            let manualPriceInputSide = null;
+
             if (!latestPrice) {
-                const err = new Error(`Latest purchase price not found for product ${productId} with received quantity > 0`);
-                err.statusCode = 400;
-                throw err;
+                priceSource = "MANUAL_FALLBACK";
+                const productRow = await Product.findOne({
+                    where: { id: productId, deleted_at: null },
+                    attributes: ["id", "gst_percent"],
+                    transaction: t,
+                });
+                gstRate = toNumber(adjustment?.gst_rate, productRow?.gst_percent);
+                if (!Number.isFinite(gstRate) || gstRate < 0) {
+                    // Worst-case go-live fallback: allow pricing with 0% GST instead of hard fail.
+                    gstRate = 0;
+                }
+                const manualExclInputRaw = adjustment?.manual_unit_price_excluding_gst;
+                const manualInclInputRaw = adjustment?.manual_unit_price_including_gst;
+                const manualExclInput = toNumber(manualExclInputRaw, NaN);
+                const manualInclInput = toNumber(manualInclInputRaw, NaN);
+                const hasManualExcl = Number.isFinite(manualExclInput) && manualExclInput > 0;
+                const hasManualIncl = Number.isFinite(manualInclInput) && manualInclInput > 0;
+                if (!hasManualExcl && !hasManualIncl) {
+                    const err = new Error(`Manual unit price is required for product ${productId} because latest purchase price was not found`);
+                    err.statusCode = 400;
+                    throw err;
+                }
+                if (hasManualExcl && hasManualIncl) {
+                    unitExcl = roundMoney(manualExclInput);
+                    unitIncl = roundMoney(manualInclInput);
+                    manualPriceInputSide = "BOTH";
+                } else if (hasManualExcl) {
+                    unitExcl = roundMoney(manualExclInput);
+                    unitIncl = roundMoney(unitExcl * (1 + gstRate / 100));
+                    manualPriceInputSide = "EXCL";
+                } else {
+                    unitIncl = roundMoney(manualInclInput);
+                    unitExcl = roundMoney(unitIncl / (1 + gstRate / 100));
+                    manualPriceInputSide = "INCL";
+                }
             }
 
-            const gstMode = normalizeGstMode(adjustment?.gst_mode);
-            const gstRate = toNumber(adjustment?.gst_rate, latestPrice.gst_rate);
-            const unitExcl = toNumber(latestPrice.unit_price_excluding_gst);
-            const unitIncl = toNumber(latestPrice.unit_price_including_gst);
             const changeAmountExcluding = roundMoney(qtyDelta * unitExcl);
             const changeAmountIncluding = roundMoney(qtyDelta * unitIncl);
             const deltaAmount =
@@ -1834,9 +1897,15 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 final_payable_after: roundMoney(afterCost - currentDiscount),
                 note: adjustment?.note || null,
                 metadata: {
-                    purchase_order_item_id: latestPrice.purchase_order_item_id,
-                    purchase_price_created_at: latestPrice.created_at,
-                    received_quantity: latestPrice.received_quantity,
+                    purchase_order_item_id: latestPrice?.purchase_order_item_id ?? null,
+                    purchase_price_created_at: latestPrice?.created_at ?? null,
+                    received_quantity: latestPrice?.received_quantity ?? null,
+                    price_source: priceSource,
+                    manual_price_input_side: manualPriceInputSide,
+                    manual_unit_price_excluding_gst: priceSource === "MANUAL_FALLBACK" ? unitExcl : null,
+                    manual_unit_price_including_gst: priceSource === "MANUAL_FALLBACK" ? unitIncl : null,
+                    gst_rate_fallback_zero_applied:
+                        priceSource === "MANUAL_FALLBACK" && (!latestPrice) && (!Number.isFinite(toNumber(adjustment?.gst_rate, NaN))),
                     requested_gst_mode: adjustment?.gst_mode ?? null,
                 },
             });
