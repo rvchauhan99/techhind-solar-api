@@ -214,13 +214,24 @@ async function connectAccount({ userId, code, transaction } = {}) {
 
 /**
  * List all connected Facebook accounts for a platform user.
+ * Supports role-based filtering via enforcedUserIds.
  */
-async function listAccounts({ userId } = {}) {
+async function listAccounts({ userId, enforcedUserIds } = {}) {
   const models = getTenantModels();
   const { FacebookAccount } = models;
 
+  const where = { is_active: true, deleted_at: null };
+
+  if (enforcedUserIds !== undefined) {
+    if (enforcedUserIds !== null) {
+      where.user_id = { [Op.in]: (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]) };
+    }
+  } else if (userId) {
+    where.user_id = userId;
+  }
+
   const accounts = await FacebookAccount.findAll({
-    where: { user_id: userId, is_active: true, deleted_at: null },
+    where,
     order: [["id", "DESC"]],
     attributes: ["id", "fb_user_id", "display_name", "expires_at", "is_active", "created_at"],
   });
@@ -231,17 +242,27 @@ async function listAccounts({ userId } = {}) {
 /**
  * Soft-delete a Facebook account (and its pages/forms via cascade awareness).
  */
-async function disconnectAccount({ accountId, userId, transaction } = {}) {
+async function disconnectAccount({ accountId, userId, enforcedUserIds, transaction } = {}) {
   const models = getTenantModels();
   const { FacebookAccount, FacebookPage, FacebookLeadForm } = models;
 
+  const where = { id: accountId, deleted_at: null };
+
+  if (enforcedUserIds !== undefined) {
+    if (enforcedUserIds !== null) {
+      where.user_id = { [Op.in]: (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]) };
+    }
+  } else if (userId) {
+    where.user_id = userId;
+  }
+
   const account = await FacebookAccount.findOne({
-    where: { id: accountId, user_id: userId, deleted_at: null },
+    where,
     transaction,
   });
 
   if (!account) {
-    throw new AppError("Facebook account not found or already disconnected", RESPONSE_STATUS_CODES.NOT_FOUND);
+    throw new AppError("Facebook account not found or access denied", RESPONSE_STATUS_CODES.NOT_FOUND);
   }
 
   // Soft-delete associated pages + forms
@@ -269,19 +290,24 @@ async function disconnectAccount({ accountId, userId, transaction } = {}) {
 
 /**
  * Fetch pages from Facebook and upsert into facebook_pages.
- * @param {{ accountId: number, transaction? }} params
+ * @param {{ accountId: number, enforcedUserIds?, transaction? }} params
  */
-async function syncPages({ accountId, transaction } = {}) {
+async function syncPages({ accountId, enforcedUserIds, transaction } = {}) {
   const models = getTenantModels();
   const { FacebookAccount, FacebookPage } = models;
 
+  const where = { id: accountId, deleted_at: null };
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    where.user_id = { [Op.in]: (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]) };
+  }
+
   const account = await FacebookAccount.findOne({
-    where: { id: accountId, deleted_at: null },
+    where,
     transaction,
   });
 
   if (!account) {
-    throw new AppError("Facebook account not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+    throw new AppError("Facebook account not found or access denied", RESPONSE_STATUS_CODES.NOT_FOUND);
   }
 
   const url = `${FB_GRAPH_BASE}/me/accounts?fields=id,name,access_token,tasks&access_token=${encodeURIComponent(account.access_token)}`;
@@ -334,9 +360,20 @@ async function syncPages({ accountId, transaction } = {}) {
 /**
  * List pages for a given account.
  */
-async function listPages({ accountId } = {}) {
+async function listPages({ accountId, enforcedUserIds } = {}) {
   const models = getTenantModels();
-  const { FacebookPage } = models;
+  const { FacebookAccount, FacebookPage } = models;
+
+  // Security check: Verify visibility of the parent account
+  const whereAccount = { id: accountId, deleted_at: null };
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    whereAccount.user_id = { [Op.in]: (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]) };
+  }
+
+  const account = await FacebookAccount.findOne({ where: whereAccount });
+  if (!account) {
+    return []; // Or throw if preferred; returning empty list is safer for UI
+  }
 
   const pages = await FacebookPage.findAll({
     where: { account_id: accountId, deleted_at: null },
@@ -350,19 +387,28 @@ async function listPages({ accountId } = {}) {
 
 /**
  * Fetch lead forms from Facebook for a page and upsert into facebook_lead_forms.
- * @param {{ dbPageId: number, transaction? }} params
+ * @param {{ dbPageId: number, enforcedUserIds?, transaction? }} params
  */
-async function syncForms({ dbPageId, transaction } = {}) {
+async function syncForms({ dbPageId, enforcedUserIds, transaction } = {}) {
   const models = getTenantModels();
-  const { FacebookPage, FacebookLeadForm } = models;
+  const { FacebookAccount, FacebookPage, FacebookLeadForm } = models;
 
   const page = await FacebookPage.findOne({
     where: { id: dbPageId, deleted_at: null },
+    include: [{ model: FacebookAccount, as: "account", required: true }],
     transaction,
   });
 
   if (!page) {
     throw new AppError("Facebook page not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+  }
+
+  // Security check: Verify visibility of the parent account
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    const allowedIds = (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]).map(Number);
+    if (!allowedIds.includes(Number(page.account?.user_id))) {
+      throw new AppError("Access denied to this page", RESPONSE_STATUS_CODES.FORBIDDEN);
+    }
   }
 
   const url =
@@ -406,9 +452,26 @@ async function syncForms({ dbPageId, transaction } = {}) {
 /**
  * List forms for a given page.
  */
-async function listForms({ dbPageId } = {}) {
+async function listForms({ dbPageId, enforcedUserIds } = {}) {
   const models = getTenantModels();
-  const { FacebookLeadForm } = models;
+  const { FacebookAccount, FacebookPage, FacebookLeadForm } = models;
+
+  const page = await FacebookPage.findOne({
+    where: { id: dbPageId, deleted_at: null },
+    include: [{ model: FacebookAccount, as: "account", required: true }],
+  });
+
+  if (!page) {
+    return [];
+  }
+
+  // Security check: Verify visibility of the parent account
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    const allowedIds = (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]).map(Number);
+    if (!allowedIds.includes(Number(page.account?.user_id))) {
+      return [];
+    }
+  }
 
   const forms = await FacebookLeadForm.findAll({
     where: { page_id: dbPageId, deleted_at: null },
@@ -552,18 +615,33 @@ async function _createMarketingLeadFromFbLead(fbLead, fbPage, fbForm, models, tr
  * Supports pagination via `after` cursor.
  * @param {{ dbFormId: number, transaction? }} params
  */
-async function syncLeads({ dbFormId, transaction } = {}) {
+async function syncLeads({ dbFormId, enforcedUserIds, transaction } = {}) {
   const models = getTenantModels();
-  const { FacebookLeadForm, FacebookPage } = models;
+  const { FacebookAccount, FacebookLeadForm, FacebookPage } = models;
 
   const form = await FacebookLeadForm.findOne({
     where: { id: dbFormId, deleted_at: null },
-    include: [{ model: FacebookPage, as: "page", required: true }],
+    include: [
+      { 
+        model: FacebookPage, 
+        as: "page", 
+        required: true,
+        include: [{ model: FacebookAccount, as: "account", required: true }]
+      }
+    ],
     transaction,
   });
 
   if (!form) {
     throw new AppError("Facebook lead form not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+  }
+
+  // Security check: Verify visibility of the parent account
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    const allowedIds = (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]).map(Number);
+    if (!allowedIds.includes(Number(form.page?.account?.user_id))) {
+      throw new AppError("Access denied to this form", RESPONSE_STATUS_CODES.FORBIDDEN);
+    }
   }
 
   const page = form.page;
@@ -612,19 +690,28 @@ async function syncLeads({ dbFormId, transaction } = {}) {
 
 /**
  * Subscribe a page to leadgen webhook events.
- * @param {{ dbPageId: number, transaction? }} params
+ * @param {{ dbPageId: number, enforcedUserIds?, transaction? }} params
  */
-async function subscribePageWebhook({ dbPageId, transaction } = {}) {
+async function subscribePageWebhook({ dbPageId, enforcedUserIds, transaction } = {}) {
   const models = getTenantModels();
-  const { FacebookPage } = models;
+  const { FacebookAccount, FacebookPage } = models;
 
   const page = await FacebookPage.findOne({
     where: { id: dbPageId, deleted_at: null },
+    include: [{ model: FacebookAccount, as: "account", required: true }],
     transaction,
   });
 
   if (!page) {
     throw new AppError("Facebook page not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+  }
+
+  // Security check: Verify visibility of the parent account
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    const allowedIds = (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]).map(Number);
+    if (!allowedIds.includes(Number(page.account?.user_id))) {
+      throw new AppError("Access denied to this page", RESPONSE_STATUS_CODES.FORBIDDEN);
+    }
   }
 
   // Subscribe the app to the page with the required leadgen field
@@ -642,17 +729,26 @@ async function subscribePageWebhook({ dbPageId, transaction } = {}) {
 /**
  * Unsubscribe a page from leadgen webhook events.
  */
-async function unsubscribePageWebhook({ dbPageId, transaction } = {}) {
+async function unsubscribePageWebhook({ dbPageId, enforcedUserIds, transaction } = {}) {
   const models = getTenantModels();
-  const { FacebookPage } = models;
+  const { FacebookAccount, FacebookPage } = models;
 
   const page = await FacebookPage.findOne({
     where: { id: dbPageId, deleted_at: null },
+    include: [{ model: FacebookAccount, as: "account", required: true }],
     transaction,
   });
 
   if (!page) {
     throw new AppError("Facebook page not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+  }
+
+  // Security check: Verify visibility of the parent account
+  if (enforcedUserIds !== undefined && enforcedUserIds !== null) {
+    const allowedIds = (Array.isArray(enforcedUserIds) ? enforcedUserIds : [enforcedUserIds]).map(Number);
+    if (!allowedIds.includes(Number(page.account?.user_id))) {
+      throw new AppError("Access denied to this page", RESPONSE_STATUS_CODES.FORBIDDEN);
+    }
   }
 
   const url =

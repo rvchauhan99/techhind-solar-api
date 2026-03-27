@@ -27,7 +27,7 @@ function orderStageLabel(o) {
 
 async function list(req, res, next) {
   try {
-    const result = await service.listOutstanding(req.query || {});
+    const result = await service.listOutstanding(req.query || {}, req);
     res.json({ status: true, ...result });
   } catch (err) {
     next(err);
@@ -36,7 +36,7 @@ async function list(req, res, next) {
 
 async function kpis(req, res, next) {
   try {
-    const result = await service.kpis(req.query || {});
+    const result = await service.kpis(req.query || {}, req);
     res.json({ status: true, data: result });
   } catch (err) {
     next(err);
@@ -63,7 +63,7 @@ async function analysis(req, res, next) {
 
 async function exportList(req, res, next) {
   try {
-    const result = await service.listOutstanding({ ...req.query, page: 1, limit: 10000 });
+    const result = await service.listOutstanding({ ...req.query, page: 1, limit: 10000 }, req);
     const rows = (result.data || []).map((o) => ({
       order_number: o.order_number,
       capacity: o.capacity,

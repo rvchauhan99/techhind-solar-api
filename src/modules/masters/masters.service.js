@@ -4,6 +4,15 @@ const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
 const modelDisplayFields = require('../../common/utils/modelDisplayFields.json');
 const { getTenantModels } = require('../tenant/tenantModels.js');
+const configCacheService = require("../config-master/configCache.service.js");
+
+const PLATFORM_CONFIG_MODEL = "platform_config.model";
+
+async function refreshPlatformConfigCacheIfNeeded(model, req) {
+    if (String(model || "").toLowerCase() !== PLATFORM_CONFIG_MODEL) return;
+    configCacheService.invalidateTenantCache(req);
+    await configCacheService.getAllConfigs(req);
+}
 
 /**
  * Helper function to get model by name (tenant-aware).
@@ -528,6 +537,7 @@ const deleteMaster = async ({ model, id } = {}, req) => {
             { where: { id }, paranoid: false }
         );
     }
+    await refreshPlatformConfigCacheIfNeeded(model, req);
 
     return true;
 };
@@ -631,6 +641,7 @@ const createMaster = async ({ model, payload, userId } = {}, req) => {
         }
     }
 
+    await refreshPlatformConfigCacheIfNeeded(model, req);
     return created.toJSON();
 };
 
@@ -824,6 +835,7 @@ const updateMaster = async ({ model, id, updates, userId } = {}, req) => {
         }
     }
 
+    await refreshPlatformConfigCacheIfNeeded(model, req);
     return record.toJSON();
 };
 
