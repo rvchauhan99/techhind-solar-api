@@ -340,6 +340,30 @@ const getById = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, item, "Order fetched", 200);
 });
 
+const getLatestPurchasePrices = asyncHandler(async (req, res) => {
+    const idsParam = req.query?.product_ids;
+    const productIds = Array.isArray(idsParam)
+        ? idsParam
+        : String(idsParam || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean);
+    const result = await orderService.getLatestPurchasePrices({
+        product_ids: productIds,
+        transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, result, "Latest purchase prices fetched", 200);
+});
+
+const getCostAmendments = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const result = await orderService.getOrderCostAmendments({
+        order_id: id,
+        transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, result, "Order cost amendments fetched", 200);
+});
+
 const generatePDF = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const order = await orderService.getOrderById({ id });
@@ -526,6 +550,8 @@ module.exports = {
     dashboardTrend,
     dashboardOrders,
     getById,
+    getLatestPurchasePrices,
+    getCostAmendments,
     create,
     update,
     remove,

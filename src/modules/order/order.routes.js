@@ -34,6 +34,7 @@ router.get("/delivery-execution", ...requireAuthWithTenant, orderReadAny, contro
 router.get("/fabrication-installation", ...requireAuthWithTenant, orderReadAny, controller.listFabricationInstallation);
 router.get("/solar-panels", ...requireAuthWithTenant, pendingOrders("read"), controller.getSolarPanels);
 router.get("/inverters", ...requireAuthWithTenant, pendingOrders("read"), controller.getInverters);
+router.get("/latest-purchase-prices", ...requireAuthWithTenant, orderReadAny, controller.getLatestPurchasePrices);
 router.post("/", ...requireAuthWithTenant, pendingOrders("create"), controller.create);
 router.post(
   "/:id/force-complete-delivery",
@@ -52,6 +53,7 @@ router.put("/:id/fabrication", ...requireAuthWithTenant, orderUpdateAny, fabrica
 router.get("/:id/installation", ...requireAuthWithTenant, orderReadAny, installationController.getByOrderId);
 router.put("/:id/installation", ...requireAuthWithTenant, orderUpdateAny, installationController.createOrUpdate);
 router.get("/:id/pdf", ...requireAuthWithTenant, orderReadAny, controller.generatePDF);
+router.get("/:id/cost-amendments", ...requireAuthWithTenant, orderReadAny, controller.getCostAmendments);
 router.get("/:id", ...requireAuthWithTenant, orderReadAny, controller.getById);
 router.put("/:id", ...requireAuthWithTenant, orderUpdateAny, controller.update);
 router.delete("/:id", ...requireAuthWithTenant, pendingOrders("delete"), controller.remove);
