@@ -1809,7 +1809,14 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             ];
         }
 
-        const costAdjustmentPayload = Array.isArray(payload.cost_adjustments) ? payload.cost_adjustments : [];
+        const skipCostEffectsForProjectBomEstablish =
+            bomSnapshotFromProject != null && bomSnapshotFromProject.length > 0;
+        let costAdjustmentPayload = Array.isArray(payload.cost_adjustments)
+            ? payload.cost_adjustments
+            : [];
+        if (skipCostEffectsForProjectBomEstablish) {
+            costAdjustmentPayload = [];
+        }
         let computedProjectCost = currentProjectCost;
         const amendmentLogs = [];
         const costAdjustmentActivity = [];
@@ -1925,7 +1932,8 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             });
         }
 
-        const hasManualProjectCostOverride = payload.manual_project_cost_override != null
+        const hasManualProjectCostOverride = !skipCostEffectsForProjectBomEstablish
+            && payload.manual_project_cost_override != null
             && payload.manual_project_cost_override !== "";
         const manualProjectCostOverride = hasManualProjectCostOverride
             ? roundMoney(payload.manual_project_cost_override)
