@@ -285,8 +285,15 @@ const listQuotations = async ({
             toNum(row.additional_cost_amount_2) -
             toNum(row.discount);
 
+        // Match web quotationCalculations.calculateTotals: GST on base excluding netmeter, stamp, state_government
+        const gstTaxableBase =
+            subtotal -
+            toNum(row.netmeter_amount) -
+            toNum(row.stamp_charges) -
+            toNum(row.state_government_amount);
         const gstRate = toNum(row.gst_rate);
-        const gstAmount = (subtotal * gstRate) / 100;
+        const safeTaxableBase = Math.max(0, gstTaxableBase);
+        const gstAmount = (safeTaxableBase * gstRate) / 100;
         const totalPayable = subtotal + gstAmount;
 
         return {
