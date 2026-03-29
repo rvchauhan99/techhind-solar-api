@@ -255,6 +255,7 @@ const listLedgerEntries = async ({
   product_id = null,
   warehouse_id = null,
   product_type_id = null,
+  product_make_id = null,
   product_name = null,
   warehouse_name = null,
   transaction_type = null,
@@ -276,7 +277,7 @@ const listLedgerEntries = async ({
   sortOrder = "DESC",
 } = {}) => {
   const models = getTenantModels();
-  const { InventoryLedger, Stock, Product, ProductType, CompanyWarehouse, User, StockSerial } = models;
+  const { InventoryLedger, Stock, Product, ProductType, ProductMake, CompanyWarehouse, User, StockSerial } = models;
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -328,14 +329,18 @@ const listLedgerEntries = async ({
   const productWhere = {};
   if (product_name) productWhere.product_name = { [Op.iLike]: `%${product_name}%` };
   if (product_type_id) productWhere.product_type_id = product_type_id;
+  if (product_make_id) productWhere.product_make_id = product_make_id;
 
   const productInclude = {
     model: Product,
     as: "product",
-    attributes: ["id", "product_name", "hsn_ssn_code", "product_type_id"],
-    required: !!product_name || !!product_type_id,
+    attributes: ["id", "product_name", "hsn_ssn_code", "product_type_id", "product_make_id"],
+    required: !!product_name || !!product_type_id || !!product_make_id,
     ...(Object.keys(productWhere).length > 0 && { where: productWhere }),
-    include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
+    include: [
+      { model: ProductType, as: "productType", attributes: ["id", "name"] },
+      { model: ProductMake, as: "productMake", attributes: ["id", "name"] },
+    ],
   };
   const warehouseInclude = {
     model: CompanyWarehouse,
@@ -380,6 +385,7 @@ const listLedgerEntries = async ({
       return {
         ...json,
         product_type_name: json.product?.productType?.name ?? null,
+        product_make_name: json.product?.productMake?.name ?? null,
       };
     }),
     meta: {
@@ -399,6 +405,7 @@ const exportLedgerEntries = async (params = {}) => {
   worksheet.columns = [
     { header: "Product", key: "product_name", width: 24 },
     { header: "Product Type", key: "product_type_name", width: 18 },
+    { header: "Product Make", key: "product_make_name", width: 18 },
     { header: "Warehouse", key: "warehouse_name", width: 22 },
     { header: "Transaction Type", key: "transaction_type", width: 18 },
     { header: "Reference No", key: "transaction_reference_no", width: 22 },
@@ -414,6 +421,7 @@ const exportLedgerEntries = async (params = {}) => {
     worksheet.addRow({
       product_name: r.product?.product_name || "",
       product_type_name: r.product_type_name ?? r.product?.productType?.name ?? "",
+      product_make_name: r.product_make_name ?? r.product?.productMake?.name ?? "",
       warehouse_name: r.warehouse?.name || "",
       transaction_type: r.transaction_type || "",
       transaction_reference_no: r.transaction_reference_no ?? "",
