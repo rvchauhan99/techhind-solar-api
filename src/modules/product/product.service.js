@@ -40,6 +40,7 @@ const listProducts = async ({
   product_name_op: productNameOp = null,
   product_type_name: productTypeName = null,
   product_make_name: productMakeName = null,
+  product_make_id: productMakeId = null,
   hsn_ssn_code: hsnSsnCode = null,
   measurement_unit_name: measurementUnitName = null,
   capacity,
@@ -131,6 +132,17 @@ const listProducts = async ({
     where[Op.and].push({ is_active: isActive === true || isActive === "true" || isActive === "1" });
   }
 
+  const resolvedProductMakeId =
+    productMakeId != null && productMakeId !== ""
+      ? parseInt(productMakeId, 10)
+      : null;
+  const validProductMakeId =
+    resolvedProductMakeId != null && !Number.isNaN(resolvedProductMakeId) ? resolvedProductMakeId : null;
+  if (validProductMakeId != null) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push({ product_make_id: validProductMakeId });
+  }
+
   const productTypeInclude = {
     model: ProductType,
     as: "productType",
@@ -142,8 +154,9 @@ const listProducts = async ({
     model: ProductMake,
     as: "productMake",
     attributes: ["id", "name"],
-    required: !!productMakeName,
-    ...(productMakeName && { where: { name: { [Op.iLike]: `%${productMakeName}%` } } }),
+    required: !!(productMakeName && validProductMakeId == null),
+    ...(productMakeName &&
+      validProductMakeId == null && { where: { name: { [Op.iLike]: `%${productMakeName}%` } } }),
   };
   const measurementUnitInclude = {
     model: MeasurementUnit,

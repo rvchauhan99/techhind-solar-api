@@ -241,6 +241,7 @@ const buildStockFilters = (params = {}, models) => {
     warehouse_id = null,
     product_id = null,
     product_type_id = null,
+    product_make_id = null,
     warehouse_name = null,
     product_name = null,
     quantity_on_hand,
@@ -258,7 +259,7 @@ const buildStockFilters = (params = {}, models) => {
     tracking_type = null,
     low_stock = null,
   } = params;
-  const { Product, ProductType, CompanyWarehouse } = models;
+  const { Product, ProductType, ProductMake, CompanyWarehouse } = models;
   const where = {};
 
   if (warehouse_id) where.warehouse_id = warehouse_id;
@@ -295,6 +296,7 @@ const buildStockFilters = (params = {}, models) => {
   const productWhere = {};
   if (product_name) productWhere.product_name = { [Op.iLike]: `%${product_name}%` };
   if (product_type_id) productWhere.product_type_id = product_type_id;
+  if (product_make_id) productWhere.product_make_id = product_make_id;
 
   const productInclude = {
     model: Product,
@@ -306,12 +308,16 @@ const buildStockFilters = (params = {}, models) => {
       "tracking_type",
       "serial_required",
       "product_type_id",
+      "product_make_id",
       "avg_purchase_price",
       "gst_percent",
     ],
-    required: !!product_name || !!product_type_id,
+    required: !!product_name || !!product_type_id || !!product_make_id,
     ...(Object.keys(productWhere).length > 0 && { where: productWhere }),
-    include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
+    include: [
+      { model: ProductType, as: "productType", attributes: ["id", "name"] },
+      { model: ProductMake, as: "productMake", attributes: ["id", "name"] },
+    ],
   };
   const warehouseInclude = {
     model: CompanyWarehouse,
@@ -334,6 +340,7 @@ const listStocks = async ({
   warehouse_id = null,
   product_id = null,
   product_type_id = null,
+  product_make_id = null,
   warehouse_name = null,
   product_name = null,
   quantity_on_hand,
@@ -361,6 +368,7 @@ const listStocks = async ({
       warehouse_id,
       product_id,
       product_type_id,
+      product_make_id,
       warehouse_name,
       product_name,
       quantity_on_hand,
@@ -401,6 +409,8 @@ const listStocks = async ({
       product: row.product,
       product_type_id: row.product?.product_type_id ?? null,
       product_type_name: row.product?.productType?.name ?? null,
+      product_make_id: row.product?.product_make_id ?? null,
+      product_make_name: row.product?.productMake?.name ?? null,
       avg_purchase_price: row.product?.avg_purchase_price ?? null,
       gst_percent: row.product?.gst_percent ?? null,
       stock_value: stockValue,
@@ -434,6 +444,7 @@ const getStockSummary = async ({
   warehouse_id = null,
   product_id = null,
   product_type_id = null,
+  product_make_id = null,
   warehouse_name = null,
   product_name = null,
   quantity_on_hand,
@@ -458,6 +469,7 @@ const getStockSummary = async ({
       warehouse_id,
       product_id,
       product_type_id,
+      product_make_id,
       warehouse_name,
       product_name,
       quantity_on_hand,
@@ -620,6 +632,7 @@ const exportStocks = async (params = {}) => {
   worksheet.columns = [
     { header: "Product", key: "product_name", width: 24 },
     { header: "Product Type", key: "product_type_name", width: 18 },
+    { header: "Product Make", key: "product_make_name", width: 18 },
     { header: "Warehouse", key: "warehouse_name", width: 22 },
     { header: "On Hand", key: "quantity_on_hand", width: 12 },
     { header: "Reserved", key: "quantity_reserved", width: 12 },
@@ -646,6 +659,7 @@ const exportStocks = async (params = {}) => {
     worksheet.addRow({
       product_name: s.product?.product_name || "",
       product_type_name: s.product_type_name ?? "",
+      product_make_name: s.product_make_name ?? "",
       warehouse_name: s.warehouse?.name || "",
       quantity_on_hand: s.quantity_on_hand != null ? s.quantity_on_hand : "",
       quantity_reserved: s.quantity_reserved != null ? s.quantity_reserved : "",

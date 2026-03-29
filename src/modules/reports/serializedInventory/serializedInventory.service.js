@@ -17,13 +17,14 @@ const getSerializedInventoryReport = async ({
   start_date = null,
   end_date = null,
   product_type_id = null,
+  product_make_id = null,
   issued_against = null,
   reference_number = null,
   sortBy = "id",
   sortOrder = "DESC",
 } = {}) => {
   const models = getTenantModels();
-  const { StockSerial, Product, CompanyWarehouse, Stock, ProductType } = models;
+  const { StockSerial, Product, CompanyWarehouse, Stock, ProductType, ProductMake } = models;
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -68,13 +69,22 @@ const getSerializedInventoryReport = async ({
     }
   }
 
-  // Build include conditions: require product when filtering by product_type_id so list/summary match
+  const productFilterActive = !!(product_type_id || product_make_id);
+  // Build include conditions: require product when filtering by product type or make so list/summary match
   const productInclude = {
     model: Product,
     as: "product",
-    required: !!product_type_id,
+    required: productFilterActive,
     paranoid: false,
-    attributes: ["id", "product_name", "hsn_ssn_code", "tracking_type", "serial_required", "product_type_id"],
+    attributes: [
+      "id",
+      "product_name",
+      "hsn_ssn_code",
+      "tracking_type",
+      "serial_required",
+      "product_type_id",
+      "product_make_id",
+    ],
     include: [
       {
         model: ProductType,
@@ -83,6 +93,14 @@ const getSerializedInventoryReport = async ({
         required: !!product_type_id,
         paranoid: false,
         ...(product_type_id ? { where: { id: product_type_id } } : {}),
+      },
+      {
+        model: ProductMake,
+        as: "productMake",
+        attributes: ["id", "name"],
+        required: !!product_make_id,
+        paranoid: false,
+        ...(product_make_id ? { where: { id: product_make_id } } : {}),
       },
     ],
   };
@@ -117,6 +135,7 @@ const getSerializedInventoryReport = async ({
       product_id: serial.product_id,
       product_name: serial.product?.product_name || null,
       product_type: serial.product?.productType?.name || null,
+      product_make: serial.product?.productMake?.name || null,
       hsn_code: serial.product?.hsn_ssn_code || null,
       warehouse_id: serial.warehouse_id,
       warehouse_name: serial.warehouse?.name || null,
@@ -158,6 +177,14 @@ const getSerializedInventoryReport = async ({
             required: !!product_type_id,
             paranoid: false,
             ...(product_type_id ? { where: { id: product_type_id } } : {}),
+          },
+          {
+            model: ProductMake,
+            as: "productMake",
+            attributes: ["id", "name"],
+            required: !!product_make_id,
+            paranoid: false,
+            ...(product_make_id ? { where: { id: product_make_id } } : {}),
           },
         ],
       },
@@ -298,6 +325,7 @@ const exportSerializedInventoryReport = async ({
   start_date = null,
   end_date = null,
   product_type_id = null,
+  product_make_id = null,
   issued_against = null,
   reference_number = null,
   format = "csv",
@@ -313,6 +341,7 @@ const exportSerializedInventoryReport = async ({
     start_date,
     end_date,
     product_type_id,
+    product_make_id,
     issued_against,
     reference_number,
   });
@@ -339,6 +368,7 @@ const generateCSV = (data) => {
     "Serial Number",
     "Product Name",
     "Product Type",
+    "Product Make",
     "HSN Code",
     "Warehouse",
     "Status",
@@ -355,6 +385,7 @@ const generateCSV = (data) => {
     item.serial_number || "",
     item.product_name || "",
     item.product_type || "",
+    item.product_make || "",
     item.hsn_code || "",
     item.warehouse_name || "",
     item.status || "",
