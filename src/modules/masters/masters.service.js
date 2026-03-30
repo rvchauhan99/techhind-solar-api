@@ -980,6 +980,12 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
             { model: models.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
         ];
     }
+    
+    const isProductMakeModel = model === 'product_make.model' || model === 'product_makes' || Model.tableName === 'product_makes';
+    if (isProductMakeModel && models.ProductType) {
+        findOptions.include = findOptions.include || [];
+        findOptions.include.push({ model: models.ProductType, as: 'productType', attributes: ['name'], required: false });
+    }
 
     // Apply limit: when id is present return at most one; when q is present default to 20, otherwise use provided limit or no limit (backward compat)
     const effectiveLimit = parsedId != null ? 1 : (limit != null ? Number(limit) : (searchTerm.length > 0 ? 20 : undefined));
@@ -995,6 +1001,9 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
         let label = data[displayField] || data.name || data.code || data.title || data.label || `ID: ${data.id}`;
         if (isPurchaseOrderModel && data.supplier && data.supplier.supplier_name) {
             label = `${data.po_number || data.id} - ${data.supplier.supplier_name}`;
+        }
+        if (isProductMakeModel && data.productType && data.productType.name) {
+            label = `${label} (${data.productType.name})`;
         }
         // Return all the data fields, so frontend can use the actual field names (name, unit, etc.)
         return {
