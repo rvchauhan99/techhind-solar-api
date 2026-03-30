@@ -39,6 +39,7 @@ const listProducts = async ({
   product_name: productName = null,
   product_name_op: productNameOp = null,
   product_type_name: productTypeName = null,
+  product_type_id: productTypeId = null,
   product_make_name: productMakeName = null,
   product_make_id: productMakeId = null,
   hsn_ssn_code: hsnSsnCode = null,
@@ -130,6 +131,17 @@ const listProducts = async ({
   if (isActive !== null && isActive !== "" && isActive !== undefined) {
     where[Op.and] = where[Op.and] || [];
     where[Op.and].push({ is_active: isActive === true || isActive === "true" || isActive === "1" });
+  }
+
+  const resolvedProductTypeId =
+    productTypeId != null && productTypeId !== ""
+      ? parseInt(productTypeId, 10)
+      : null;
+  const validProductTypeId =
+    resolvedProductTypeId != null && !Number.isNaN(resolvedProductTypeId) ? resolvedProductTypeId : null;
+  if (validProductTypeId != null) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push({ product_type_id: validProductTypeId });
   }
 
   const resolvedProductMakeId =
