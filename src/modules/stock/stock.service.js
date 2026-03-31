@@ -94,6 +94,7 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
         const existingSerial = await StockSerial.findOne({
           where: {
             serial_number: { [Op.iLike]: serial.serial_number },
+            status: { [Op.notIn]: [SERIAL_STATUS.BLOCKED, SERIAL_STATUS.RETURNED] },
           },
           include: [
             {
@@ -800,8 +801,9 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
 };
 
 /**
- * Validate that a serial does NOT already exist for this product + warehouse (any status).
- * Used for IN/Found adjustments - new serials must not already exist.
+ * Validate that a serial does NOT already exist as an *active* record for any product of the same product type.
+ * BLOCKED and RETURNED serials are considered "dead" and CAN be re-found (IN/Found adjustment).
+ * Only active statuses (AVAILABLE, RESERVED, ISSUED) count as conflicting duplicates.
  * Returns { exists: false } or { exists: true, message: string }.
  */
 const validateSerialNotExists = async ({ serial_number, product_id, warehouse_id } = {}) => {
@@ -811,21 +813,52 @@ const validateSerialNotExists = async ({ serial_number, product_id, warehouse_id
   }
   const models = getTenantModels();
   const { StockSerial, Product } = models;
-  const row = await StockSerial.findOne({
-    where: {
-      serial_number: { [Op.iLike]: trimmed },
-      product_id: parseInt(product_id, 10),
-      warehouse_id: parseInt(warehouse_id, 10),
-    },
-    attributes: ["id"],
-  });
 
-  if (row) {
-    const product = await Product.findByPk(parseInt(product_id, 10), {
-      attributes: ["id", "product_name"],
+  // "Active" statuses that truly block re-entry
+  const activeStatuses = [SERIAL_STATUS.AVAILABLE, SERIAL_STATUS.RESERVED, SERIAL_STATUS.ISSUED];
+
+  // Look up the product type for this product
+  const product = await Product.findByPk(parseInt(product_id, 10), {
+    attributes: ["id", "product_name", "product_type_id"],
+  });
+  const productName = product?.product_name || `Product #${product_id}`;
+  const productTypeId = product?.product_type_id ?? null;
+
+  if (productTypeId != null) {
+    // Check across all products of the same product type — but only active serials
+    const row = await StockSerial.findOne({
+      where: {
+        serial_number: { [Op.iLike]: trimmed },
+        status: { [Op.in]: activeStatuses },
+      },
+      include: [
+        {
+          model: Product,
+          as: "product",
+          required: true,
+          attributes: ["id", "product_type_id"],
+          where: { product_type_id: productTypeId },
+        },
+      ],
+      attributes: ["id"],
     });
-    const productName = product?.product_name || `Product #${product_id}`;
-    return { exists: true, message: `Serial '${trimmed}' already exists for ${productName} at this warehouse` };
+    if (row) {
+      return { exists: true, message: `Serial '${trimmed}' is already active for this product type (${productName}). It cannot be added as a Found item while it is still in stock.` };
+    }
+  } else {
+    // Fallback: check by product_id + warehouse_id, active statuses only
+    const row = await StockSerial.findOne({
+      where: {
+        serial_number: { [Op.iLike]: trimmed },
+        product_id: parseInt(product_id, 10),
+        warehouse_id: parseInt(warehouse_id, 10),
+        status: { [Op.in]: activeStatuses },
+      },
+      attributes: ["id"],
+    });
+    if (row) {
+      return { exists: true, message: `Serial '${trimmed}' is already active for ${productName} at this warehouse` };
+    }
   }
 
   return { exists: false };
