@@ -190,9 +190,10 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
       }
 
       // Validate serial count if required
-      if (product.serial_required && item.serials) {
-        if (item.serials.length !== item.adjustment_quantity) {
-          throw new Error(`Serial count (${item.serials.length}) must match adjustment quantity (${item.adjustment_quantity})`);
+      if (product.serial_required) {
+        const serialCount = (item.serials || []).length;
+        if (serialCount !== item.adjustment_quantity) {
+          throw new Error(`Serial count (${serialCount}) must match adjustment quantity (${item.adjustment_quantity}) for serial-tracked products`);
         }
       }
 
@@ -231,38 +232,55 @@ const createStockAdjustment = async ({ payload, transaction } = {}) => {
                 }
                 stockSerialId = stockSerial.id;
               } else if (direction === MOVEMENT_TYPE.IN) {
-                const existing = await StockSerial.findOne({
+                // Only ACTIVE serials (AVAILABLE/RESERVED/ISSUED) block re-entry
+                const existingActive = await StockSerial.findOne({
                   where: {
                     serial_number: { [Op.iLike]: trimmed },
                     product_id: item.product_id,
                     warehouse_id: adjustmentData.warehouse_id,
+                    status: { [Op.in]: [SERIAL_STATUS.AVAILABLE, SERIAL_STATUS.RESERVED, SERIAL_STATUS.ISSUED] },
                   },
                   attributes: ["id"],
                   transaction: t,
                 });
-                if (existing) {
-                  throw new Error(`Serial "${trimmed}" already exists for product id ${item.product_id} at this warehouse`);
+                if (existingActive) {
+                  throw new Error(`Serial "${trimmed}" is already active in stock at this warehouse`);
                 }
-                const stock = await stockService.getOrCreateStock({
-                  product_id: item.product_id,
-                  warehouse_id: adjustmentData.warehouse_id,
-                  product,
-                  transaction: t,
-                });
-                const newSerial = await StockSerial.create(
-                  {
+                // BLOCKED/RETURNED serial can be re-found — re-link it; post will reactivate it
+                const existingDead = await StockSerial.findOne({
+                  where: {
+                    serial_number: { [Op.iLike]: trimmed },
                     product_id: item.product_id,
                     warehouse_id: adjustmentData.warehouse_id,
-                    stock_id: stock.id,
-                    serial_number: trimmed,
-                    status: SERIAL_STATUS.AVAILABLE,
-                    source_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
-                    source_id: created.id,
-                    inward_date: new Date(),
+                    status: { [Op.in]: [SERIAL_STATUS.BLOCKED, SERIAL_STATUS.RETURNED] },
                   },
-                  { transaction: t }
-                );
-                stockSerialId = newSerial.id;
+                  attributes: ["id"],
+                  transaction: t,
+                });
+                if (existingDead) {
+                  stockSerialId = existingDead.id;
+                } else {
+                  const stock = await stockService.getOrCreateStock({
+                    product_id: item.product_id,
+                    warehouse_id: adjustmentData.warehouse_id,
+                    product,
+                    transaction: t,
+                  });
+                  const newSerial = await StockSerial.create(
+                    {
+                      product_id: item.product_id,
+                      warehouse_id: adjustmentData.warehouse_id,
+                      stock_id: stock.id,
+                      serial_number: trimmed,
+                      status: SERIAL_STATUS.AVAILABLE,
+                      source_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
+                      source_id: created.id,
+                      inward_date: new Date(),
+                    },
+                    { transaction: t }
+                  );
+                  stockSerialId = newSerial.id;
+                }
               }
             }
           }
@@ -341,9 +359,10 @@ const updateStockAdjustment = async ({ id, payload, transaction } = {}) => {
         const direction = item.adjustment_direction || defaultDirection;
         if (!direction) throw new Error("Adjustment direction must be specified for AUDIT type");
 
-        if (product.serial_required && item.serials) {
-          if (item.serials.length !== item.adjustment_quantity) {
-            throw new Error(`Serial count (${item.serials.length}) must match adjustment quantity (${item.adjustment_quantity})`);
+        if (product.serial_required) {
+          const serialCount = (item.serials || []).length;
+          if (serialCount !== item.adjustment_quantity) {
+            throw new Error(`Serial count (${serialCount}) must match adjustment quantity (${item.adjustment_quantity}) for serial-tracked products`);
           }
         }
 
@@ -382,38 +401,55 @@ const updateStockAdjustment = async ({ id, payload, transaction } = {}) => {
                   }
                   stockSerialId = stockSerial.id;
                 } else if (direction === MOVEMENT_TYPE.IN) {
-                  const existing = await StockSerial.findOne({
+                  // Only ACTIVE serials (AVAILABLE/RESERVED/ISSUED) block re-entry
+                  const existingActive = await StockSerial.findOne({
                     where: {
                       serial_number: { [Op.iLike]: trimmed },
                       product_id: item.product_id,
                       warehouse_id: adjustmentData.warehouse_id,
+                      status: { [Op.in]: [SERIAL_STATUS.AVAILABLE, SERIAL_STATUS.RESERVED, SERIAL_STATUS.ISSUED] },
                     },
                     attributes: ["id"],
                     transaction: t,
                   });
-                  if (existing) {
-                    throw new Error(`Serial "${trimmed}" already exists for product id ${item.product_id} at this warehouse`);
+                  if (existingActive) {
+                    throw new Error(`Serial "${trimmed}" is already active in stock at this warehouse`);
                   }
-                  const stock = await stockService.getOrCreateStock({
-                    product_id: item.product_id,
-                    warehouse_id: adjustmentData.warehouse_id,
-                    product,
-                    transaction: t,
-                  });
-                  const newSerial = await StockSerial.create(
-                    {
+                  // BLOCKED/RETURNED serial can be re-found — re-link it; post will reactivate it
+                  const existingDead = await StockSerial.findOne({
+                    where: {
+                      serial_number: { [Op.iLike]: trimmed },
                       product_id: item.product_id,
                       warehouse_id: adjustmentData.warehouse_id,
-                      stock_id: stock.id,
-                      serial_number: trimmed,
-                      status: SERIAL_STATUS.AVAILABLE,
-                      source_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
-                      source_id: id,
-                      inward_date: new Date(),
+                      status: { [Op.in]: [SERIAL_STATUS.BLOCKED, SERIAL_STATUS.RETURNED] },
                     },
-                    { transaction: t }
-                  );
-                  stockSerialId = newSerial.id;
+                    attributes: ["id"],
+                    transaction: t,
+                  });
+                  if (existingDead) {
+                    stockSerialId = existingDead.id;
+                  } else {
+                    const stock = await stockService.getOrCreateStock({
+                      product_id: item.product_id,
+                      warehouse_id: adjustmentData.warehouse_id,
+                      product,
+                      transaction: t,
+                    });
+                    const newSerial = await StockSerial.create(
+                      {
+                        product_id: item.product_id,
+                        warehouse_id: adjustmentData.warehouse_id,
+                        stock_id: stock.id,
+                        serial_number: trimmed,
+                        status: SERIAL_STATUS.AVAILABLE,
+                        source_type: TRANSACTION_TYPE.STOCK_ADJUSTMENT,
+                        source_id: id,
+                        inward_date: new Date(),
+                      },
+                      { transaction: t }
+                    );
+                    stockSerialId = newSerial.id;
+                  }
                 }
               }
             }
@@ -468,7 +504,7 @@ const approveStockAdjustment = async ({ id, approved_by, transaction } = {}) => 
             {
               model: StockAdjustmentSerial,
               as: "serials",
-              include: [{ model: StockSerial, as: "stockSerial" }],
+              include: [{ model: StockSerial, as: "stockSerial", attributes: ["id", "serial_number", "status", "warehouse_id"] }],
             },
           ],
         },
@@ -522,7 +558,7 @@ const postStockAdjustment = async ({ id, transaction } = {}) => {
             {
               model: StockAdjustmentSerial,
               as: "serials",
-              include: [{ model: StockSerial, as: "stockSerial" }],
+              include: [{ model: StockSerial, as: "stockSerial", attributes: ["id", "serial_number", "status", "warehouse_id"] }],
             },
           ],
         },
@@ -543,6 +579,8 @@ const postStockAdjustment = async ({ id, transaction } = {}) => {
         product: item.product,
         transaction: t,
       });
+      // Reload within transaction to get the latest committed values
+      await stock.reload({ transaction: t });
 
       // Validate for OUT adjustments
       if (item.adjustment_direction === MOVEMENT_TYPE.OUT) {
