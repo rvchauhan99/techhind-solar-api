@@ -392,6 +392,22 @@ const createLead = async ({ payload, transaction } = {}) => {
     throw new AppError("customer_name and mobile_number are required", RESPONSE_STATUS_CODES.BAD_REQUEST);
   }
 
+  // Check for existing lead with same mobile number
+  const existingLead = await MarketingLead.findOne({
+    where: {
+      mobile_number: payload.mobile_number,
+      deleted_at: null,
+    },
+    transaction,
+  });
+
+  if (existingLead) {
+    throw new AppError(
+      `A lead with mobile number ${payload.mobile_number} already exists (#${existingLead.lead_number || existingLead.id})`,
+      RESPONSE_STATUS_CODES.BAD_REQUEST
+    );
+  }
+
   await assertActiveUserIds(payload?.assigned_to, {
     transaction,
     models,

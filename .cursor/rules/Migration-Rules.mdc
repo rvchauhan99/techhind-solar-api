@@ -1,0 +1,10 @@
+---
+description: Enforce creation of migration scripts for any database schema changes.
+globs: src/models/*.js
+---
+
+# Migration Rules
+
+- ALWAYS create a new migration script in the `migrations/` directory whenever you modify a model's schema (add/remove/modify columns).
+- Use the current date and a sequential number for the migration filename (e.g., `YYYYMMDDHHMMSS-description.js`).
+- Ensure both `up` and `down` methods are implemented for reversibility.

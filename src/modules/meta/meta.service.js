@@ -637,6 +637,7 @@ async function _createMarketingLeadFromFbLead(fbLead, fbPage, fbForm, models, tr
       address: address || null,
       inquiry_source_id: inquirySourceId,
       campaign_id: campaignId,
+      campaign_name: campaignName,
       status: "new",
       priority: "medium",
       lead_score: 0,
