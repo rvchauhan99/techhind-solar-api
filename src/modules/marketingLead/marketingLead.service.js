@@ -18,6 +18,15 @@ const normalizeLike = (s) => {
   return str ? `%${str}%` : null;
 };
 
+/** Parse multi-select values (arrays or comma-separated strings) into arrays */
+const parseMultiSelectValue = (val) => {
+  if (Array.isArray(val)) return val.filter(Boolean);
+  if (typeof val === "string" && val.trim() !== "") {
+    return val.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return null;
+};
+
 /** Normalize optional date from payload: invalid/empty/"Invalid date" -> null; valid date -> Date or ISO string for DB */
 const normalizeOptionalDate = (value) => {
   if (value == null || value === "") return null;
@@ -48,43 +57,55 @@ const buildLeadWhere = ({
 }) => {
   const where = { deleted_at: null };
 
-  if (status) {
-    where.status = Array.isArray(status) ? { [Op.in]: status } : status;
+  const statusList = parseMultiSelectValue(status);
+  if (statusList) {
+    where.status = { [Op.in]: statusList };
   }
-  if (not_status) {
-    const notStatusList = Array.isArray(not_status) ? not_status : [not_status];
+
+  const notStatusList = parseMultiSelectValue(not_status);
+  if (notStatusList) {
     if (where.status) {
       where.status = { [Op.and]: [where.status, { [Op.notIn]: notStatusList }] };
     } else {
       where.status = { [Op.notIn]: notStatusList };
     }
   }
-  if (assigned_to != null && String(assigned_to).trim() !== "") {
-    const id = parseInt(assigned_to, 10);
-    if (!Number.isNaN(id)) where.assigned_to = id;
+
+  const assignedToList = parseMultiSelectValue(assigned_to);
+  if (assignedToList) {
+    where.assigned_to = { [Op.in]: assignedToList.map(Number) };
   }
+
   if (Array.isArray(enforcedAssignedToIds)) {
-    if (enforcedAssignedToIds.length === 0) {
-      where.assigned_to = { [Op.in]: [-1] };
+    const enforcedIds = enforcedAssignedToIds.length === 0 ? [-1] : enforcedAssignedToIds;
+    if (where.assigned_to) {
+      // If both explicit assigned_to filter and enforced visibility criteria exist, intersect them
+      where.assigned_to = { [Op.and]: [where.assigned_to, { [Op.in]: enforcedIds }] };
     } else {
-      where.assigned_to = { [Op.in]: enforcedAssignedToIds };
+      where.assigned_to = { [Op.in]: enforcedIds };
     }
   }
-  if (branch_id != null && String(branch_id).trim() !== "") {
-    const id = parseInt(branch_id, 10);
-    if (!Number.isNaN(id)) where.branch_id = id;
+
+  const branchIdList = parseMultiSelectValue(branch_id);
+  if (branchIdList) {
+    where.branch_id = { [Op.in]: branchIdList.map(Number) };
   }
-  if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
-    const id = parseInt(inquiry_source_id, 10);
-    if (!Number.isNaN(id)) where.inquiry_source_id = id;
+
+  const inquirySourceIdList = parseMultiSelectValue(inquiry_source_id);
+  if (inquirySourceIdList) {
+    where.inquiry_source_id = { [Op.in]: inquirySourceIdList.map(Number) };
   }
-  if (campaign_id != null && String(campaign_id).trim() !== "") {
-    const id = parseInt(campaign_id, 10);
-    if (!Number.isNaN(id)) where.campaign_id = id;
+
+  const campaignIdList = parseMultiSelectValue(campaign_id);
+  if (campaignIdList) {
+    where.campaign_id = { [Op.in]: campaignIdList.map(Number) };
   }
-  if (priority) {
-    where.priority = priority;
+
+  const priorityList = parseMultiSelectValue(priority);
+  if (priorityList) {
+    where.priority = { [Op.in]: priorityList };
   }
+
   if (created_from || created_to) {
     where.created_at = {};
     if (created_from) where.created_at[Op.gte] = created_from;
