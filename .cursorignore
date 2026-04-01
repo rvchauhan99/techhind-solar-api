@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+.logs
+.env
+coverage
+db-backups
+docs
+postman
+public
+sample
+*.xlsx
+*.pdf
+*.csv
