@@ -334,5 +334,13 @@
             "config_value",
             "value_type"
         ]
+    },
+    {
+        "id": 39,
+        "name": "Campaign",
+        "model_name": "campaign.model",
+        "required_fields": [
+            "name"
+        ]
     }
 ]

@@ -25,7 +25,7 @@ const listLeadFollowups = async ({
   priority,
   assigned_to,
   branch_id,
-  campaign_name,
+  campaign_id,
   next_follow_up_from,
   next_follow_up_to,
   reminder_view,
@@ -39,6 +39,7 @@ const listLeadFollowups = async ({
     MarketingLeadFollowUp,
     CompanyBranch,
     InquirySource,
+    Campaign,
     User,
   } = models;
 
@@ -95,8 +96,9 @@ const listLeadFollowups = async ({
   }
 
   // Campaign filter
-  if (campaign_name) {
-    where.campaign_name = { [Op.iLike]: normalizeLike(campaign_name) };
+  if (campaign_id != null && String(campaign_id).trim() !== "") {
+    const id = parseInt(campaign_id, 10);
+    if (!Number.isNaN(id)) where.campaign_id = id;
   }
 
   // Next follow-up date filtering (date-preset support)
@@ -139,6 +141,12 @@ const listLeadFollowups = async ({
     {
       model: User,
       as: "assignedTo",
+      attributes: ["id", "name"],
+      required: false,
+    },
+    {
+      model: Campaign,
+      as: "campaign",
       attributes: ["id", "name"],
       required: false,
     },
@@ -192,7 +200,8 @@ const listLeadFollowups = async ({
       branch_id: lead.branch_id,
       branch_name: lead.branch?.name || null,
       inquiry_source_name: lead.inquirySource?.source_name || null,
-      campaign_name: lead.campaign_name,
+      campaign_id: lead.campaign_id,
+      campaign_name: lead.campaign?.name || null,
       lead_score: lead.lead_score,
       next_follow_up_at: lead.next_follow_up_at,
       last_called_at: lead.last_called_at,

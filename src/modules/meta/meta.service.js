@@ -524,7 +524,7 @@ function extractFbField(fieldData, key) {
  * @param {object} [transaction]
  */
 async function _createMarketingLeadFromFbLead(fbLead, fbPage, fbForm, models, transaction) {
-  const { MarketingLead } = models;
+  const { MarketingLead, Campaign } = models;
 
   const fbLeadId = String(fbLead.id);
 
@@ -556,10 +556,35 @@ async function _createMarketingLeadFromFbLead(fbLead, fbPage, fbForm, models, tr
     extractFbField(fieldData, "first_name") ||
     "Unknown";
 
-  const mobileNumber =
+  const extractedMobileNumber =
     extractFbField(fieldData, "phone_number") ||
     extractFbField(fieldData, "phone") ||
-    "0000000000";
+    null;
+
+  const mobileNumber = extractedMobileNumber || "0000000000";
+
+  // Skip if the incoming mobile number already exists in any active lead.
+  // Compare normalized numbers (digits only) so +91/space/dash formats are treated as same.
+  if (extractedMobileNumber) {
+    const normalizedMobile = extractedMobileNumber.replace(/\D/g, "");
+    if (normalizedMobile) {
+      const existingWithMobile = await MarketingLead.findOne({
+        where: {
+          deleted_at: null,
+          [Op.and]: [
+            MarketingLead.sequelize.literal(
+              `(regexp_replace(coalesce("MarketingLead"."mobile_number", ''), '\\D', '', 'g') = '${normalizedMobile.replace(/'/g, "''")}')`
+            ),
+          ],
+        },
+        transaction,
+      });
+
+      if (existingWithMobile) {
+        return null;
+      }
+    }
+  }
 
   const emailId =
     extractFbField(fieldData, "email") ||
@@ -580,6 +605,21 @@ async function _createMarketingLeadFromFbLead(fbLead, fbPage, fbForm, models, tr
   const campaignName = fbForm ? fbForm.form_name : null;
   const pageName = fbPage ? fbPage.page_name : null;
 
+  let campaignId = null;
+  if (campaignName && Campaign) {
+    let [campaign] = await Campaign.findOrCreate({
+      where: {
+        name: { [Op.iLike]: campaignName },
+        deleted_at: null,
+      },
+      defaults: {
+        name: campaignName,
+      },
+      transaction,
+    });
+    campaignId = campaign.id;
+  }
+
   const tags = {
     fb_lead_id: fbLeadId,
     fb_page_id: fbPage ? fbPage.page_id : null,
@@ -596,6 +636,7 @@ async function _createMarketingLeadFromFbLead(fbLead, fbPage, fbForm, models, tr
       email_id: emailId,
       address: address || null,
       inquiry_source_id: inquirySourceId,
+      campaign_id: campaignId,
       campaign_name: campaignName,
       status: "new",
       priority: "medium",
