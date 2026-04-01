@@ -381,6 +381,10 @@ module.exports = (db) => {
     MarketingLead.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
     InquirySource.hasMany(MarketingLead, { foreignKey: "inquiry_source_id", as: "marketingLeads" });
   }
+  if (MarketingLead && db.Campaign) {
+    MarketingLead.belongsTo(db.Campaign, { foreignKey: "campaign_id", as: "campaign" });
+    db.Campaign.hasMany(MarketingLead, { foreignKey: "campaign_id", as: "marketingLeads" });
+  }
   if (MarketingLead && User) {
     MarketingLead.belongsTo(User, { foreignKey: "assigned_to", as: "assignedTo" });
     User.hasMany(MarketingLead, { foreignKey: "assigned_to", as: "assignedMarketingLeads" });
