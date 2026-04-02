@@ -123,7 +123,7 @@ function getOAuthUrl(state = "") {
     );
   }
 
-  const scopes = "pages_show_list,pages_read_engagement,leads_retrieval,pages_manage_ads";
+  const scopes = "pages_show_list,pages_read_engagement,leads_retrieval";
   let url =
     `https://www.facebook.com/v19.0/dialog/oauth` +
     `?client_id=${encodeURIComponent(appId)}` +
@@ -312,7 +312,7 @@ async function syncPages({ accountId, enforcedUserIds, transaction } = {}) {
 
   const url = `${FB_GRAPH_BASE}/me/accounts?fields=id,name,access_token,tasks&access_token=${encodeURIComponent(account.access_token)}`;
   console.log("[meta/sync-pages] Fetching from:", url.split("?")[0] + "?access_token=REDACTED");
-  
+
   // Debug: Check permissions granted to this token
   try {
     const permRes = await fbRequest(`${FB_GRAPH_BASE}/me/permissions?access_token=${encodeURIComponent(account.access_token)}`);
@@ -663,9 +663,9 @@ async function syncLeads({ dbFormId, enforcedUserIds, transaction } = {}) {
   const form = await FacebookLeadForm.findOne({
     where: { id: dbFormId, deleted_at: null },
     include: [
-      { 
-        model: FacebookPage, 
-        as: "page", 
+      {
+        model: FacebookPage,
+        as: "page",
         required: true,
         include: [{ model: FacebookAccount, as: "account", required: true }]
       }
