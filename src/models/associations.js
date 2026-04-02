@@ -308,6 +308,14 @@ module.exports = (db) => {
     Customer.hasMany(Inquiry, { foreignKey: "customer_id", as: "inquiries" });
   }
 
+  if (Inquiry && db.Reason) {
+    Inquiry.belongsTo(db.Reason, { foreignKey: "dead_reason_id", as: "deadReason" });
+  }
+
+  if (Followup && db.Reason) {
+    Followup.belongsTo(db.Reason, { foreignKey: "dead_reason_id", as: "deadReason" });
+  }
+
   // Inquiry ↔ InquirySource
   if (Inquiry && InquirySource) {
     Inquiry.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
@@ -552,6 +560,9 @@ module.exports = (db) => {
   if (Order && Discom) {
     Order.belongsTo(Discom, { foreignKey: "discom_id", as: "discom" });
     Discom.hasMany(Order, { foreignKey: "discom_id", as: "orders" });
+  }
+  if (Order && db.Reason) {
+    Order.belongsTo(db.Reason, { foreignKey: "cancellation_reason_id", as: "cancellationReasonRef" });
   }
   if (Order && Division) {
     Order.belongsTo(Division, { foreignKey: "division_id", as: "division" });

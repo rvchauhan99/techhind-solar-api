@@ -589,6 +589,14 @@ const Order = sequelize.define(
             type: DataTypes.TEXT,
             allowNull: true,
         },
+        cancellation_reason_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
+        cancellation_remarks: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
         created_at: {
             type: DataTypes.DATE,
             defaultValue: DataTypes.NOW,

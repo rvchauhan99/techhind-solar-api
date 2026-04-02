@@ -40,30 +40,49 @@ const createFollowup = async (payload, transaction = null) => {
   const currentStatusLevel = STATUS_HIERARCHY[inquiry.status] || 0;
   const connectedStatusLevel = STATUS_HIERARCHY[INQUIRY_STATUS.CONNECTED];
 
-  // Only update inquiry status to "Connected" if current status is less than "Connected"
-  if (currentStatusLevel < connectedStatusLevel) {
-    await inquiry.update(
-      { status: INQUIRY_STATUS.CONNECTED },
-      { transaction }
-    );
-  }
-
-  // Verify call_by user exists if provided
-  if (payload.call_by) {
-    const user = await User.findOne({
-      where: { id: payload.call_by, deleted_at: null },
-      transaction,
-    });
-
-    if (!user) {
-      throw new AppError("User not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+  // If status is 'Dead', handle dead logic
+  if (payload.inquiry_status === "Dead") {
+    if (!payload.dead_reason_id) {
+      throw new AppError("Dead reason is required", RESPONSE_STATUS_CODES.BAD_REQUEST);
     }
 
-    // mark inquiry as live 
+    // Fetch reason name if not provided
+    let deadReasonName = payload.dead_reason;
+    if (!deadReasonName) {
+      const { Reason } = models;
+      const reasonRecord = await Reason.findByPk(payload.dead_reason_id, { transaction });
+      deadReasonName = reasonRecord?.reason || null;
+    }
+
     await inquiry.update(
-      { is_dead: false },
+      {
+        is_dead: true,
+        dead_reason_id: payload.dead_reason_id,
+        dead_reason: deadReasonName,
+        dead_remarks: payload.dead_remarks || null,
+      },
       { transaction }
     );
+  } else {
+    // Only update inquiry status to "Connected" if current status is less than "Connected"
+    if (currentStatusLevel < connectedStatusLevel) {
+      await inquiry.update({ status: INQUIRY_STATUS.CONNECTED }, { transaction });
+    }
+
+    // Verify call_by user exists if provided
+    if (payload.call_by) {
+      const user = await User.findOne({
+        where: { id: payload.call_by, deleted_at: null },
+        transaction,
+      });
+
+      if (!user) {
+        throw new AppError("User not found", RESPONSE_STATUS_CODES.NOT_FOUND);
+      }
+
+      // mark inquiry as live
+      await inquiry.update({ is_dead: false }, { transaction });
+    }
   }
 
   const createPayload = {
@@ -75,6 +94,9 @@ const createFollowup = async (payload, transaction = null) => {
     is_schedule_site_visit: payload.is_schedule_site_visit !== undefined ? payload.is_schedule_site_visit : false,
     is_msg_send_to_customer: payload.is_msg_send_to_customer !== undefined ? payload.is_msg_send_to_customer : false,
     rating: payload.rating || null,
+    dead_reason_id: payload.dead_reason_id || null,
+    dead_reason: payload.dead_reason || null,
+    dead_remarks: payload.dead_remarks || null,
   };
 
   const followup = await Followup.create(createPayload, { transaction });
