@@ -6,6 +6,7 @@ const { Op, QueryTypes } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const configCacheService = require("../config-master/configCache.service.js");
 const { buildBomSnapshotFromProjectPrice } = require("../../common/utils/bomFromProjectPrice.js");
 const notificationService = require("../notification/notification.service.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
@@ -156,6 +157,31 @@ const normalizeOrderBomSnapshot = (bom_snapshot) => {
 const GST_MODE = {
     INCLUDING_GST: "INCLUDING_GST",
     EXCLUDING_GST: "EXCLUDING_GST",
+};
+
+/**
+ * Resolve effective profit margin for a product, falling back to platform config.
+ */
+const resolveProductMargin = async (product, req) => {
+    const productMargin = toNumber(product?.profit_margin_percent, null);
+    if (productMargin !== null && productMargin > 0) {
+        return productMargin;
+    }
+    const defaultMargin = await configCacheService.getConfigValue(
+        req,
+        "default_product_profit_margin_percent",
+        0
+    );
+    return toNumber(defaultMargin, 0);
+};
+
+/**
+ * Apply profit margin to purchase prices to get sales prices.
+ */
+const applyMarginToPrice = (purchasePriceExcl, marginPercent, gstPercent) => {
+    const unitExcl = roundMoney(purchasePriceExcl * (1 + marginPercent / 100));
+    const unitIncl = roundMoney(unitExcl * (1 + gstPercent / 100));
+    return { unitExcl, unitIncl };
 };
 
 const toNumber = (value, fallback = 0) => {
@@ -1307,8 +1333,8 @@ const getOrderById = async ({ id } = {}) => {
     };
 };
 
-const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
-    const models = getTenantModels();
+const getLatestPurchasePrices = async ({ product_ids, transaction, req } = {}) => {
+    const models = getTenantModels(req);
     const { Product } = models;
     const parsedProductIds = Array.isArray(product_ids)
         ? product_ids
@@ -1325,24 +1351,37 @@ const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
             id: uniqueProductIds,
             deleted_at: null,
         },
-        attributes: ["id", "gst_percent"],
+        attributes: ["id", "gst_percent", "profit_margin_percent"],
         ...(transaction ? { transaction } : {}),
     });
-    const gstByProductId = {};
+    const productDataById = {};
     (productRows || []).forEach((p) => {
-        gstByProductId[p.id] = toNumber(p.gst_percent, 0);
+        productDataById[p.id] = p;
     });
 
     const results = [];
     for (const productId of uniqueProductIds) {
+        const product = productDataById[productId];
+        const gstRate = toNumber(product?.gst_percent, 0);
+        const marginPercent = await resolveProductMargin(product, req);
+
         const latest = await getLatestPurchasePriceByProductId({
             productId,
             transaction,
             models,
         });
+
         if (latest) {
+            const purchaseExcl = toNumber(latest.unit_price_excluding_gst, 0);
+            const { unitExcl, unitIncl } = applyMarginToPrice(purchaseExcl, marginPercent, gstRate);
+
             results.push({
                 ...latest,
+                purchase_unit_price_excluding_gst: latest.unit_price_excluding_gst,
+                purchase_unit_price_including_gst: latest.unit_price_including_gst,
+                unit_price_excluding_gst: unitExcl,
+                unit_price_including_gst: unitIncl,
+                profit_margin_percent_applied: marginPercent,
                 missing_price: false,
             });
         } else {
@@ -1352,7 +1391,10 @@ const getLatestPurchasePrices = async ({ product_ids, transaction } = {}) => {
                 received_quantity: 0,
                 unit_price_excluding_gst: null,
                 unit_price_including_gst: null,
-                gst_rate: toNumber(gstByProductId[productId], 0),
+                purchase_unit_price_excluding_gst: null,
+                purchase_unit_price_including_gst: null,
+                profit_margin_percent_applied: marginPercent,
+                gst_rate: gstRate,
                 created_at: null,
                 missing_price: true,
             });
@@ -1699,13 +1741,14 @@ const createOrder = async ({ payload, transaction, req } = {}) => {
     }
 };
 
-const updateOrder = async ({ id, payload, transaction, user } = {}) => {
+const updateOrder = async ({ id, payload, transaction, user, req } = {}) => {
     if (!id) return null;
-    const models = getTenantModels();
+    const models = getTenantModels(req);
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
         State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
+        Role,
     } = models;
     const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
@@ -1717,6 +1760,18 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
         });
 
         if (!order) throw new Error("Order not found");
+
+        // Resolve superadmin status
+        let isSuperAdmin = false;
+        if (user?.role_id) {
+            const role = await Role.findOne({
+                where: { id: user.role_id, deleted_at: null },
+                attributes: ["name"],
+                transaction: t,
+            });
+            const roleName = String(role?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            isSuperAdmin = roleName === "superadmin";
+        }
 
         // Normalize payload for Sequelize/Postgres:
         // - Many UI form fields submit `""` for "not selected" (or `"Invalid date"`).
@@ -1741,6 +1796,69 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
         };
 
         payload = normalizePayloadForSequelize(payload);
+
+        // Enforcement for non-superadmin
+        if (!isSuperAdmin) {
+            // 1. Reject manual project cost override
+            if (payload.manual_project_cost_override != null) {
+                const err = new Error("Only superadmin can set manual project cost override.");
+                err.statusCode = 403;
+                throw err;
+            }
+
+            // 2. Validate BOM snapshot: non-superadmin can only add items
+            if (payload.bom_snapshot != null && Array.isArray(payload.bom_snapshot)) {
+                const oldBom = order.bom_snapshot || [];
+                const newBom = payload.bom_snapshot;
+
+                // First N lines must match existing lines in order (product_id and planned_qty)
+                for (let i = 0; i < oldBom.length; i++) {
+                    const oldLine = oldBom[i];
+                    const newLine = newBom[i];
+
+                    if (!newLine) {
+                        const err = new Error("Non-superadmin cannot remove existing BOM items.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+
+                    if (Number(oldLine.product_id) !== Number(newLine.product_id)) {
+                        const err = new Error("Non-superadmin cannot modify existing BOM item product.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+
+                    // Compare planned_qty (normalized)
+                    const oldPlanned = Number(oldLine.planned_qty ?? oldLine.quantity ?? 0);
+                    const newPlanned = Number(newLine.planned_qty ?? newLine.quantity ?? 0);
+                    if (oldPlanned !== newPlanned) {
+                        const err = new Error("Non-superadmin cannot modify existing BOM item quantities.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+                }
+
+                // Any extra lines must have planner_added flag
+                for (let i = oldBom.length; i < newBom.length; i++) {
+                    if (!newBom[i].planner_added) {
+                        const err = new Error("Non-superadmin can only add new items with planner_added flag.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+                }
+            }
+
+            // 3. Validate cost adjustments: non-superadmin can only have adjustments for added items
+            if (payload.cost_adjustments != null && Array.isArray(payload.cost_adjustments)) {
+                // We'll re-derive adjustments later based on BOM diff, but let's check for any sneaky negative deltas
+                const hasNegativeDelta = payload.cost_adjustments.some(adj => toNumber(adj.qty_delta) < 0);
+                if (hasNegativeDelta) {
+                    const err = new Error("Non-superadmin cannot decrease quantities or remove items.");
+                    err.statusCode = 403;
+                    throw err;
+                }
+            }
+        }
 
         // When Planner sends project_price_id and order has no BOM, build BOM from project and set on order
         let bomSnapshotFromProject = null;
@@ -1829,26 +1947,37 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 continue;
             }
 
+            const productRow = await Product.findOne({
+                where: { id: productId, deleted_at: null },
+                attributes: ["id", "gst_percent", "profit_margin_percent"],
+                transaction: t,
+            });
+
+            if (!productRow) {
+                continue;
+            }
+
             const latestPrice = await getLatestPurchasePriceByProductId({
                 productId,
                 transaction: t,
                 models,
             });
             const gstMode = normalizeGstMode(adjustment?.gst_mode);
-            let gstRate = toNumber(adjustment?.gst_rate, latestPrice?.gst_rate);
-            let unitExcl = toNumber(latestPrice?.unit_price_excluding_gst);
-            let unitIncl = toNumber(latestPrice?.unit_price_including_gst);
+            let gstRate = toNumber(adjustment?.gst_rate, productRow.gst_percent);
+            let unitExcl = 0;
+            let unitIncl = 0;
             let priceSource = "LATEST_PURCHASE";
             let manualPriceInputSide = null;
 
-            if (!latestPrice) {
+            const marginPercent = await resolveProductMargin(productRow, req);
+
+            if (latestPrice) {
+                const purchaseExcl = toNumber(latestPrice.unit_price_excluding_gst);
+                const salesPrices = applyMarginToPrice(purchaseExcl, marginPercent, gstRate);
+                unitExcl = salesPrices.unitExcl;
+                unitIncl = salesPrices.unitIncl;
+            } else {
                 priceSource = "MANUAL_FALLBACK";
-                const productRow = await Product.findOne({
-                    where: { id: productId, deleted_at: null },
-                    attributes: ["id", "gst_percent"],
-                    transaction: t,
-                });
-                gstRate = toNumber(adjustment?.gst_rate, productRow?.gst_percent);
                 if (!Number.isFinite(gstRate) || gstRate < 0) {
                     // Worst-case go-live fallback: allow pricing with 0% GST instead of hard fail.
                     gstRate = 0;
@@ -1914,6 +2043,7 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                     gst_rate_fallback_zero_applied:
                         priceSource === "MANUAL_FALLBACK" && (!latestPrice) && (!Number.isFinite(toNumber(adjustment?.gst_rate, NaN))),
                     requested_gst_mode: adjustment?.gst_mode ?? null,
+                    profit_margin_percent_applied: marginPercent,
                 },
             });
 
