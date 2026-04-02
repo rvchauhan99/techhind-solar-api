@@ -535,6 +535,9 @@ const cancelOrder = asyncHandler(async (req, res) => {
     assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
 
     const payload = { ...req.body };
+    if (!payload.cancellation_reason_id) {
+        return responseHandler.sendError(res, "Cancellation reason is required", 400);
+    }
     const result = await orderService.cancelOrder({
         id,
         payload,

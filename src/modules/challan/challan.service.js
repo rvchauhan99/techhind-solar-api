@@ -729,11 +729,64 @@ const getChallanForPdf = async ({ id } = {}) => {
 };
 
 /**
+ * Get delivered serials for an order (hybrid: normalized + CSV fallback)
+ */
+const getOrderDeliveredSerials = async (orderId) => {
+    const models = getTenantModels();
+    const { Challan, ChallanItems, ChallanItemSerial } = models;
+
+    // 1. Try normalized links first
+    const normalizedLinks = await ChallanItemSerial.findAll({
+        where: { order_id: orderId, is_active: true },
+        attributes: ["product_id", "serial_number", "stock_serial_id"],
+    });
+
+    if (normalizedLinks.length > 0) {
+        const map = {};
+        normalizedLinks.forEach((link) => {
+            const pid = link.product_id;
+            if (!map[pid]) map[pid] = [];
+            map[pid].push({
+                serial_number: link.serial_number,
+                stock_serial_id: link.stock_serial_id,
+            });
+        });
+        return map;
+    }
+
+    // 2. Fallback to CSV parsing for legacy challans
+    const challans = await Challan.findAll({
+        where: { order_id: orderId, deleted_at: null, is_reversed: false },
+        include: [{ model: ChallanItems, as: "items", attributes: ["product_id", "serials"] }],
+    });
+
+    const map = {};
+    challans.forEach((c) => {
+        (c.items || []).forEach((item) => {
+            const pid = item.product_id;
+            const serials = (item.serials || "")
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+            
+            if (serials.length > 0) {
+                if (!map[pid]) map[pid] = [];
+                serials.forEach((sn) => {
+                    map[pid].push({ serial_number: sn, stock_serial_id: null });
+                });
+            }
+        });
+    });
+
+    return map;
+};
+
+/**
  * Create challan with items
  */
-const createChallan = async ({ payload, user_id, transaction } = {}) => {
+const createChallan = async ({ payload, user_id, transaction, serialScanRequired = true } = {}) => {
     const models = getTenantModels();
-    const { Challan, ChallanItems, Order, CompanyWarehouse, Product, Stock, StockSerial, Quotation, User, ProductType, ProjectScheme } = models;
+    const { Challan, ChallanItems, ChallanItemSerial, Order, CompanyWarehouse, Product, Stock, StockSerial, Quotation, User, ProductType, ProjectScheme } = models;
     const { items, ...challanData } = payload;
 
     // Validate minimum one item
@@ -955,7 +1008,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
         challan_id: challan.id,
     }));
 
-    await ChallanItems.bulkCreate(itemsToCreate, { transaction });
+    const createdItems = await ChallanItems.bulkCreate(itemsToCreate, { transaction, returning: true });
 
     // Inventory operations (OUT) for each item
     if (challanData.order_id && plannedWarehouseId && Array.isArray(items) && items.length > 0) {
@@ -977,6 +1030,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
             const qty = Number(item.quantity);
             const product = productMap[item.product_id];
             const productName = product?.product_name || `Product #${item.product_id}`;
+            const currentChallanItem = createdItems.find(ci => Number(ci.product_id) === Number(item.product_id));
 
             if (!Number.isFinite(qty) || qty <= 0) {
                 const error = new Error(`Invalid quantity for ${productName}`);
@@ -1011,7 +1065,7 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                 throw error;
             }
 
-            const isSerialized = !!stock.serial_required || !!product.serial_required;
+            const isSerialized = serialScanRequired && (!!stock.serial_required || !!product.serial_required);
             const serialsRaw = item.serials || "";
             const serialList = serialsRaw
                 .split(",")
@@ -1062,6 +1116,21 @@ const createChallan = async ({ payload, user_id, transaction } = {}) => {
                             source_id: challan.id,
                             issued_against: "customer_order",
                             reference_number: transactionReferenceNo,
+                        },
+                        { transaction }
+                    );
+
+                    // Create normalized serial link
+                    await ChallanItemSerial.create(
+                        {
+                            challan_id: challan.id,
+                            challan_item_id: currentChallanItem?.id || 0,
+                            order_id: challan.order_id,
+                            product_id: item.product_id,
+                            serial_number: serial,
+                            stock_serial_id: stockSerial.id,
+                            source: "delivery_scan",
+                            is_active: true,
                         },
                         { transaction }
                     );
@@ -1207,7 +1276,7 @@ const updateChallan = async ({ id, payload, transaction } = {}) => {
  */
 const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null, markReversed = false } = {}) => {
     const models = getTenantModels();
-    const { Challan, ChallanItems, Order, Product, StockSerial } = models;
+    const { Challan, ChallanItems, ChallanItemSerial, Order, Product, StockSerial } = models;
     const challan = await Challan.findOne({
         where: { id, deleted_at: null },
         include: [
@@ -1370,8 +1439,18 @@ const deleteChallan = async ({ id, user_id, transaction, ledgerReason = null, ma
             },
             { transaction }
         );
+
+        // Deactivate normalized serial links
+        await ChallanItemSerial.update(
+            { is_active: false },
+            {
+                where: { challan_id: id },
+                transaction,
+            }
+        );
     }
 
+    await ChallanItemSerial.destroy({ where: { challan_id: id }, transaction });
     await challan.destroy({ transaction });
 
     if (orderId) {
@@ -1742,4 +1821,5 @@ module.exports = {
     getQuotationProductsByOrderId,
     getDeliveryStatus,
     getChallanForPdf,
+    getOrderDeliveredSerials,
 };

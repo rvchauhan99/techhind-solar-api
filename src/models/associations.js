@@ -58,6 +58,7 @@ module.exports = (db) => {
     StockAdjustmentSerial,
     Challan,
     ChallanItems,
+    ChallanItemSerial,
     PanelTechnology,
     Fabrication,
     Installation,
@@ -307,6 +308,14 @@ module.exports = (db) => {
     Customer.hasMany(Inquiry, { foreignKey: "customer_id", as: "inquiries" });
   }
 
+  if (Inquiry && db.Reason) {
+    Inquiry.belongsTo(db.Reason, { foreignKey: "dead_reason_id", as: "deadReason" });
+  }
+
+  if (Followup && db.Reason) {
+    Followup.belongsTo(db.Reason, { foreignKey: "dead_reason_id", as: "deadReason" });
+  }
+
   // Inquiry ↔ InquirySource
   if (Inquiry && InquirySource) {
     Inquiry.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
@@ -551,6 +560,9 @@ module.exports = (db) => {
   if (Order && Discom) {
     Order.belongsTo(Discom, { foreignKey: "discom_id", as: "discom" });
     Discom.hasMany(Order, { foreignKey: "discom_id", as: "orders" });
+  }
+  if (Order && db.Reason) {
+    Order.belongsTo(db.Reason, { foreignKey: "cancellation_reason_id", as: "cancellationReasonRef" });
   }
   if (Order && Division) {
     Order.belongsTo(Division, { foreignKey: "division_id", as: "division" });
@@ -875,6 +887,30 @@ module.exports = (db) => {
   if (ChallanItems && Product) {
     ChallanItems.belongsTo(Product, { foreignKey: "product_id", as: "product" });
     Product.hasMany(ChallanItems, { foreignKey: "product_id", as: "challanItems" });
+  }
+
+  // ChallanItemSerial associations
+  if (ChallanItemSerial) {
+    if (Challan) {
+      ChallanItemSerial.belongsTo(Challan, { foreignKey: "challan_id", as: "challan" });
+      Challan.hasMany(ChallanItemSerial, { foreignKey: "challan_id", as: "serialLinks" });
+    }
+    if (ChallanItems) {
+      ChallanItemSerial.belongsTo(ChallanItems, { foreignKey: "challan_item_id", as: "challanItem" });
+      ChallanItems.hasMany(ChallanItemSerial, { foreignKey: "challan_item_id", as: "serialLinks" });
+    }
+    if (Order) {
+      ChallanItemSerial.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+      Order.hasMany(ChallanItemSerial, { foreignKey: "order_id", as: "challanSerialLinks" });
+    }
+    if (Product) {
+      ChallanItemSerial.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+      Product.hasMany(ChallanItemSerial, { foreignKey: "product_id", as: "challanSerialLinks" });
+    }
+    if (StockSerial) {
+      ChallanItemSerial.belongsTo(StockSerial, { foreignKey: "stock_serial_id", as: "stockSerial" });
+      StockSerial.hasMany(ChallanItemSerial, { foreignKey: "stock_serial_id", as: "challanLinks" });
+    }
   }
 
   // Fabrication associations (one per order)

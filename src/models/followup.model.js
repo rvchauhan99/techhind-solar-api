@@ -49,6 +49,18 @@ const Followup = sequelize.define(
         isIn: [FOLLOWUP_RATING],
       },
     },
+    dead_reason_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    dead_reason: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    dead_remarks: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,

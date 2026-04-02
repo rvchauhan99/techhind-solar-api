@@ -125,6 +125,8 @@ const TRANSACTION_TYPE = {
   CUTOVER_OPENING: "CUTOVER_OPENING",
   // Go-live: used serialized inventory import (already issued against customer orders)
   USED_INVENTORY_IMPORT: "USED_INVENTORY_IMPORT",
+  // Installation stage serial reconciliation force-adjust
+  INSTALLATION_FORCE_ADJUST: "INSTALLATION_FORCE_ADJUST",
 };
 
 const MOVEMENT_TYPE = {

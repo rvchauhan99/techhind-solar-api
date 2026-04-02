@@ -648,6 +648,7 @@ const listOrders = async ({
         { model: Product, as: "solarPanel", attributes: ["id", "product_name"], required: false },
         { model: Product, as: "inverter", attributes: ["id", "product_name"], required: false },
         { model: ProjectPhase, as: "projectPhase", attributes: ["id", "name"], required: false },
+        { model: db.Reason, as: "cancellationReasonRef", attributes: ["id", "reason"], required: false },
     ];
 
     const findOptions = {
@@ -743,7 +744,10 @@ const listOrders = async ({
             cancelled_by_name: row.cancelledByUser?.name || null,
             cancelled_stage: row.cancelled_stage || null,
             cancelled_at_stage_key: row.cancelled_at_stage_key || null,
+            cancellation_reason_id: row.cancellation_reason_id || null,
             cancellation_reason: row.cancellation_reason || null,
+            cancellation_reason_name: row.cancellationReasonRef?.reason || row.cancellation_reason || null,
+            cancellation_remarks: row.cancellation_remarks || null,
 
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -3443,10 +3447,27 @@ const cancelOrder = async ({ id, payload = {}, transaction, user }) => {
         cancelledStage = null;
     }
 
-    const cancellationReason =
-        payload.cancellation_reason != null
-            ? String(payload.cancellation_reason).slice(0, 2000)
-            : order.cancellation_reason;
+    const cancelledAtStageKey = cancelledStage === "after_confirmation" ? (order.current_stage_key || null) : null;
+
+    let cancellationReason = payload.cancellation_reason;
+    if (payload.cancellation_reason_id) {
+        const { Reason } = models;
+        const reasonRecord = await Reason.findOne({
+            where: {
+                id: payload.cancellation_reason_id,
+                reason_type: "order_cancellation",
+                is_active: true,
+                deleted_at: null,
+            },
+            ...txOptions,
+        });
+        if (!reasonRecord) {
+            const error = new Error("Invalid or inactive cancellation reason");
+            error.statusCode = 400;
+            throw error;
+        }
+        cancellationReason = reasonRecord.reason;
+    }
 
     await order.update(
         {
@@ -3454,11 +3475,10 @@ const cancelOrder = async ({ id, payload = {}, transaction, user }) => {
             cancelled_at: new Date(),
             cancelled_by: user?.id ?? order.cancelled_by ?? null,
             cancelled_stage: cancelledStage,
-            // For pending (before_confirmation) orders, no stage has been reached yet → keep null.
-            // For confirmed (after_confirmation) orders, remember the exact stage where it was cancelled.
-            cancelled_at_stage_key:
-                cancelledStage === "after_confirmation" ? (order.current_stage_key || null) : null,
-            cancellation_reason: cancellationReason,
+            cancelled_at_stage_key: cancelledAtStageKey,
+            cancellation_reason_id: payload.cancellation_reason_id || null,
+            cancellation_reason: cancellationReason || order.cancellation_reason,
+            cancellation_remarks: payload.cancellation_remarks || null,
         },
         txOptions
     );

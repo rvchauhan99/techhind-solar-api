@@ -51,6 +51,7 @@ router.post(
 router.get("/:id/fabrication", ...requireAuthWithTenant, orderReadAny, fabricationController.getByOrderId);
 router.put("/:id/fabrication", ...requireAuthWithTenant, orderUpdateAny, fabricationController.createOrUpdate);
 router.get("/:id/installation", ...requireAuthWithTenant, orderReadAny, installationController.getByOrderId);
+router.get("/:id/delivered-serials", ...requireAuthWithTenant, orderReadAny, installationController.getDeliveredSerials);
 router.put("/:id/installation", ...requireAuthWithTenant, orderUpdateAny, installationController.createOrUpdate);
 router.get("/:id/pdf", ...requireAuthWithTenant, orderReadAny, controller.generatePDF);
 router.get("/:id/cost-amendments", ...requireAuthWithTenant, orderReadAny, controller.getCostAmendments);

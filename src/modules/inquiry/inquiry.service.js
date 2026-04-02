@@ -55,7 +55,7 @@ const listInquiries = async ({
   enforced_handled_by_ids: enforcedHandledByIds,
 } = {}) => {
   const models = getTenantModels();
-  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City, OrderType } = models;
+  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City, OrderType, Reason } = models;
   const { Op } = models.Sequelize;
 
   const where = { deleted_at: null };
@@ -234,6 +234,7 @@ const listInquiries = async ({
     discomInclude.required ? discomInclude : { model: Discom, as: "discom", attributes: ["id", "name"] },
     orderTypeInclude.required ? orderTypeInclude : { model: OrderType, as: "orderType", attributes: ["id", "name"] },
     customerInclude,
+    { model: Reason, as: "deadReason", attributes: ["id", "reason"], required: false },
   ];
 
   const offset = (page - 1) * limit;
@@ -285,6 +286,10 @@ const listInquiries = async ({
       updated_at: row.updated_at,
       branch_name: row.branch?.name || null,
       branch_id: row.branch_id ?? row.branch?.id ?? null,
+      dead_reason_id: row.dead_reason_id,
+      dead_reason: row.dead_reason,
+      dead_reason_name: row.deadReason?.reason || row.dead_reason || null,
+      dead_remarks: row.dead_remarks,
       email_id: row.customer?.email_id || null,
       state_id: row.customer?.state_id || null,
       city_id: row.customer?.city_id || null,
@@ -418,7 +423,7 @@ const exportInquiries = async ({
 
 const getInquiryById = async ({ id }) => {
   const models = getTenantModels();
-  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City } = models;
+  const { Inquiry, InquirySource, ProjectScheme, User, Customer, CompanyBranch, Discom, State, City, Reason } = models;
   if (!id) return null;
 
   const found = await Inquiry.findOne({
@@ -431,6 +436,7 @@ const getInquiryById = async ({ id }) => {
       { model: User, as: "channelPartner", attributes: ["id", "name"] },
       { model: CompanyBranch, as: "branch", attributes: ["id", "name"] },
       { model: Discom, as: "discom", attributes: ["id", "name"] },
+      { model: Reason, as: "deadReason", attributes: ["id", "reason"] },
       {
         model: Customer,
         as: "customer",
@@ -473,6 +479,10 @@ const getInquiryById = async ({ id }) => {
     reference_from: row.reference_from,
     estimated_cost: row.estimated_cost,
     payment_type: row.payment_type,
+    dead_reason_id: row.dead_reason_id,
+    dead_reason: row.dead_reason,
+    dead_reason_name: row.deadReason?.reason || row.dead_reason || null,
+    dead_remarks: row.dead_remarks,
     do_not_send_message: row.do_not_send_message,
     created_at: row.created_at,
     // Customer fields
@@ -703,6 +713,9 @@ const updateInquiry = async ({ id, payload, transaction } = {}) => {
             : !!payload.do_not_send_message,
         status: payload.status ?? inquiry.status,
         is_dead: payload.is_dead ?? inquiry.is_dead,
+        dead_reason_id: payload.dead_reason_id ?? inquiry.dead_reason_id,
+        dead_reason: payload.dead_reason ?? inquiry.dead_reason,
+        dead_remarks: payload.dead_remarks ?? inquiry.dead_remarks,
       },
       { transaction: t }
     );

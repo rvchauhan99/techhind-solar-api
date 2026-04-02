@@ -211,6 +211,11 @@ const update = asyncHandler(async (req, res) => {
   const context = await resolveInquiryVisibilityContext(req);
   assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
   const payload = { ...req.body };
+
+  if (payload.is_dead === true && !payload.dead_reason_id) {
+    return responseHandler.sendError(res, "Please select a dead reason", 400);
+  }
+
   const updated = await inquiryService.updateInquiry({
     id,
     payload,

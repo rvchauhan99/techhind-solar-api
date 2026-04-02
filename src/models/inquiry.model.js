@@ -93,6 +93,18 @@ const Inquiry = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    dead_reason_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    dead_reason: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    dead_remarks: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
 
     status: {
       type: DataTypes.STRING,
