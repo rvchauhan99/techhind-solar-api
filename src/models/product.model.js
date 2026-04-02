@@ -55,6 +55,11 @@ const Product = sequelize.define(
     updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     deleted_at: { type: DataTypes.DATE, allowNull: true },
     properties: { type: DataTypes.JSON, allowNull: true },
+    profit_margin_percent: {
+      type: DataTypes.DECIMAL(5, 2),
+      allowNull: true,
+      comment: "Percentage markup on pre-GST purchase unit price",
+    },
   },
   {
     tableName: "products",
