@@ -43,6 +43,7 @@ const normalizeDashboardFilters = (query = {}) => {
         reference_from = null,
         branch_id = null,
         inquiry_source_id = null,
+        project_scheme_id = null,
         order_number = null,
         order_date_from = null,
         order_date_to = null,
@@ -75,6 +76,7 @@ const normalizeDashboardFilters = (query = {}) => {
         reference_from,
         branch_id,
         inquiry_source_id,
+        project_scheme_id,
         order_number,
         order_date_from: from,
         order_date_to: to,
@@ -95,6 +97,7 @@ const list = asyncHandler(async (req, res) => {
         order_date_from,
         order_date_to,
         customer_name,
+        project_scheme_id,
         current_stage_key,
         capacity,
         capacity_op,
@@ -115,6 +118,7 @@ const list = asyncHandler(async (req, res) => {
         order_date_from,
         order_date_to,
         customer_name,
+        project_scheme_id,
         current_stage_key,
         capacity,
         capacity_op,
@@ -137,6 +141,7 @@ const exportList = asyncHandler(async (req, res) => {
         order_date_from,
         order_date_to,
         customer_name,
+        project_scheme_id,
         current_stage_key,
         capacity,
         capacity_op,
@@ -155,6 +160,7 @@ const exportList = asyncHandler(async (req, res) => {
         order_date_from,
         order_date_to,
         customer_name,
+        project_scheme_id,
         current_stage_key,
         capacity,
         capacity_op,
@@ -227,6 +233,7 @@ const dashboardOrders = asyncHandler(async (req, res) => {
         consumer_no: filters.consumer_no,
         application_no: filters.application_no,
         reference_from: filters.reference_from,
+        project_scheme_id: filters.project_scheme_id,
         current_stage_key: filters.current_stage_key,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
@@ -333,6 +340,31 @@ const getById = asyncHandler(async (req, res) => {
     return responseHandler.sendSuccess(res, item, "Order fetched", 200);
 });
 
+const getLatestPurchasePrices = asyncHandler(async (req, res) => {
+    const idsParam = req.query?.product_ids;
+    const productIds = Array.isArray(idsParam)
+        ? idsParam
+        : String(idsParam || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean);
+    const result = await orderService.getLatestPurchasePrices({
+        product_ids: productIds,
+        transaction: req.transaction,
+        req,
+    });
+    return responseHandler.sendSuccess(res, result, "Latest purchase prices fetched", 200);
+});
+
+const getCostAmendments = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const result = await orderService.getOrderCostAmendments({
+        order_id: id,
+        transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, result, "Order cost amendments fetched", 200);
+});
+
 const generatePDF = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const order = await orderService.getOrderById({ id });
@@ -391,6 +423,7 @@ const create = asyncHandler(async (req, res) => {
     const created = await orderService.createOrder({
         payload,
         transaction: req.transaction,
+        req,
     });
     return responseHandler.sendSuccess(res, created, "Order created", 201);
 });
@@ -449,6 +482,7 @@ const update = asyncHandler(async (req, res) => {
         payload,
         transaction: req.transaction,
         user: req.user,
+        req,
     });
     return responseHandler.sendSuccess(res, updated, "Order updated", 200);
 });
@@ -518,6 +552,8 @@ module.exports = {
     dashboardTrend,
     dashboardOrders,
     getById,
+    getLatestPurchasePrices,
+    getCostAmendments,
     create,
     update,
     remove,

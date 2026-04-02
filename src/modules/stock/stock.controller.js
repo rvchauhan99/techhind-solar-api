@@ -11,6 +11,7 @@ const list = asyncHandler(async (req, res) => {
   if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
   if (params.product_id) params.product_id = parseInt(params.product_id, 10);
   if (params.product_type_id) params.product_type_id = parseInt(params.product_type_id, 10);
+  if (params.product_make_id) params.product_make_id = parseInt(params.product_make_id, 10);
   const result = await stockService.listStocks(params);
   return responseHandler.sendSuccess(res, result, "Stock list fetched", 200);
 });
@@ -20,6 +21,7 @@ const getSummary = asyncHandler(async (req, res) => {
   if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
   if (params.product_id) params.product_id = parseInt(params.product_id, 10);
   if (params.product_type_id) params.product_type_id = parseInt(params.product_type_id, 10);
+  if (params.product_make_id) params.product_make_id = parseInt(params.product_make_id, 10);
   const result = await stockService.getStockSummary(params);
   return responseHandler.sendSuccess(res, result, "Stock summary fetched", 200);
 });
@@ -29,6 +31,7 @@ const exportList = asyncHandler(async (req, res) => {
   if (params.warehouse_id) params.warehouse_id = parseInt(params.warehouse_id, 10);
   if (params.product_id) params.product_id = parseInt(params.product_id, 10);
   if (params.product_type_id) params.product_type_id = parseInt(params.product_type_id, 10);
+  if (params.product_make_id) params.product_make_id = parseInt(params.product_make_id, 10);
   const buffer = await stockService.exportStocks(params);
   const filename = `stocks-${new Date().toISOString().split("T")[0]}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

@@ -8,11 +8,23 @@ const AppError = require("../../common/errors/AppError.js");
 const { RESPONSE_STATUS_CODES } = require("../../common/utils/constants.js");
 const notificationService = require("../notification/notification.service.js");
 const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
+const {
+  assertNoDuplicateInquiryByMobile,
+} = require("../../common/utils/assertNoDuplicateInquiryByMobile.js");
 
 const normalizeLike = (s) => {
   if (s == null) return null;
   const str = String(s).trim();
   return str ? `%${str}%` : null;
+};
+
+/** Parse multi-select values (arrays or comma-separated strings) into arrays */
+const parseMultiSelectValue = (val) => {
+  if (Array.isArray(val)) return val.filter(Boolean);
+  if (typeof val === "string" && val.trim() !== "") {
+    return val.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return null;
 };
 
 /** Normalize optional date from payload: invalid/empty/"Invalid date" -> null; valid date -> Date or ISO string for DB */
@@ -30,7 +42,7 @@ const buildLeadWhere = ({
   assigned_to,
   branch_id,
   inquiry_source_id,
-  campaign_name,
+  campaign_id,
   priority,
   created_from,
   created_to,
@@ -45,42 +57,55 @@ const buildLeadWhere = ({
 }) => {
   const where = { deleted_at: null };
 
-  if (status) {
-    where.status = Array.isArray(status) ? { [Op.in]: status } : status;
+  const statusList = parseMultiSelectValue(status);
+  if (statusList) {
+    where.status = { [Op.in]: statusList };
   }
-  if (not_status) {
-    const notStatusList = Array.isArray(not_status) ? not_status : [not_status];
+
+  const notStatusList = parseMultiSelectValue(not_status);
+  if (notStatusList) {
     if (where.status) {
       where.status = { [Op.and]: [where.status, { [Op.notIn]: notStatusList }] };
     } else {
       where.status = { [Op.notIn]: notStatusList };
     }
   }
-  if (assigned_to != null && String(assigned_to).trim() !== "") {
-    const id = parseInt(assigned_to, 10);
-    if (!Number.isNaN(id)) where.assigned_to = id;
+
+  const assignedToList = parseMultiSelectValue(assigned_to);
+  if (assignedToList) {
+    where.assigned_to = { [Op.in]: assignedToList.map(Number) };
   }
+
   if (Array.isArray(enforcedAssignedToIds)) {
-    if (enforcedAssignedToIds.length === 0) {
-      where.assigned_to = { [Op.in]: [-1] };
+    const enforcedIds = enforcedAssignedToIds.length === 0 ? [-1] : enforcedAssignedToIds;
+    if (where.assigned_to) {
+      // If both explicit assigned_to filter and enforced visibility criteria exist, intersect them
+      where.assigned_to = { [Op.and]: [where.assigned_to, { [Op.in]: enforcedIds }] };
     } else {
-      where.assigned_to = { [Op.in]: enforcedAssignedToIds };
+      where.assigned_to = { [Op.in]: enforcedIds };
     }
   }
-  if (branch_id != null && String(branch_id).trim() !== "") {
-    const id = parseInt(branch_id, 10);
-    if (!Number.isNaN(id)) where.branch_id = id;
+
+  const branchIdList = parseMultiSelectValue(branch_id);
+  if (branchIdList) {
+    where.branch_id = { [Op.in]: branchIdList.map(Number) };
   }
-  if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
-    const id = parseInt(inquiry_source_id, 10);
-    if (!Number.isNaN(id)) where.inquiry_source_id = id;
+
+  const inquirySourceIdList = parseMultiSelectValue(inquiry_source_id);
+  if (inquirySourceIdList) {
+    where.inquiry_source_id = { [Op.in]: inquirySourceIdList.map(Number) };
   }
-  if (campaign_name) {
-    where.campaign_name = { [Op.iLike]: normalizeLike(campaign_name) };
+
+  const campaignIdList = parseMultiSelectValue(campaign_id);
+  if (campaignIdList) {
+    where.campaign_id = { [Op.in]: campaignIdList.map(Number) };
   }
-  if (priority) {
-    where.priority = priority;
+
+  const priorityList = parseMultiSelectValue(priority);
+  if (priorityList) {
+    where.priority = { [Op.in]: priorityList };
   }
+
   if (created_from || created_to) {
     where.created_at = {};
     if (created_from) where.created_at[Op.gte] = created_from;
@@ -119,7 +144,7 @@ const listLeads = async ({
   assigned_to,
   branch_id,
   inquiry_source_id,
-  campaign_name,
+  campaign_id,
   priority,
   created_from,
   created_to,
@@ -138,6 +163,7 @@ const listLeads = async ({
     MarketingLeadFollowUp,
     CompanyBranch,
     InquirySource,
+    Campaign,
     User,
     State,
     City,
@@ -150,7 +176,7 @@ const listLeads = async ({
     assigned_to,
     branch_id,
     inquiry_source_id,
-    campaign_name,
+    campaign_id,
     priority,
     created_from,
     created_to,
@@ -188,6 +214,12 @@ const listLeads = async ({
       model: InquirySource,
       as: "inquirySource",
       attributes: ["id", "source_name"],
+      required: false,
+    },
+    {
+      model: Campaign,
+      as: "campaign",
+      attributes: ["id", "name"],
       required: false,
     },
     {
@@ -253,7 +285,8 @@ const listLeads = async ({
       branch_name: lead.branch?.name || null,
       inquiry_source_id: lead.inquiry_source_id,
       inquiry_source_name: lead.inquirySource?.source_name || null,
-      campaign_name: lead.campaign_name,
+      campaign_id: lead.campaign_id,
+      campaign_name: lead.campaign?.name || null,
       lead_segment: lead.lead_segment,
       product_interest: lead.product_interest,
       expected_capacity_kw: lead.expected_capacity_kw,
@@ -297,6 +330,7 @@ const getLeadById = async ({ id } = {}) => {
     MarketingLeadFollowUp,
     CompanyBranch,
     InquirySource,
+    Campaign,
     User,
     State,
     City,
@@ -307,6 +341,7 @@ const getLeadById = async ({ id } = {}) => {
     include: [
       { model: CompanyBranch, as: "branch", attributes: ["id", "name"], required: false },
       { model: InquirySource, as: "inquirySource", attributes: ["id", "source_name"], required: false },
+      { model: Campaign, as: "campaign", attributes: ["id", "name"], required: false },
       { model: User, as: "assignedTo", attributes: ["id", "name"], required: false },
       { model: State, as: "state", attributes: ["id", "name"], required: false },
       { model: City, as: "city", attributes: ["id", "name"], required: false },
@@ -345,7 +380,8 @@ const getLeadById = async ({ id } = {}) => {
     branch_name: row.branch?.name || null,
     inquiry_source_id: row.inquiry_source_id,
     inquiry_source_name: row.inquirySource?.source_name || null,
-    campaign_name: row.campaign_name,
+    campaign_id: row.campaign_id,
+    campaign_name: row.campaign?.name || null,
     lead_segment: row.lead_segment,
     product_interest: row.product_interest,
     expected_capacity_kw: row.expected_capacity_kw,
@@ -375,6 +411,22 @@ const createLead = async ({ payload, transaction } = {}) => {
 
   if (!payload?.customer_name || !payload?.mobile_number) {
     throw new AppError("customer_name and mobile_number are required", RESPONSE_STATUS_CODES.BAD_REQUEST);
+  }
+
+  // Check for existing lead with same mobile number
+  const existingLead = await MarketingLead.findOne({
+    where: {
+      mobile_number: payload.mobile_number,
+      deleted_at: null,
+    },
+    transaction,
+  });
+
+  if (existingLead) {
+    throw new AppError(
+      `A lead with mobile number ${payload.mobile_number} already exists (#${existingLead.lead_number || existingLead.id})`,
+      RESPONSE_STATUS_CODES.BAD_REQUEST
+    );
   }
 
   await assertActiveUserIds(payload?.assigned_to, {
@@ -412,7 +464,7 @@ const createLead = async ({ payload, transaction } = {}) => {
       taluka: payload.taluka || null,
       branch_id: payload.branch_id || null,
       inquiry_source_id: payload.inquiry_source_id || null,
-      campaign_name: payload.campaign_name || null,
+      campaign_id: payload.campaign_id || null,
       lead_segment: payload.lead_segment || null,
       product_interest: payload.product_interest || null,
       expected_capacity_kw: payload.expected_capacity_kw || null,
@@ -476,7 +528,7 @@ const updateLead = async ({ id, payload, transaction } = {}) => {
     taluka: payload.taluka ?? lead.taluka,
     branch_id: payload.branch_id ?? lead.branch_id,
     inquiry_source_id: payload.inquiry_source_id ?? lead.inquiry_source_id,
-    campaign_name: payload.campaign_name ?? lead.campaign_name,
+    campaign_id: payload.campaign_id ?? lead.campaign_id,
     lead_segment: payload.lead_segment ?? lead.lead_segment,
     product_interest: payload.product_interest ?? lead.product_interest,
     expected_capacity_kw: payload.expected_capacity_kw ?? lead.expected_capacity_kw,
@@ -707,6 +759,23 @@ const convertLeadToInquiry = async ({ id, payload, user, transaction } = {}) => 
     };
   }
 
+  let mobileForDuplicateCheck = lead.mobile_number;
+  if (payload?.customer_id) {
+    const existingCustomer = await Customer.findOne({
+      where: { id: payload.customer_id, deleted_at: null },
+      attributes: ["mobile_number"],
+      transaction,
+    });
+    if (existingCustomer) {
+      mobileForDuplicateCheck = existingCustomer.mobile_number;
+    }
+  }
+  await assertNoDuplicateInquiryByMobile({
+    mobile_number: mobileForDuplicateCheck,
+    models,
+    transaction,
+  });
+
   // create or reuse customer
   let customerId = payload?.customer_id || null;
   if (!customerId) {
@@ -766,7 +835,7 @@ const convertLeadToInquiry = async ({ id, payload, user, transaction } = {}) => 
     rating: payload?.rating || null,
     remarks: payload?.remarks || lead.remarks || null,
     next_reminder_date: payload?.next_reminder_date || null,
-    reference_from: payload?.reference_from || lead.campaign_name || null,
+    reference_from: payload?.reference_from || lead.campaign?.name || null,
     estimated_cost: payload?.estimated_cost || lead.expected_project_cost || null,
     payment_type: normalizedPaymentType,
     status: payload?.status || undefined,

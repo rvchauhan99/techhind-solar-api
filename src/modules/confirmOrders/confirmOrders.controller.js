@@ -10,6 +10,11 @@ const { getTenantModels } = require("../tenant/tenantModels.js");
 const modelAgreementPdfService = require("./modelAgreementPdf.service.js");
 const orderDocumentsService = require("../orderDocuments/orderDocuments.service.js");
 
+const normalizeRoleName = (s) =>
+    String(s || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
 const resolveConfirmOrderVisibilityContext = async (req) => {
     const roleId = Number(req.user?.role_id);
     const userId = Number(req.user?.id);
@@ -45,6 +50,7 @@ const list = asyncHandler(async (req, res) => {
         mobile_number,
         branch_id,
         inquiry_source_id,
+        project_scheme_id,
         handled_by,
         order_number,
         consumer_no,
@@ -66,6 +72,7 @@ const list = asyncHandler(async (req, res) => {
         mobile_number,
         branch_id,
         inquiry_source_id,
+        project_scheme_id,
         handled_by,
         order_number,
         consumer_no,
@@ -136,8 +143,51 @@ const getModelAgreementPdf = asyncHandler(async (req, res) => {
     res.send(buffer);
 });
 
+const changeHandledBy = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { handled_by, reason } = req.body || {};
+    const nextHandledBy = Number.parseInt(handled_by, 10);
+
+    if (!Number.isInteger(nextHandledBy) || nextHandledBy <= 0) {
+        return responseHandler.sendError(res, "Valid handled_by is required", 400);
+    }
+
+    const models = getTenantModels(req);
+    const roleRow = await models.Role.findOne({
+        where: { id: req.user?.role_id, deleted_at: null },
+        attributes: ["name"],
+        transaction: req.transaction,
+    });
+    const normalizedRoleName = normalizeRoleName(roleRow?.name);
+    if (normalizedRoleName !== "superadmin") {
+        return responseHandler.sendError(res, "Superadmin role required", 403);
+    }
+
+    const existing = await orderService.getOrderById({ id });
+    if (!existing) {
+        return responseHandler.sendError(res, "Order not found", 404);
+    }
+
+    const context = await resolveConfirmOrderVisibilityContext(req);
+    assertRecordVisibleByListingCriteria(existing, context, { handledByField: "handled_by" });
+
+    if (String(existing.status || "").toLowerCase() !== "confirmed") {
+        return responseHandler.sendError(res, "Handled By can be changed only for confirmed orders", 400);
+    }
+
+    const updated = await orderService.reassignHandledByForConfirmedOrder({
+        id,
+        new_handled_by: nextHandledBy,
+        reason,
+        user: req.user,
+        transaction: req.transaction,
+    });
+    return responseHandler.sendSuccess(res, updated, "Handled By updated successfully", 200);
+});
+
 module.exports = {
     list,
     getById,
     getModelAgreementPdf,
+    changeHandledBy,
 };

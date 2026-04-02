@@ -2,9 +2,15 @@
 
 const { Op, Sequelize } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const configCacheService = require("../config-master/configCache.service.js");
 
 const PAID_STATUSES = ["approved", "pending_approval"];
 const PAID_STATUSES_SQL = PAID_STATUSES.map((s) => `'${s}'`).join(", ");
+const MIN_OUTSTANDING_KEY = "payment_outstanding.min_outstanding_amount";
+const FRACTION_DIGITS_KEY = "payment_outstanding.currency_fraction_digits";
+const LEGACY_MIN_OUTSTANDING_KEY = "min_outstanding_amount";
+const LEGACY_FRACTION_DIGITS_KEY = "currency_fraction_digits";
+
 
 function normalizedPaymentTypeSql(columnSql) {
   // Normalize free-text `orders.payment_type` into stable buckets.
@@ -25,6 +31,37 @@ function getDb() {
   return getTenantModels();
 }
 
+async function getPaymentOutstandingRuntimeConfig(req) {
+  // Compatibility mode:
+  // Prefer legacy plain keys first, then namespaced keys.
+  // Reason: config cache always includes namespaced defaults, which can shadow fallback paths.
+  const minOutstandingRaw = await configCacheService.getConfigValue(
+    req,
+    LEGACY_MIN_OUTSTANDING_KEY,
+    await configCacheService.getConfigValue(req, MIN_OUTSTANDING_KEY, 0.01)
+  );
+  const fractionDigitsRaw = await configCacheService.getConfigValue(
+    req,
+    LEGACY_FRACTION_DIGITS_KEY,
+    await configCacheService.getConfigValue(req, FRACTION_DIGITS_KEY, 2)
+  );
+
+  console.log("minOutstandingRaw", minOutstandingRaw);
+  console.log("fractionDigitsRaw", fractionDigitsRaw);
+  const minOutstanding = Number(minOutstandingRaw);
+  const safeMinOutstanding = Number.isFinite(minOutstanding) && minOutstanding >= 0 ? minOutstanding : 0.01;
+
+  const fractionDigits = Number(fractionDigitsRaw);
+  const safeFractionDigits = Number.isInteger(fractionDigits)
+    ? Math.max(0, Math.min(4, fractionDigits))
+    : 2;
+
+  return {
+    min_outstanding_amount: safeMinOutstanding,
+    currency_fraction_digits: safeFractionDigits,
+  };
+}
+
 function buildCommonFilters(query = {}) {
   const {
     q,
@@ -40,6 +77,8 @@ function buildCommonFilters(query = {}) {
     reference_from,
     order_date_from,
     order_date_to,
+    delivery_date_from,
+    delivery_date_to,
     current_stage_key,
     customer_name,
     mobile_number,
@@ -98,6 +137,11 @@ function buildCommonFilters(query = {}) {
     if (order_date_from) where.order_date[Op.gte] = order_date_from;
     if (order_date_to) where.order_date[Op.lte] = order_date_to;
   }
+  if (delivery_date_from || delivery_date_to) {
+    where.planned_delivery_date = {};
+    if (delivery_date_from) where.planned_delivery_date[Op.gte] = delivery_date_from;
+    if (delivery_date_to) where.planned_delivery_date[Op.lte] = delivery_date_to;
+  }
 
   if (current_stage_key != null && String(current_stage_key).trim() !== "") {
     const key = String(current_stage_key).trim();
@@ -126,12 +170,13 @@ function buildCommonFilters(query = {}) {
   return where;
 }
 
-async function listOutstanding(query) {
+async function listOutstanding(query, req) {
   const db = getDb();
   const page = Number(query.page || 1);
   const limit = Math.min(Number(query.limit || 25), 200);
   const offset = (page - 1) * limit;
 
+  const runtimeConfig = await getPaymentOutstandingRuntimeConfig(req);
   const where = buildCommonFilters(query);
 
   // Sum of paid payments per order (approved + pending_approval) (string for reuse in attributes/where)
@@ -148,8 +193,8 @@ async function listOutstanding(query) {
   where[Op.and].push(
     Sequelize.where(
       Sequelize.literal(`"Order"."project_cost" - ${paidSubquerySql}`),
-      Op.gt,
-      0
+      Op.gte,
+      runtimeConfig.min_outstanding_amount
     )
   );
 
@@ -163,6 +208,9 @@ async function listOutstanding(query) {
     "order_date",
     "branch_id",
     "handled_by",
+    "planned_delivery_date",
+    "netmeter_applied_on",
+    "disbursed_date",
     "project_cost",
     [Sequelize.literal(paidSubquerySql), "total_paid"],
     [Sequelize.literal(`"Order"."project_cost" - ${paidSubquerySql}`), "outstanding"],
@@ -190,11 +238,13 @@ async function listOutstanding(query) {
     page,
     limit,
     total: typeof count === "number" ? count : count.length,
+    config: runtimeConfig,
   };
 }
 
-async function kpis(query) {
+async function kpis(query, req) {
   const db = getDb();
+  const runtimeConfig = await getPaymentOutstandingRuntimeConfig(req);
   const where = buildCommonFilters(query);
   const paidSubquery = `(
     SELECT COALESCE(SUM(opd.payment_amount), 0)
@@ -239,6 +289,8 @@ async function kpis(query) {
   if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
   if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
+  if (where.planned_delivery_date?.[Op.gte]) { whereClauses.push("o.planned_delivery_date >= :delivery_date_from"); replacements.delivery_date_from = where.planned_delivery_date[Op.gte]; }
+  if (where.planned_delivery_date?.[Op.lte]) { whereClauses.push("o.planned_delivery_date <= :delivery_date_to"); replacements.delivery_date_to = where.planned_delivery_date[Op.lte]; }
   // NOTE: Trend must always show full history; ignore order_date filters here.
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
@@ -272,13 +324,14 @@ async function kpis(query) {
     { replacements, type: Sequelize.QueryTypes.SELECT }
   );
 
-  return rows || {
+  const data = rows || {
     total_outstanding: 0,
     direct_outstanding: 0,
     loan_outstanding: 0,
     pdc_outstanding: 0,
     unknown_outstanding: 0,
   };
+  return { ...data, config: runtimeConfig };
 }
 
 async function trend(query) {
@@ -327,6 +380,8 @@ async function trend(query) {
   if (query.consumer_no) { whereClauses.push("o.consumer_no ILIKE :consumer_no"); replacements.consumer_no = `%${query.consumer_no}%`; }
   if (query.application_no) { whereClauses.push("o.application_no ILIKE :application_no"); replacements.application_no = `%${query.application_no}%`; }
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
+  if (where.planned_delivery_date?.[Op.gte]) { whereClauses.push("o.planned_delivery_date >= :delivery_date_from"); replacements.delivery_date_from = where.planned_delivery_date[Op.gte]; }
+  if (where.planned_delivery_date?.[Op.lte]) { whereClauses.push("o.planned_delivery_date <= :delivery_date_to"); replacements.delivery_date_to = where.planned_delivery_date[Op.lte]; }
   // NOTE: Trend must always show full history; ignore order_date filters here.
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
@@ -410,6 +465,8 @@ async function analysis(query) {
   if (query.reference_from) { whereClauses.push("o.reference_from ILIKE :reference_from"); replacements.reference_from = `%${query.reference_from}%`; }
   if (where.order_date?.[Op.gte]) { whereClauses.push("o.order_date >= :order_date_from"); replacements.order_date_from = where.order_date[Op.gte]; }
   if (where.order_date?.[Op.lte]) { whereClauses.push("o.order_date <= :order_date_to"); replacements.order_date_to = where.order_date[Op.lte]; }
+  if (where.planned_delivery_date?.[Op.gte]) { whereClauses.push("o.planned_delivery_date >= :delivery_date_from"); replacements.delivery_date_from = where.planned_delivery_date[Op.gte]; }
+  if (where.planned_delivery_date?.[Op.lte]) { whereClauses.push("o.planned_delivery_date <= :delivery_date_to"); replacements.delivery_date_to = where.planned_delivery_date[Op.lte]; }
   if (query.customer_name) { whereClauses.push("c.customer_name ILIKE :customer_name"); replacements.customer_name = `%${query.customer_name}%`; }
   if (query.mobile_number) { whereClauses.push("c.mobile_number ILIKE :mobile_number"); replacements.mobile_number = `%${query.mobile_number}%`; }
   if (query.q) {
@@ -588,5 +645,6 @@ module.exports = {
   analysis,
   listFollowUps,
   createFollowUp,
+  getPaymentOutstandingRuntimeConfig,
 };
 

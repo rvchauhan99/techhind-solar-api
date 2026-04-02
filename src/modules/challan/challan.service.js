@@ -174,13 +174,28 @@ const getManagedWarehouseIdsForUserIds = async ({ userIds = [], transaction = nu
 const recomputeOrderDeliveryStatus = async (orderId, transaction = null) => {
     if (!orderId) return;
     const models = getTenantModels();
-    const { Order } = models;
+    const { Order, Challan } = models;
     const order = await Order.findOne({
         where: { id: orderId, deleted_at: null },
         attributes: ["id", "bom_snapshot", "delivery_status"],
         transaction,
     });
-    if (!order || !Array.isArray(order.bom_snapshot) || order.bom_snapshot.length === 0) return;
+    if (!order) return;
+
+    if (!Array.isArray(order.bom_snapshot) || order.bom_snapshot.length === 0) {
+        // For projects without a BOM (common in commercial projects initially),
+        // we set status to 'complete' if at least one challan has been created.
+        const challanCount = await Challan.count({
+            where: { order_id: orderId, deleted_at: null },
+            transaction,
+        });
+
+        const newStatus = challanCount > 0 ? "complete" : "pending";
+        if (order.delivery_status !== newStatus) {
+            await order.update({ delivery_status: newStatus }, { transaction });
+        }
+        return;
+    }
 
     const bom = order.bom_snapshot;
 

@@ -2,14 +2,16 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
+const configCacheService = require("../config-master/configCache.service.js");
 const { buildBomSnapshotFromProjectPrice } = require("../../common/utils/bomFromProjectPrice.js");
 const notificationService = require("../notification/notification.service.js");
 const serialMasterService = require("../serialMaster/serialMaster.service.js");
 const { assertActiveUserIds } = require("../../common/utils/activeUserGuard.js");
+const bucketService = require("../../common/services/bucket.service.js");
 
 /** Derive first panel and first inverter product_id from bom_snapshot (by product_type_name). */
 const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
@@ -19,7 +21,8 @@ const derivePanelAndInverterFromBomSnapshot = (bom_snapshot) => {
     for (const line of bom_snapshot) {
         const product = getBomLineProduct(line);
         const typeName = norm(product?.product_type_name || "");
-        if (typeName === "panel" && out.solar_panel_id == null) out.solar_panel_id = line.product_id;
+        const isPanel = typeName === "panel" || typeName === "solar_panel";
+        if (isPanel && out.solar_panel_id == null) out.solar_panel_id = line.product_id;
         if (typeName === "inverter" && out.inverter_id == null) out.inverter_id = line.product_id;
         if (out.solar_panel_id != null && out.inverter_id != null) break;
     }
@@ -151,6 +154,127 @@ const normalizeOrderBomSnapshot = (bom_snapshot) => {
     });
 };
 
+const GST_MODE = {
+    INCLUDING_GST: "INCLUDING_GST",
+    EXCLUDING_GST: "EXCLUDING_GST",
+};
+
+/**
+ * Resolve effective profit margin for a product, falling back to platform config.
+ */
+const resolveProductMargin = async (product, req) => {
+    const productMargin = toNumber(product?.profit_margin_percent, null);
+    if (productMargin !== null && productMargin > 0) {
+        return productMargin;
+    }
+    const defaultMargin = await configCacheService.getConfigValue(
+        req,
+        "default_product_profit_margin_percent",
+        0
+    );
+    return toNumber(defaultMargin, 0);
+};
+
+/**
+ * Apply profit margin to purchase prices to get sales prices.
+ */
+const applyMarginToPrice = (purchasePriceExcl, marginPercent, gstPercent) => {
+    const unitExcl = roundMoney(purchasePriceExcl * (1 + marginPercent / 100));
+    const unitIncl = roundMoney(unitExcl * (1 + gstPercent / 100));
+    return { unitExcl, unitIncl };
+};
+
+const toNumber = (value, fallback = 0) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+};
+
+const roundMoney = (value) => Math.round((toNumber(value) + Number.EPSILON) * 100) / 100;
+
+const normalizeGstMode = (value) => {
+    const raw = String(value || "").trim().toUpperCase();
+    return raw === GST_MODE.EXCLUDING_GST ? GST_MODE.EXCLUDING_GST : GST_MODE.INCLUDING_GST;
+};
+
+const mapCostAmendmentRows = (rows = []) =>
+    rows.map((row) => ({
+        id: row.id,
+        order_id: row.order_id,
+        product_id: row.product_id,
+        product_name: row.product?.product_name || null,
+        actor_user_id: row.actor_user_id,
+        actor_user_name: row.actorUser?.name || null,
+        change_type: row.change_type,
+        qty_delta: toNumber(row.qty_delta),
+        unit_price_base: toNumber(row.unit_price_base),
+        gst_mode: row.gst_mode,
+        gst_rate: toNumber(row.gst_rate),
+        line_amount_excluding_gst: toNumber(row.line_amount_excluding_gst),
+        line_amount_including_gst: toNumber(row.line_amount_including_gst),
+        project_cost_before: toNumber(row.project_cost_before),
+        project_cost_after: toNumber(row.project_cost_after),
+        final_payable_before: toNumber(row.final_payable_before),
+        final_payable_after: toNumber(row.final_payable_after),
+        note: row.note || null,
+        metadata: row.metadata || null,
+        created_at: row.created_at,
+    }));
+
+const getLatestPurchasePriceByProductId = async ({ productId, transaction, models }) => {
+    const parsedProductId = Number.parseInt(productId, 10);
+    if (!Number.isInteger(parsedProductId) || parsedProductId <= 0) {
+        return null;
+    }
+    const rows = await models.sequelize.query(
+        `SELECT poi.id,
+                poi.product_id,
+                poi.rate,
+                poi.gst_percent,
+                poi.amount_excluding_gst,
+                poi.amount,
+                poi.received_quantity,
+                poi.created_at
+         FROM purchase_order_items poi
+         WHERE poi.product_id = :productId
+           AND COALESCE(poi.received_quantity, 0) > 0
+         ORDER BY poi.created_at DESC, poi.id DESC
+         LIMIT 1`,
+        {
+            replacements: { productId: parsedProductId },
+            type: QueryTypes.SELECT,
+            transaction,
+        }
+    );
+
+    const row = rows?.[0];
+    if (!row) return null;
+
+    const rate = toNumber(row.rate, 0);
+    const gstRate = toNumber(row.gst_percent, 0);
+    const amountExcl = toNumber(row.amount_excluding_gst, 0);
+    const amountIncl = toNumber(row.amount, 0);
+
+    let derivedRateExcluding = rate;
+    let derivedRateIncluding = roundMoney(rate * (1 + gstRate / 100));
+    if (amountExcl > 0 && amountIncl > 0) {
+        const qtyHint = rate > 0 ? amountExcl / rate : 1;
+        if (qtyHint > 0) {
+            derivedRateExcluding = roundMoney(amountExcl / qtyHint);
+            derivedRateIncluding = roundMoney(amountIncl / qtyHint);
+        }
+    }
+
+    return {
+        product_id: parsedProductId,
+        purchase_order_item_id: row.id,
+        received_quantity: toNumber(row.received_quantity, 0),
+        unit_price_excluding_gst: roundMoney(derivedRateExcluding),
+        unit_price_including_gst: roundMoney(derivedRateIncluding),
+        gst_rate: gstRate,
+        created_at: row.created_at,
+    };
+};
+
 /** Escape string for safe use in SQL LIKE pattern (%, _) and in string literal (single quote). */
 const escapeSearchForLike = (s) => {
     if (s == null || typeof s !== "string") return "";
@@ -188,6 +312,7 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         handled_by,
         branch_id,
         inquiry_source_id,
+        project_scheme_id,
         order_number,
         consumer_no,
         application_no,
@@ -228,6 +353,11 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
     if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
         const sid = parseInt(inquiry_source_id, 10);
         if (!Number.isNaN(sid)) where.inquiry_source_id = sid;
+    }
+
+    if (project_scheme_id != null && String(project_scheme_id).trim() !== "") {
+        const psid = parseInt(project_scheme_id, 10);
+        if (!Number.isNaN(psid)) where.project_scheme_id = psid;
     }
 
     if (consumer_no) {
@@ -305,6 +435,7 @@ const listOrders = async ({
     mobile_number,
     branch_id,
     inquiry_source_id,
+    project_scheme_id,
     consumer_no,
     application_no,
     reference_from,
@@ -324,7 +455,7 @@ const listOrders = async ({
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
-        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
     } = models;
     const offset = (page - 1) * limit;
 
@@ -357,6 +488,11 @@ const listOrders = async ({
     if (inquiry_source_id != null && String(inquiry_source_id).trim() !== "") {
         const sid = parseInt(inquiry_source_id, 10);
         if (!Number.isNaN(sid)) where.inquiry_source_id = sid;
+    }
+
+    if (project_scheme_id != null && String(project_scheme_id).trim() !== "") {
+        const psid = parseInt(project_scheme_id, 10);
+        if (!Number.isNaN(psid)) where.project_scheme_id = psid;
     }
 
     if (consumer_no) {
@@ -932,7 +1068,7 @@ const getOrderById = async ({ id } = {}) => {
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
-        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
     } = models;
     const order = await Order.findOne({
         where: { id, deleted_at: null },
@@ -1197,12 +1333,117 @@ const getOrderById = async ({ id } = {}) => {
     };
 };
 
-const createOrder = async ({ payload, transaction } = {}) => {
+const getLatestPurchasePrices = async ({ product_ids, transaction, req } = {}) => {
+    const models = getTenantModels(req);
+    const { Product } = models;
+    const parsedProductIds = Array.isArray(product_ids)
+        ? product_ids
+            .map((id) => Number.parseInt(id, 10))
+            .filter((id) => Number.isInteger(id) && id > 0)
+        : [];
+    const uniqueProductIds = [...new Set(parsedProductIds)];
+    if (uniqueProductIds.length === 0) {
+        return [];
+    }
+
+    const productRows = await Product.findAll({
+        where: {
+            id: uniqueProductIds,
+            deleted_at: null,
+        },
+        attributes: ["id", "gst_percent", "profit_margin_percent"],
+        ...(transaction ? { transaction } : {}),
+    });
+    const productDataById = {};
+    (productRows || []).forEach((p) => {
+        productDataById[p.id] = p;
+    });
+
+    const results = [];
+    for (const productId of uniqueProductIds) {
+        const product = productDataById[productId];
+        const gstRate = toNumber(product?.gst_percent, 0);
+        const marginPercent = await resolveProductMargin(product, req);
+
+        const latest = await getLatestPurchasePriceByProductId({
+            productId,
+            transaction,
+            models,
+        });
+
+        if (latest) {
+            const purchaseExcl = toNumber(latest.unit_price_excluding_gst, 0);
+            const { unitExcl, unitIncl } = applyMarginToPrice(purchaseExcl, marginPercent, gstRate);
+
+            results.push({
+                ...latest,
+                purchase_unit_price_excluding_gst: latest.unit_price_excluding_gst,
+                purchase_unit_price_including_gst: latest.unit_price_including_gst,
+                unit_price_excluding_gst: unitExcl,
+                unit_price_including_gst: unitIncl,
+                profit_margin_percent_applied: marginPercent,
+                missing_price: false,
+            });
+        } else {
+            results.push({
+                product_id: productId,
+                purchase_order_item_id: null,
+                received_quantity: 0,
+                unit_price_excluding_gst: null,
+                unit_price_including_gst: null,
+                purchase_unit_price_excluding_gst: null,
+                purchase_unit_price_including_gst: null,
+                profit_margin_percent_applied: marginPercent,
+                gst_rate: gstRate,
+                created_at: null,
+                missing_price: true,
+            });
+        }
+    }
+    return results;
+};
+
+const getOrderCostAmendments = async ({ order_id, transaction } = {}) => {
     const models = getTenantModels();
+    const { Order, OrderCostAmendmentLog, Product, User } = models;
+    const parsedOrderId = Number.parseInt(order_id, 10);
+    if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+        const error = new Error("Valid order id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const txOptions = transaction ? { transaction } : {};
+    const order = await Order.findOne({
+        where: { id: parsedOrderId, deleted_at: null },
+        attributes: ["id"],
+        ...txOptions,
+    });
+    if (!order) {
+        const error = new Error("Order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const rows = await OrderCostAmendmentLog.findAll({
+        where: { order_id: parsedOrderId, deleted_at: null },
+        include: [
+            { model: Product, as: "product", attributes: ["id", "product_name"], required: false },
+            { model: User, as: "actorUser", attributes: ["id", "name"], required: false },
+        ],
+        order: [["created_at", "DESC"], ["id", "DESC"]],
+        ...txOptions,
+    });
+    return mapCostAmendmentRows(rows);
+};
+
+const createOrder = async ({ payload, transaction, req } = {}) => {
+    const models = getTenantModels(req);
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
         State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        InquiryDocument, OrderDocument, OrderDocumentType,
     } = models;
     const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
@@ -1374,6 +1615,104 @@ const createOrder = async ({ payload, transaction } = {}) => {
             }
         }
 
+        // Carry-forward inquiry documents to order_documents.
+        // Rules:
+        // - If allow_multiple=false for a doc_type: carry only the latest inquiry document (created_at DESC).
+        // - If allow_multiple=true: carry all inquiry documents for that doc_type.
+        // - If order_documents already has rows for order_id+doc_type: replace them with the carried-forward set.
+        const inquiryIdForDocs = payload.inquiry_id || quotationForStatus?.inquiry_id;
+        if (inquiryIdForDocs != null) {
+            const orderId = created?.id;
+            if (orderId != null) {
+                const parseAllowMultiple = (value) => {
+                    if (value === true || value === 1 || value === "1") return true;
+                    if (value === false || value === 0 || value === "0") return false;
+                    if (typeof value === "string") {
+                        const s = value.trim().toLowerCase();
+                        if (["true", "yes", "y", "allow", "multiple"].includes(s)) return true;
+                        if (["false", "no", "n", "deny"].includes(s)) return false;
+                    }
+                    return Boolean(value);
+                };
+
+                const allowMultipleRows = await OrderDocumentType.findAll({
+                    where: { deleted_at: null },
+                    attributes: ["type", "allow_multiple"],
+                    transaction: t,
+                });
+                const allowMultipleByDocType = {};
+                (allowMultipleRows || []).forEach((r) => {
+                    allowMultipleByDocType[r.type] = parseAllowMultiple(r.allow_multiple);
+                });
+
+                const inquiryDocs = await InquiryDocument.findAll({
+                    where: { inquiry_id: inquiryIdForDocs, deleted_at: null },
+                    order: [["created_at", "DESC"]],
+                    transaction: t,
+                });
+
+                // Group by doc_type. For allow_multiple=false, first doc is already the latest.
+                const docsByType = new Map();
+                for (const d of inquiryDocs || []) {
+                    const dt = d.doc_type;
+                    const allowMultiple = allowMultipleByDocType[dt] ?? false;
+                    if (!docsByType.has(dt)) docsByType.set(dt, []);
+                    if (!allowMultiple) {
+                        if (docsByType.get(dt).length === 0) docsByType.set(dt, [d]);
+                    } else {
+                        docsByType.get(dt).push(d);
+                    }
+                }
+
+                const bucketClient = req ? bucketService.getBucketForRequest(req) : bucketService.getClient();
+
+                for (const [docType, docs] of docsByType.entries()) {
+                    const copiedDocs = [];
+                    for (const inquiryDoc of docs) {
+                        const rawSourceKey = String(inquiryDoc.document_path || "").replace(/^\/+/, "");
+                        if (!rawSourceKey) continue;
+
+                        const destKey = rawSourceKey.startsWith("inquiry-documents/")
+                            ? rawSourceKey.replace(/^inquiry-documents\//, "order-documents/")
+                            : rawSourceKey;
+
+                        try {
+                            if (destKey !== rawSourceKey) {
+                                await bucketService.copyObjectWithClient(bucketClient, rawSourceKey, destKey);
+                            }
+                            copiedDocs.push({ destKey, inquiryDoc });
+                        } catch (err) {
+                            console.warn(
+                                "[order] Failed to copy inquiry document to order bucket:",
+                                docType,
+                                err?.message || err
+                            );
+                        }
+                    }
+
+                    if (copiedDocs.length > 0) {
+                        // Replace existing rows for this order+doc_type.
+                        await OrderDocument.destroy({
+                            where: { order_id: orderId, doc_type: docType },
+                            transaction: t,
+                        });
+
+                        for (const { destKey, inquiryDoc } of copiedDocs) {
+                            await OrderDocument.create(
+                                {
+                                    order_id: orderId,
+                                    doc_type: docType,
+                                    document_path: destKey,
+                                    remarks: inquiryDoc.remarks ?? null,
+                                },
+                                { transaction: t }
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         if (committedHere) {
             await t.commit();
         }
@@ -1402,13 +1741,14 @@ const createOrder = async ({ payload, transaction } = {}) => {
     }
 };
 
-const updateOrder = async ({ id, payload, transaction, user } = {}) => {
+const updateOrder = async ({ id, payload, transaction, user, req } = {}) => {
     if (!id) return null;
-    const models = getTenantModels();
+    const models = getTenantModels(req);
     const {
         Order, Inquiry, Quotation, Customer, User, InquirySource, CompanyBranch,
         ProjectScheme, OrderType, Discom, Division, SubDivision, LoanType,
-        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation,
+        State, City, Product, ProjectPhase, CompanyWarehouse, Fabrication, Installation, OrderCostAmendmentLog,
+        Role,
     } = models;
     const t = transaction || (await models.sequelize.transaction());
     let committedHere = !transaction;
@@ -1421,19 +1761,127 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
 
         if (!order) throw new Error("Order not found");
 
+        // Resolve superadmin status
+        let isSuperAdmin = false;
+        if (user?.role_id) {
+            const role = await Role.findOne({
+                where: { id: user.role_id, deleted_at: null },
+                attributes: ["name"],
+                transaction: t,
+            });
+            const roleName = String(role?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            isSuperAdmin = roleName === "superadmin";
+        }
+
+        // Normalize payload for Sequelize/Postgres:
+        // - Many UI form fields submit `""` for "not selected" (or `"Invalid date"`).
+        // - Passing `""` into BIGINT/DATE/NUMBER columns causes Postgres cast errors.
+        const normalizePayloadForSequelize = (input) => {
+            if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+            const normalized = { ...input };
+
+            for (const [key, value] of Object.entries(normalized)) {
+                if (value === "" || (typeof value === "string" && value.trim() === "")) {
+                    normalized[key] = null;
+                    continue;
+                }
+
+                if (typeof value === "string" && value.trim().toLowerCase() === "invalid date") {
+                    normalized[key] = null;
+                    continue;
+                }
+            }
+
+            return normalized;
+        };
+
+        payload = normalizePayloadForSequelize(payload);
+
+        // Enforcement for non-superadmin
+        if (!isSuperAdmin) {
+            // 1. Reject manual project cost override
+            if (payload.manual_project_cost_override != null) {
+                const err = new Error("Only superadmin can set manual project cost override.");
+                err.statusCode = 403;
+                throw err;
+            }
+
+            // 2. Validate BOM snapshot: non-superadmin can only add items
+            if (payload.bom_snapshot != null && Array.isArray(payload.bom_snapshot)) {
+                const oldBom = order.bom_snapshot || [];
+                const newBom = payload.bom_snapshot;
+
+                // First N lines must match existing lines in order (product_id and planned_qty)
+                for (let i = 0; i < oldBom.length; i++) {
+                    const oldLine = oldBom[i];
+                    const newLine = newBom[i];
+
+                    if (!newLine) {
+                        const err = new Error("Non-superadmin cannot remove existing BOM items.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+
+                    if (Number(oldLine.product_id) !== Number(newLine.product_id)) {
+                        const err = new Error("Non-superadmin cannot modify existing BOM item product.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+
+                    // Compare planned_qty (normalized)
+                    const oldPlanned = Number(oldLine.planned_qty ?? oldLine.quantity ?? 0);
+                    const newPlanned = Number(newLine.planned_qty ?? newLine.quantity ?? 0);
+                    if (oldPlanned !== newPlanned) {
+                        const err = new Error("Non-superadmin cannot modify existing BOM item quantities.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+                }
+
+                // Any extra lines must have planner_added flag
+                for (let i = oldBom.length; i < newBom.length; i++) {
+                    if (!newBom[i].planner_added) {
+                        const err = new Error("Non-superadmin can only add new items with planner_added flag.");
+                        err.statusCode = 403;
+                        throw err;
+                    }
+                }
+            }
+
+            // 3. Validate cost adjustments: non-superadmin can only have adjustments for added items
+            if (payload.cost_adjustments != null && Array.isArray(payload.cost_adjustments)) {
+                // We'll re-derive adjustments later based on BOM diff, but let's check for any sneaky negative deltas
+                const hasNegativeDelta = payload.cost_adjustments.some(adj => toNumber(adj.qty_delta) < 0);
+                if (hasNegativeDelta) {
+                    const err = new Error("Non-superadmin cannot decrease quantities or remove items.");
+                    err.statusCode = 403;
+                    throw err;
+                }
+            }
+        }
+
         // When Planner sends project_price_id and order has no BOM, build BOM from project and set on order
         let bomSnapshotFromProject = null;
-        let derivedSolarPanelId = null;
-        let derivedInverterId = null;
         if (payload.project_price_id != null && (!order.bom_snapshot || order.bom_snapshot.length === 0)) {
             const built = await buildBomSnapshotFromProjectPrice(payload.project_price_id, t, models);
             if (built && built.length > 0) {
                 bomSnapshotFromProject = normalizeOrderBomSnapshot(built);
-                const derived = derivePanelAndInverterFromBomSnapshot(built);
-                derivedSolarPanelId = derived.solar_panel_id;
-                derivedInverterId = derived.inverter_id;
             }
         }
+
+        /** BOM snapshot used this request to sync order-level panel/inverter product ids (planner PATCH or project import). */
+        let snapshotForProductIds = null;
+        if (bomSnapshotFromProject && bomSnapshotFromProject.length > 0) {
+            snapshotForProductIds = bomSnapshotFromProject;
+        } else if (payload.bom_snapshot != null && Array.isArray(payload.bom_snapshot)) {
+            snapshotForProductIds = normalizeOrderBomSnapshot(payload.bom_snapshot);
+        }
+        const bomDerived =
+            snapshotForProductIds != null
+                ? derivePanelAndInverterFromBomSnapshot(snapshotForProductIds)
+                : { solar_panel_id: null, inverter_id: null };
+        const bomDerivedPanelId = bomDerived.solar_panel_id;
+        const bomDerivedInverterId = bomDerived.inverter_id;
 
         const previousStatus = order.status;
         const previousPlannedWarehouseId = order.planned_warehouse_id;
@@ -1446,6 +1894,8 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
         const previousNetmeterInstalledCompletedAt = order.netmeter_installed_completed_at;
         const previousSubsidyClaimCompletedAt = order.subsidy_claim_completed_at;
         const previousSubsidyDisbursedCompletedAt = order.subsidy_disbursed_completed_at;
+        const currentProjectCost = toNumber(order.project_cost);
+        const currentDiscount = toNumber(order.discount);
 
         const normalizeNullableId = (value, existing) => {
             if (value === "") return null;
@@ -1476,6 +1926,198 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 },
             ];
         }
+
+        const skipCostEffectsForProjectBomEstablish =
+            bomSnapshotFromProject != null && bomSnapshotFromProject.length > 0;
+        let costAdjustmentPayload = Array.isArray(payload.cost_adjustments)
+            ? payload.cost_adjustments
+            : [];
+        if (skipCostEffectsForProjectBomEstablish) {
+            costAdjustmentPayload = [];
+        }
+        let computedProjectCost = currentProjectCost;
+        const amendmentLogs = [];
+        const costAdjustmentActivity = [];
+        const previousProjectCost = currentProjectCost;
+
+        for (const adjustment of costAdjustmentPayload) {
+            const productId = Number.parseInt(adjustment?.product_id, 10);
+            const qtyDelta = toNumber(adjustment?.qty_delta, 0);
+            if (!Number.isInteger(productId) || productId <= 0 || qtyDelta === 0) {
+                continue;
+            }
+
+            const productRow = await Product.findOne({
+                where: { id: productId, deleted_at: null },
+                attributes: ["id", "gst_percent", "profit_margin_percent"],
+                transaction: t,
+            });
+
+            if (!productRow) {
+                continue;
+            }
+
+            const latestPrice = await getLatestPurchasePriceByProductId({
+                productId,
+                transaction: t,
+                models,
+            });
+            const gstMode = normalizeGstMode(adjustment?.gst_mode);
+            let gstRate = toNumber(adjustment?.gst_rate, productRow.gst_percent);
+            let unitExcl = 0;
+            let unitIncl = 0;
+            let priceSource = "LATEST_PURCHASE";
+            let manualPriceInputSide = null;
+
+            const marginPercent = await resolveProductMargin(productRow, req);
+
+            if (latestPrice) {
+                const purchaseExcl = toNumber(latestPrice.unit_price_excluding_gst);
+                const salesPrices = applyMarginToPrice(purchaseExcl, marginPercent, gstRate);
+                unitExcl = salesPrices.unitExcl;
+                unitIncl = salesPrices.unitIncl;
+            } else {
+                priceSource = "MANUAL_FALLBACK";
+                if (!Number.isFinite(gstRate) || gstRate < 0) {
+                    // Worst-case go-live fallback: allow pricing with 0% GST instead of hard fail.
+                    gstRate = 0;
+                }
+                const manualExclInputRaw = adjustment?.manual_unit_price_excluding_gst;
+                const manualInclInputRaw = adjustment?.manual_unit_price_including_gst;
+                const manualExclInput = toNumber(manualExclInputRaw, NaN);
+                const manualInclInput = toNumber(manualInclInputRaw, NaN);
+                const hasManualExcl = Number.isFinite(manualExclInput) && manualExclInput > 0;
+                const hasManualIncl = Number.isFinite(manualInclInput) && manualInclInput > 0;
+                if (!hasManualExcl && !hasManualIncl) {
+                    const err = new Error(`Manual unit price is required for product ${productId} because latest purchase price was not found`);
+                    err.statusCode = 400;
+                    throw err;
+                }
+                if (hasManualExcl && hasManualIncl) {
+                    unitExcl = roundMoney(manualExclInput);
+                    unitIncl = roundMoney(manualInclInput);
+                    manualPriceInputSide = "BOTH";
+                } else if (hasManualExcl) {
+                    unitExcl = roundMoney(manualExclInput);
+                    unitIncl = roundMoney(unitExcl * (1 + gstRate / 100));
+                    manualPriceInputSide = "EXCL";
+                } else {
+                    unitIncl = roundMoney(manualInclInput);
+                    unitExcl = roundMoney(unitIncl / (1 + gstRate / 100));
+                    manualPriceInputSide = "INCL";
+                }
+            }
+
+            const changeAmountExcluding = roundMoney(qtyDelta * unitExcl);
+            const changeAmountIncluding = roundMoney(qtyDelta * unitIncl);
+            const deltaAmount =
+                gstMode === GST_MODE.EXCLUDING_GST ? changeAmountExcluding : changeAmountIncluding;
+            const beforeCost = computedProjectCost;
+            const afterCost = roundMoney(beforeCost + deltaAmount);
+            computedProjectCost = afterCost;
+
+            amendmentLogs.push({
+                order_id: order.id,
+                product_id: productId,
+                actor_user_id: user?.id ?? null,
+                change_type: qtyDelta > 0 ? "ADD_QTY" : "DEDUCT_QTY",
+                qty_delta: qtyDelta,
+                unit_price_base: gstMode === GST_MODE.EXCLUDING_GST ? unitExcl : unitIncl,
+                gst_mode: gstMode,
+                gst_rate: gstRate,
+                line_amount_excluding_gst: changeAmountExcluding,
+                line_amount_including_gst: changeAmountIncluding,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+                final_payable_before: roundMoney(beforeCost - currentDiscount),
+                final_payable_after: roundMoney(afterCost - currentDiscount),
+                note: adjustment?.note || null,
+                metadata: {
+                    purchase_order_item_id: latestPrice?.purchase_order_item_id ?? null,
+                    purchase_price_created_at: latestPrice?.created_at ?? null,
+                    received_quantity: latestPrice?.received_quantity ?? null,
+                    price_source: priceSource,
+                    manual_price_input_side: manualPriceInputSide,
+                    manual_unit_price_excluding_gst: priceSource === "MANUAL_FALLBACK" ? unitExcl : null,
+                    manual_unit_price_including_gst: priceSource === "MANUAL_FALLBACK" ? unitIncl : null,
+                    gst_rate_fallback_zero_applied:
+                        priceSource === "MANUAL_FALLBACK" && (!latestPrice) && (!Number.isFinite(toNumber(adjustment?.gst_rate, NaN))),
+                    requested_gst_mode: adjustment?.gst_mode ?? null,
+                    profit_margin_percent_applied: marginPercent,
+                },
+            });
+
+            costAdjustmentActivity.push({
+                action: qtyDelta > 0 ? "cost_added_by_qty" : "cost_deducted_by_qty",
+                at: new Date().toISOString(),
+                user_id: user?.id ?? null,
+                user_name: user?.name ?? null,
+                product_id: productId,
+                qty_delta: qtyDelta,
+                gst_mode: gstMode,
+                line_amount_excluding_gst: changeAmountExcluding,
+                line_amount_including_gst: changeAmountIncluding,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+            });
+        }
+
+        const hasManualProjectCostOverride = !skipCostEffectsForProjectBomEstablish
+            && payload.manual_project_cost_override != null
+            && payload.manual_project_cost_override !== "";
+        const manualProjectCostOverride = hasManualProjectCostOverride
+            ? roundMoney(payload.manual_project_cost_override)
+            : null;
+        if (manualProjectCostOverride != null) {
+            const beforeCost = computedProjectCost;
+            const afterCost = manualProjectCostOverride;
+            computedProjectCost = afterCost;
+            amendmentLogs.push({
+                order_id: order.id,
+                product_id: null,
+                actor_user_id: user?.id ?? null,
+                change_type: "FINAL_OVERRIDE",
+                qty_delta: null,
+                unit_price_base: null,
+                gst_mode: null,
+                gst_rate: null,
+                line_amount_excluding_gst: null,
+                line_amount_including_gst: null,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+                final_payable_before: roundMoney(beforeCost - currentDiscount),
+                final_payable_after: roundMoney(afterCost - currentDiscount),
+                note: payload.manual_project_cost_override_note || "Manual final payable override",
+                metadata: {
+                    source: "planner_manual_override",
+                },
+            });
+            costAdjustmentActivity.push({
+                action: "final_payable_override",
+                at: new Date().toISOString(),
+                user_id: user?.id ?? null,
+                user_name: user?.name ?? null,
+                project_cost_before: beforeCost,
+                project_cost_after: afterCost,
+            });
+        }
+
+        const effectiveProjectCost =
+            hasManualProjectCostOverride || amendmentLogs.length > 0
+                ? computedProjectCost
+                : (payload.project_cost ?? order.project_cost);
+        const autoCalculatedProjectCost = roundMoney(
+            hasManualProjectCostOverride ? (amendmentLogs.find((item) => item.change_type === "FINAL_OVERRIDE")?.project_cost_before ?? computedProjectCost) : computedProjectCost
+        );
+        const finalSavedProjectCost = roundMoney(effectiveProjectCost);
+        const overrideApplied = hasManualProjectCostOverride && manualProjectCostOverride != null;
+        const costUpdateSummary = {
+            previous_project_cost: roundMoney(previousProjectCost),
+            auto_calculated_project_cost: autoCalculatedProjectCost,
+            final_saved_project_cost: finalSavedProjectCost,
+            total_delta: roundMoney(finalSavedProjectCost - previousProjectCost),
+            override_applied: overrideApplied,
+        };
 
         // Auto-transition order to completed when final stage is completed.
         // Rule: if Subsidy Disbursed stage is completed AND subsidy_disbursed is true, close the order.
@@ -1557,7 +2199,7 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 project_scheme_id: payload.project_scheme_id ?? order.project_scheme_id,
                 capacity: payload.capacity ?? order.capacity,
                 existing_pv_capacity: payload.existing_pv_capacity ?? order.existing_pv_capacity,
-                project_cost: payload.project_cost ?? order.project_cost,
+                project_cost: effectiveProjectCost,
                 discount: payload.discount ?? order.discount,
                 order_type_id: payload.order_type_id ?? order.order_type_id,
                 discom_id: payload.discom_id ?? order.discom_id,
@@ -1573,8 +2215,12 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
                 geda_registration_date: payload.geda_registration_date ?? order.geda_registration_date,
                 payment_type: payload.payment_type ?? order.payment_type,
                 loan_type_id: payload.loan_type_id ?? order.loan_type_id,
-                solar_panel_id: payload.solar_panel_id ?? derivedSolarPanelId ?? order.solar_panel_id,
-                inverter_id: payload.inverter_id ?? derivedInverterId ?? order.inverter_id,
+                solar_panel_id:
+                    payload.solar_panel_id ??
+                    (snapshotForProductIds != null ? bomDerivedPanelId : order.solar_panel_id),
+                inverter_id:
+                    payload.inverter_id ??
+                    (snapshotForProductIds != null ? bomDerivedInverterId : order.inverter_id),
                 project_phase_id: payload.project_phase_id ?? order.project_phase_id,
                 project_price_id: payload.project_price_id ?? order.project_price_id,
                 order_remarks: payload.order_remarks ?? order.order_remarks,
@@ -1672,6 +2318,32 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             },
             { transaction: t }
         );
+
+        const shouldAppendCostSummaryActivity =
+            Array.isArray(payload.cost_adjustments) || payload.manual_project_cost_override !== undefined;
+        if (amendmentLogs.length > 0 || shouldAppendCostSummaryActivity) {
+            if (amendmentLogs.length > 0) {
+                await OrderCostAmendmentLog.bulkCreate(amendmentLogs, { transaction: t });
+            }
+            const existingLog = Array.isArray(plannerActivityLogUpdate)
+                ? plannerActivityLogUpdate
+                : (Array.isArray(order.planner_activity_log) ? order.planner_activity_log : []);
+            const mergedActivity = [
+                ...existingLog,
+                ...costAdjustmentActivity,
+                {
+                    action: "cost_update_summary",
+                    at: new Date().toISOString(),
+                    user_id: user?.id ?? null,
+                    user_name: user?.name ?? null,
+                    ...costUpdateSummary,
+                },
+            ];
+            await order.update(
+                { planner_activity_log: mergedActivity },
+                { transaction: t }
+            );
+        }
 
         if (committedHere) {
             await t.commit();
@@ -1843,7 +2515,10 @@ const updateOrder = async ({ id, payload, transaction, user } = {}) => {
             });
         }
 
-        return orderJson;
+        return {
+            ...orderJson,
+            cost_update_summary: costUpdateSummary,
+        };
     } catch (err) {
         if (committedHere) {
             await t.rollback();
@@ -2791,6 +3466,80 @@ const cancelOrder = async ({ id, payload = {}, transaction, user }) => {
     return order.toJSON ? order.toJSON() : order;
 };
 
+const reassignHandledByForConfirmedOrder = async ({
+    id,
+    new_handled_by,
+    reason: _reason = null,
+    user: _user,
+    transaction,
+} = {}) => {
+    const models = getTenantModels();
+    const { Order, User } = models;
+    const txOptions = transaction ? { transaction } : {};
+    const parsedOrderId = Number.parseInt(id, 10);
+    const targetHandledBy = Number.parseInt(new_handled_by, 10);
+
+    if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+        const error = new Error("Valid order id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+    if (!Number.isInteger(targetHandledBy) || targetHandledBy <= 0) {
+        const error = new Error("Valid handled_by is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const order = await Order.findOne({
+        where: { id: parsedOrderId, deleted_at: null },
+        ...txOptions,
+    });
+    if (!order) {
+        const error = new Error("Order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (String(order.status || "").toLowerCase() !== "confirmed") {
+        const error = new Error("Handled By can be changed only for confirmed orders");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    await assertActiveUserIds([targetHandledBy], {
+        transaction,
+        models,
+        fieldLabel: "Handled By user",
+    });
+
+    const currentHandledBy = Number.parseInt(order.handled_by, 10);
+    if (currentHandledBy === targetHandledBy) {
+        const enrichedNoop = await Order.findOne({
+            where: { id: parsedOrderId, deleted_at: null },
+            include: [{ model: User, as: "handledBy", attributes: ["id", "name"], required: false }],
+            ...txOptions,
+        });
+        return {
+            ...(enrichedNoop?.toJSON ? enrichedNoop.toJSON() : order.toJSON ? order.toJSON() : order),
+            reassignment_noop: true,
+        };
+    }
+
+    await order.update(
+        {
+            handled_by: targetHandledBy,
+        },
+        txOptions
+    );
+
+    const enriched = await Order.findOne({
+        where: { id: parsedOrderId, deleted_at: null },
+        include: [{ model: User, as: "handledBy", attributes: ["id", "name"], required: false }],
+        ...txOptions,
+    });
+    return enriched?.toJSON ? enriched.toJSON() : order.toJSON ? order.toJSON() : order;
+};
+
 module.exports = {
     listOrders,
     exportOrders,
@@ -2802,6 +3551,7 @@ module.exports = {
     getSolarPanels,
     getInverters,
     cancelOrder,
+    reassignHandledByForConfirmedOrder,
     listPendingDeliveryOrders,
     listDeliveryExecutionOrders,
     listFabricationInstallationOrders,
@@ -2809,4 +3559,6 @@ module.exports = {
     getOrdersDashboardKpis,
     getOrdersDashboardPipeline,
     getOrdersDashboardTrend,
+    getLatestPurchasePrices,
+    getOrderCostAmendments,
 };

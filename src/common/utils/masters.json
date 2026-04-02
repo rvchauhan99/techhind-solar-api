@@ -324,5 +324,23 @@
             "title",
             "content"
         ]
+    },
+    {
+        "id": 38,
+        "name": "Platform Config",
+        "model_name": "platform_config.model",
+        "required_fields": [
+            "config_key",
+            "config_value",
+            "value_type"
+        ]
+    },
+    {
+        "id": 39,
+        "name": "Campaign",
+        "model_name": "campaign.model",
+        "required_fields": [
+            "name"
+        ]
     }
 ]

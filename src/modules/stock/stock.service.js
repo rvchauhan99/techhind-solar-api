@@ -94,6 +94,7 @@ const createStockFromPOInward = async ({ poInward, transaction }) => {
         const existingSerial = await StockSerial.findOne({
           where: {
             serial_number: { [Op.iLike]: serial.serial_number },
+            status: { [Op.notIn]: [SERIAL_STATUS.BLOCKED, SERIAL_STATUS.RETURNED] },
           },
           include: [
             {
@@ -241,6 +242,7 @@ const buildStockFilters = (params = {}, models) => {
     warehouse_id = null,
     product_id = null,
     product_type_id = null,
+    product_make_id = null,
     warehouse_name = null,
     product_name = null,
     quantity_on_hand,
@@ -258,7 +260,7 @@ const buildStockFilters = (params = {}, models) => {
     tracking_type = null,
     low_stock = null,
   } = params;
-  const { Product, ProductType, CompanyWarehouse } = models;
+  const { Product, ProductType, ProductMake, CompanyWarehouse } = models;
   const where = {};
 
   if (warehouse_id) where.warehouse_id = warehouse_id;
@@ -295,6 +297,7 @@ const buildStockFilters = (params = {}, models) => {
   const productWhere = {};
   if (product_name) productWhere.product_name = { [Op.iLike]: `%${product_name}%` };
   if (product_type_id) productWhere.product_type_id = product_type_id;
+  if (product_make_id) productWhere.product_make_id = product_make_id;
 
   const productInclude = {
     model: Product,
@@ -306,12 +309,16 @@ const buildStockFilters = (params = {}, models) => {
       "tracking_type",
       "serial_required",
       "product_type_id",
+      "product_make_id",
       "avg_purchase_price",
       "gst_percent",
     ],
-    required: !!product_name || !!product_type_id,
+    required: !!product_name || !!product_type_id || !!product_make_id,
     ...(Object.keys(productWhere).length > 0 && { where: productWhere }),
-    include: [{ model: ProductType, as: "productType", attributes: ["id", "name"] }],
+    include: [
+      { model: ProductType, as: "productType", attributes: ["id", "name"] },
+      { model: ProductMake, as: "productMake", attributes: ["id", "name"] },
+    ],
   };
   const warehouseInclude = {
     model: CompanyWarehouse,
@@ -334,6 +341,7 @@ const listStocks = async ({
   warehouse_id = null,
   product_id = null,
   product_type_id = null,
+  product_make_id = null,
   warehouse_name = null,
   product_name = null,
   quantity_on_hand,
@@ -361,6 +369,7 @@ const listStocks = async ({
       warehouse_id,
       product_id,
       product_type_id,
+      product_make_id,
       warehouse_name,
       product_name,
       quantity_on_hand,
@@ -401,6 +410,8 @@ const listStocks = async ({
       product: row.product,
       product_type_id: row.product?.product_type_id ?? null,
       product_type_name: row.product?.productType?.name ?? null,
+      product_make_id: row.product?.product_make_id ?? null,
+      product_make_name: row.product?.productMake?.name ?? null,
       avg_purchase_price: row.product?.avg_purchase_price ?? null,
       gst_percent: row.product?.gst_percent ?? null,
       stock_value: stockValue,
@@ -434,6 +445,7 @@ const getStockSummary = async ({
   warehouse_id = null,
   product_id = null,
   product_type_id = null,
+  product_make_id = null,
   warehouse_name = null,
   product_name = null,
   quantity_on_hand,
@@ -458,6 +470,7 @@ const getStockSummary = async ({
       warehouse_id,
       product_id,
       product_type_id,
+      product_make_id,
       warehouse_name,
       product_name,
       quantity_on_hand,
@@ -620,6 +633,7 @@ const exportStocks = async (params = {}) => {
   worksheet.columns = [
     { header: "Product", key: "product_name", width: 24 },
     { header: "Product Type", key: "product_type_name", width: 18 },
+    { header: "Product Make", key: "product_make_name", width: 18 },
     { header: "Warehouse", key: "warehouse_name", width: 22 },
     { header: "On Hand", key: "quantity_on_hand", width: 12 },
     { header: "Reserved", key: "quantity_reserved", width: 12 },
@@ -646,6 +660,7 @@ const exportStocks = async (params = {}) => {
     worksheet.addRow({
       product_name: s.product?.product_name || "",
       product_type_name: s.product_type_name ?? "",
+      product_make_name: s.product_make_name ?? "",
       warehouse_name: s.warehouse?.name || "",
       quantity_on_hand: s.quantity_on_hand != null ? s.quantity_on_hand : "",
       quantity_reserved: s.quantity_reserved != null ? s.quantity_reserved : "",
@@ -786,8 +801,9 @@ const validateSerialAvailable = async ({ serial_number, product_id, warehouse_id
 };
 
 /**
- * Validate that a serial does NOT already exist for this product + warehouse (any status).
- * Used for IN/Found adjustments - new serials must not already exist.
+ * Validate that a serial does NOT already exist as an *active* record for any product of the same product type.
+ * BLOCKED and RETURNED serials are considered "dead" and CAN be re-found (IN/Found adjustment).
+ * Only active statuses (AVAILABLE, RESERVED, ISSUED) count as conflicting duplicates.
  * Returns { exists: false } or { exists: true, message: string }.
  */
 const validateSerialNotExists = async ({ serial_number, product_id, warehouse_id } = {}) => {
@@ -797,21 +813,52 @@ const validateSerialNotExists = async ({ serial_number, product_id, warehouse_id
   }
   const models = getTenantModels();
   const { StockSerial, Product } = models;
-  const row = await StockSerial.findOne({
-    where: {
-      serial_number: { [Op.iLike]: trimmed },
-      product_id: parseInt(product_id, 10),
-      warehouse_id: parseInt(warehouse_id, 10),
-    },
-    attributes: ["id"],
-  });
 
-  if (row) {
-    const product = await Product.findByPk(parseInt(product_id, 10), {
-      attributes: ["id", "product_name"],
+  // "Active" statuses that truly block re-entry
+  const activeStatuses = [SERIAL_STATUS.AVAILABLE, SERIAL_STATUS.RESERVED, SERIAL_STATUS.ISSUED];
+
+  // Look up the product type for this product
+  const product = await Product.findByPk(parseInt(product_id, 10), {
+    attributes: ["id", "product_name", "product_type_id"],
+  });
+  const productName = product?.product_name || `Product #${product_id}`;
+  const productTypeId = product?.product_type_id ?? null;
+
+  if (productTypeId != null) {
+    // Check across all products of the same product type — but only active serials
+    const row = await StockSerial.findOne({
+      where: {
+        serial_number: { [Op.iLike]: trimmed },
+        status: { [Op.in]: activeStatuses },
+      },
+      include: [
+        {
+          model: Product,
+          as: "product",
+          required: true,
+          attributes: ["id", "product_type_id"],
+          where: { product_type_id: productTypeId },
+        },
+      ],
+      attributes: ["id"],
     });
-    const productName = product?.product_name || `Product #${product_id}`;
-    return { exists: true, message: `Serial '${trimmed}' already exists for ${productName} at this warehouse` };
+    if (row) {
+      return { exists: true, message: `Serial '${trimmed}' is already active for this product type (${productName}). It cannot be added as a Found item while it is still in stock.` };
+    }
+  } else {
+    // Fallback: check by product_id + warehouse_id, active statuses only
+    const row = await StockSerial.findOne({
+      where: {
+        serial_number: { [Op.iLike]: trimmed },
+        product_id: parseInt(product_id, 10),
+        warehouse_id: parseInt(warehouse_id, 10),
+        status: { [Op.in]: activeStatuses },
+      },
+      attributes: ["id"],
+    });
+    if (row) {
+      return { exists: true, message: `Serial '${trimmed}' is already active for ${productName} at this warehouse` };
+    }
   }
 
   return { exists: false };

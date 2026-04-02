@@ -39,7 +39,9 @@ const listProducts = async ({
   product_name: productName = null,
   product_name_op: productNameOp = null,
   product_type_name: productTypeName = null,
+  product_type_id: productTypeId = null,
   product_make_name: productMakeName = null,
+  product_make_id: productMakeId = null,
   hsn_ssn_code: hsnSsnCode = null,
   measurement_unit_name: measurementUnitName = null,
   capacity,
@@ -131,6 +133,28 @@ const listProducts = async ({
     where[Op.and].push({ is_active: isActive === true || isActive === "true" || isActive === "1" });
   }
 
+  const resolvedProductTypeId =
+    productTypeId != null && productTypeId !== ""
+      ? parseInt(productTypeId, 10)
+      : null;
+  const validProductTypeId =
+    resolvedProductTypeId != null && !Number.isNaN(resolvedProductTypeId) ? resolvedProductTypeId : null;
+  if (validProductTypeId != null) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push({ product_type_id: validProductTypeId });
+  }
+
+  const resolvedProductMakeId =
+    productMakeId != null && productMakeId !== ""
+      ? parseInt(productMakeId, 10)
+      : null;
+  const validProductMakeId =
+    resolvedProductMakeId != null && !Number.isNaN(resolvedProductMakeId) ? resolvedProductMakeId : null;
+  if (validProductMakeId != null) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push({ product_make_id: validProductMakeId });
+  }
+
   const productTypeInclude = {
     model: ProductType,
     as: "productType",
@@ -142,8 +166,9 @@ const listProducts = async ({
     model: ProductMake,
     as: "productMake",
     attributes: ["id", "name"],
-    required: !!productMakeName,
-    ...(productMakeName && { where: { name: { [Op.iLike]: `%${productMakeName}%` } } }),
+    required: !!(productMakeName && validProductMakeId == null),
+    ...(productMakeName &&
+      validProductMakeId == null && { where: { name: { [Op.iLike]: `%${productMakeName}%` } } }),
   };
   const measurementUnitInclude = {
     model: MeasurementUnit,
@@ -245,6 +270,7 @@ const getProductById = async ({ id } = {}) => {
     selling_price: row.selling_price,
     mrp: row.mrp,
     gst_percent: row.gst_percent,
+    profit_margin_percent: row.profit_margin_percent,
     min_stock_quantity: row.min_stock_quantity,
     min_purchase_price: row.min_purchase_price,
     avg_purchase_price: row.avg_purchase_price,
@@ -290,6 +316,7 @@ const createProduct = async ({ payload, transaction } = {}) => {
       selling_price: payload.selling_price,
       mrp: payload.mrp,
       gst_percent: payload.gst_percent,
+      profit_margin_percent: payload.profit_margin_percent,
       min_stock_quantity: payload.min_stock_quantity || 0,
       tracking_type: trackingType,
       serial_required: serialRequired,
@@ -375,6 +402,7 @@ const updateProduct = async ({ id, payload, transaction } = {}) => {
         selling_price: payload.selling_price ?? product.selling_price,
         mrp: payload.mrp ?? product.mrp,
         gst_percent: payload.gst_percent ?? product.gst_percent,
+        profit_margin_percent: payload.profit_margin_percent !== undefined ? payload.profit_margin_percent : product.profit_margin_percent,
         min_stock_quantity: payload.min_stock_quantity !== undefined ? payload.min_stock_quantity : product.min_stock_quantity,
         properties: payload.properties !== undefined ? payload.properties : product.properties,
       },

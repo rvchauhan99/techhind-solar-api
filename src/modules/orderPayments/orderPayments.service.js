@@ -1,4 +1,5 @@
 const { Op } = require("sequelize");
+const AppError = require("../../common/errors/AppError.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 const notificationService = require("../notification/notification.service.js");
 
@@ -7,6 +8,40 @@ const orderPaymentService = {
     async createPayment(payload, transaction, req) {
         const models = getTenantModels(req);
         const { OrderPaymentDetail, Order } = models;
+
+        if (payload.order_id) {
+            const orderId = payload.order_id;
+            const order = await Order.findByPk(orderId, {
+                attributes: ["id", "project_cost"],
+                transaction,
+            });
+            if (!order) {
+                throw new AppError("Order not found", 404);
+            }
+            const totalPaidRaw = await OrderPaymentDetail.sum("payment_amount", {
+                where: {
+                    order_id: orderId,
+                    deleted_at: null,
+                    status: { [Op.in]: ["approved", "pending_approval"] },
+                },
+                transaction,
+            });
+            const totalPaid = Number(totalPaidRaw || 0);
+            const projectCost = Number(order.project_cost ?? 0);
+            const outstanding = Math.max(0, projectCost - totalPaid);
+            const newAmount = Number(payload.payment_amount);
+            if (!Number.isFinite(newAmount) || newAmount <= 0) {
+                throw new AppError("Payment amount must be a positive number", 400);
+            }
+            const EPS = 1e-6;
+            if (newAmount > outstanding + EPS) {
+                const cap = Math.round(outstanding * 100) / 100;
+                throw new AppError(
+                    `Payment amount cannot exceed outstanding balance (max Rs. ${cap.toLocaleString("en-IN")}).`,
+                    400
+                );
+            }
+        }
 
         // Defensive guard: avoid creating duplicate rows for the same payment
         // when the same request is accidentally sent multiple times in a short window.

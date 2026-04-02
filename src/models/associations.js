@@ -79,6 +79,10 @@ module.exports = (db) => {
     PurchaseReturnItem,
     PurchaseReturnSerial,
     PaymentFollowUp,
+    FacebookAccount,
+    FacebookPage,
+    FacebookLeadForm,
+    OrderCostAmendmentLog,
   } = db;
 
   // User ↔ Role
@@ -377,6 +381,10 @@ module.exports = (db) => {
     MarketingLead.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
     InquirySource.hasMany(MarketingLead, { foreignKey: "inquiry_source_id", as: "marketingLeads" });
   }
+  if (MarketingLead && db.Campaign) {
+    MarketingLead.belongsTo(db.Campaign, { foreignKey: "campaign_id", as: "campaign" });
+    db.Campaign.hasMany(MarketingLead, { foreignKey: "campaign_id", as: "marketingLeads" });
+  }
   if (MarketingLead && User) {
     MarketingLead.belongsTo(User, { foreignKey: "assigned_to", as: "assignedTo" });
     User.hasMany(MarketingLead, { foreignKey: "assigned_to", as: "assignedMarketingLeads" });
@@ -511,6 +519,18 @@ module.exports = (db) => {
     Order.belongsTo(User, { foreignKey: "fabricator_id", as: "orderFabricator" });
     Order.belongsTo(User, { foreignKey: "installer_id", as: "orderInstaller" });
     Order.belongsTo(User, { foreignKey: "fabricator_installer_id", as: "orderFabricatorInstaller" });
+  }
+  if (Order && OrderCostAmendmentLog) {
+    Order.hasMany(OrderCostAmendmentLog, { foreignKey: "order_id", as: "costAmendments" });
+    OrderCostAmendmentLog.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  }
+  if (OrderCostAmendmentLog && Product) {
+    OrderCostAmendmentLog.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+    Product.hasMany(OrderCostAmendmentLog, { foreignKey: "product_id", as: "orderCostAmendments" });
+  }
+  if (OrderCostAmendmentLog && User) {
+    OrderCostAmendmentLog.belongsTo(User, { foreignKey: "actor_user_id", as: "actorUser" });
+    User.hasMany(OrderCostAmendmentLog, { foreignKey: "actor_user_id", as: "orderCostAmendmentsActed" });
   }
   if (Order && InquirySource) {
     Order.belongsTo(InquirySource, { foreignKey: "inquiry_source_id", as: "inquirySource" });
@@ -1016,6 +1036,26 @@ module.exports = (db) => {
 
   if (User) {
     Object.values(db).forEach(ensureAuditAssociations);
+  }
+
+  // ─── Facebook Lead Ads associations ───────────────────────────────────────
+
+  // FacebookAccount ↔ User (who connected the account)
+  if (FacebookAccount && User) {
+    FacebookAccount.belongsTo(User, { foreignKey: "user_id", as: "user" });
+    User.hasMany(FacebookAccount, { foreignKey: "user_id", as: "facebookAccounts" });
+  }
+
+  // FacebookPage ↔ FacebookAccount (One account → many pages)
+  if (FacebookPage && FacebookAccount) {
+    FacebookPage.belongsTo(FacebookAccount, { foreignKey: "account_id", as: "account" });
+    FacebookAccount.hasMany(FacebookPage, { foreignKey: "account_id", as: "pages" });
+  }
+
+  // FacebookLeadForm ↔ FacebookPage (One page → many forms)
+  if (FacebookLeadForm && FacebookPage) {
+    FacebookLeadForm.belongsTo(FacebookPage, { foreignKey: "page_id", as: "page" });
+    FacebookPage.hasMany(FacebookLeadForm, { foreignKey: "page_id", as: "leadForms" });
   }
 
 };

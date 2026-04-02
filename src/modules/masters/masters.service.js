@@ -4,6 +4,15 @@ const AppError = require('../../common/errors/AppError.js');
 const { RESPONSE_STATUS_CODES } = require('../../common/utils/constants.js');
 const modelDisplayFields = require('../../common/utils/modelDisplayFields.json');
 const { getTenantModels } = require('../tenant/tenantModels.js');
+const configCacheService = require("../config-master/configCache.service.js");
+
+const PLATFORM_CONFIG_MODEL = "platform_config.model";
+
+async function refreshPlatformConfigCacheIfNeeded(model, req) {
+    if (String(model || "").toLowerCase() !== PLATFORM_CONFIG_MODEL) return;
+    configCacheService.invalidateTenantCache(req);
+    await configCacheService.getAllConfigs(req);
+}
 
 /**
  * Helper function to get model by name (tenant-aware).
@@ -528,6 +537,7 @@ const deleteMaster = async ({ model, id } = {}, req) => {
             { where: { id }, paranoid: false }
         );
     }
+    await refreshPlatformConfigCacheIfNeeded(model, req);
 
     return true;
 };
@@ -631,6 +641,7 @@ const createMaster = async ({ model, payload, userId } = {}, req) => {
         }
     }
 
+    await refreshPlatformConfigCacheIfNeeded(model, req);
     return created.toJSON();
 };
 
@@ -824,6 +835,7 @@ const updateMaster = async ({ model, id, updates, userId } = {}, req) => {
         }
     }
 
+    await refreshPlatformConfigCacheIfNeeded(model, req);
     return record.toJSON();
 };
 
@@ -968,6 +980,12 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
             { model: models.Supplier, as: 'supplier', attributes: ['id', 'supplier_name'], required: false },
         ];
     }
+    
+    const isProductMakeModel = model === 'product_make.model' || model === 'product_makes' || Model.tableName === 'product_makes';
+    if (isProductMakeModel && models.ProductType) {
+        findOptions.include = findOptions.include || [];
+        findOptions.include.push({ model: models.ProductType, as: 'productType', attributes: ['name'], required: false });
+    }
 
     // Apply limit: when id is present return at most one; when q is present default to 20, otherwise use provided limit or no limit (backward compat)
     const effectiveLimit = parsedId != null ? 1 : (limit != null ? Number(limit) : (searchTerm.length > 0 ? 20 : undefined));
@@ -983,6 +1001,9 @@ const getReferenceOptions = async ({ model, status, status_in, q = null, limit =
         let label = data[displayField] || data.name || data.code || data.title || data.label || `ID: ${data.id}`;
         if (isPurchaseOrderModel && data.supplier && data.supplier.supplier_name) {
             label = `${data.po_number || data.id} - ${data.supplier.supplier_name}`;
+        }
+        if (isProductMakeModel && data.productType && data.productType.name) {
+            label = `${label} (${data.productType.name})`;
         }
         // Return all the data fields, so frontend can use the actual field names (name, unit, etc.)
         return {

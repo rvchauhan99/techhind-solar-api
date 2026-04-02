@@ -32,7 +32,10 @@ const StockAdjustmentSerial = sequelize.define(
     indexes: [
       {
         unique: true,
-        fields: ["stock_serial_id"],
+        // Composite unique: same serial cannot appear twice in the same item,
+        // but CAN appear in different adjustments over its lifetime (lost → found → lost, etc.)
+        fields: ["stock_adjustment_item_id", "stock_serial_id"],
+        name: "stock_adjustment_serials_item_serial_unique",
       },
     ],
   }

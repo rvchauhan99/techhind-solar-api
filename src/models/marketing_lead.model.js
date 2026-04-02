@@ -126,6 +126,10 @@ const MarketingLead = sequelize.define(
       type: DataTypes.BIGINT,
       allowNull: true,
     },
+    campaign_id: {
+      type: DataTypes.BIGINT,
+      allowNull: true,
+    },
     campaign_name: {
       type: DataTypes.STRING,
       allowNull: true,
