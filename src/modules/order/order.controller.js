@@ -351,6 +351,7 @@ const getLatestPurchasePrices = asyncHandler(async (req, res) => {
     const result = await orderService.getLatestPurchasePrices({
         product_ids: productIds,
         transaction: req.transaction,
+        req,
     });
     return responseHandler.sendSuccess(res, result, "Latest purchase prices fetched", 200);
 });
@@ -481,6 +482,7 @@ const update = asyncHandler(async (req, res) => {
         payload,
         transaction: req.transaction,
         user: req.user,
+        req,
     });
     return responseHandler.sendSuccess(res, updated, "Order updated", 200);
 });
