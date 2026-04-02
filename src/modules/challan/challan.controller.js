@@ -36,6 +36,8 @@ const resolveDeliveryChallanVisibilityContext = async (req) => {
     return { listingCriteria, enforcedHandledByIds: teamUserIds };
 };
 
+const configCacheService = require("../config-master/configCache.service.js");
+
 const list = asyncHandler(async (req, res) => {
     const {
         order_id,
@@ -204,10 +206,13 @@ const generatePDF = asyncHandler(async (req, res) => {
 
 const create = asyncHandler(async (req, res) => {
     const payload = { ...req.body };
+    const key = "delivery_challan.serial_scan_required";
+    const serialScanRequired = await configCacheService.getConfigValue(req, key, true);
     const created = await challanService.createChallan({
         payload,
         user_id: req.user?.id,
         transaction: req.transaction,
+        serialScanRequired: serialScanRequired === true,
     });
     return responseHandler.sendSuccess(res, created, "Challan created", 201);
 });
@@ -339,6 +344,12 @@ const getDeliveryStatus = asyncHandler(async (req, res) => {
     );
 });
 
+const getSerialScanRequired = asyncHandler(async (req, res) => {
+    const key = "delivery_challan.serial_scan_required";
+    const value = await configCacheService.getConfigValue(req, key, true);
+    return responseHandler.sendSuccess(res, { required: value === true }, "Config fetched", 200);
+});
+
 module.exports = {
     list,
     getById,
@@ -350,4 +361,5 @@ module.exports = {
     getNextChallanNumber,
     getQuotationProducts,
     getDeliveryStatus,
+    getSerialScanRequired,
 };

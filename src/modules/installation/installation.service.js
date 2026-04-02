@@ -75,6 +75,166 @@ const createOrUpdate = async (orderId, payload, options = {}) => {
         const data = { ...payload };
         delete data.complete;
 
+        // 1. Reconciliation Logic
+        const installationScans = data.installation_scans || {}; // { product_id: [serial1, serial2] }
+        const forceAdjust = !!data.force_adjust;
+        const forceAdjustReason = data.force_adjust_reason || "";
+
+        if (complete) {
+            // A. Determine required counts from order.bom_snapshot (shipped/delivered qty)
+            const deliveredSerialsMap = await challanService.getOrderDeliveredSerials(orderId);
+            const requiredProducts = Object.keys(deliveredSerialsMap);
+
+            const mismatches = [];
+            const adjustments = [];
+
+            for (const pid of requiredProducts) {
+                const deliveredSerials = deliveredSerialsMap[pid] || [];
+                const scannedSerials = installationScans[pid] || [];
+                const requiredCount = deliveredSerials.length;
+
+                if (scannedSerials.length !== requiredCount) {
+                    throw new Error(`Product #${pid}: Required ${requiredCount} scans, but got ${scannedSerials.length}`);
+                }
+
+                // Compare scanned vs delivered
+                const deliveredSerialNumbers = deliveredSerials.map(s => s.serial_number.toLowerCase());
+                const scannedSerialNumbers = scannedSerials.map(s => s.toLowerCase());
+
+                const missingFromDelivered = scannedSerialNumbers.filter(sn => !deliveredSerialNumbers.includes(sn));
+                const extraInDelivered = deliveredSerialNumbers.filter(sn => !scannedSerialNumbers.includes(sn));
+
+                if (missingFromDelivered.length > 0) {
+                    if (!forceAdjust) {
+                        mismatches.push({
+                            product_id: pid,
+                            missing_serials: missingFromDelivered,
+                            expected_serials: extraInDelivered,
+                        });
+                    } else {
+                        // Prepare adjustments for force-adjust
+                        adjustments.push({
+                            product_id: pid,
+                            to_issue: missingFromDelivered,
+                            to_return: extraInDelivered,
+                        });
+                    }
+                }
+            }
+
+            if (mismatches.length > 0) {
+                const error = new Error("Serial mismatch detected");
+                error.statusCode = 400;
+                error.code = "SERIAL_MISMATCH";
+                error.mismatches = mismatches;
+                error.can_force_adjust = true;
+                throw error;
+            }
+
+            // B. Execute Force Adjustments if requested
+            if (forceAdjust && adjustments.length > 0) {
+                if (!forceAdjustReason) {
+                    throw new Error("Force adjust reason is required");
+                }
+                const { StockSerial, ChallanItemSerial, Stock } = models;
+
+                for (const adj of adjustments) {
+                    const pid = adj.product_id;
+                    const product = await models.Product.findByPk(pid, { transaction: t });
+                    
+                    // 1. Return expected-but-not-installed serials to AVAILABLE
+                    for (const sn of adj.to_return) {
+                        const ss = await StockSerial.findOne({
+                            where: { serial_number: { [Op.iLike]: sn }, product_id: pid, status: SERIAL_STATUS.ISSUED },
+                            transaction: t,
+                            lock: t.LOCK.UPDATE,
+                        });
+                        if (ss) {
+                            const warehouseId = ss.warehouse_id;
+                            const stock = await Stock.findOne({ where: { product_id: pid, warehouse_id: warehouseId }, transaction: t });
+                            
+                            await ss.update({
+                                status: SERIAL_STATUS.AVAILABLE,
+                                outward_date: null,
+                                source_type: null,
+                                source_id: null,
+                                issued_against: null,
+                                reference_number: null,
+                            }, { transaction: t });
+
+                            // Increment stock back
+                            if (stock) {
+                                await stock.update({
+                                    quantity_available: Number(stock.quantity_available) + 1,
+                                    quantity_on_hand: Number(stock.quantity_on_hand) + 1,
+                                }, { transaction: t });
+                            }
+
+                            // Deactivate old challan link
+                            await ChallanItemSerial.update({ is_active: false }, {
+                                where: { order_id: orderId, product_id: pid, serial_number: { [Op.iLike]: sn } },
+                                transaction: t,
+                            });
+                        }
+                    }
+
+                    // 2. Issue actually-installed-but-not-delivered serials
+                    for (const sn of adj.to_issue) {
+                        const ss = await StockSerial.findOne({
+                            where: { serial_number: { [Op.iLike]: sn }, product_id: pid, status: SERIAL_STATUS.AVAILABLE },
+                            transaction: t,
+                            lock: t.LOCK.UPDATE,
+                        });
+                        if (!ss) {
+                            throw new Error(`Serial '${sn}' for product #${pid} is not available in stock for force-adjust`);
+                        }
+
+                        const warehouseId = ss.warehouse_id;
+                        const stock = await Stock.findOne({ where: { product_id: pid, warehouse_id: warehouseId }, transaction: t });
+
+                        await ss.update({
+                            status: SERIAL_STATUS.ISSUED,
+                            outward_date: new Date(),
+                            source_type: TRANSACTION_TYPE.INSTALLATION_FORCE_ADJUST,
+                            source_id: orderId,
+                            issued_against: "customer_order",
+                            reference_number: order.order_number,
+                        }, { transaction: t });
+
+                        // Decrement stock
+                        if (stock) {
+                            await stock.update({
+                                quantity_available: Number(stock.quantity_available) - 1,
+                                quantity_on_hand: Number(stock.quantity_on_hand) - 1,
+                            }, { transaction: t });
+                        }
+
+                        // Create new normalized challan link (link to the latest active challan for this order/product)
+                        const latestChallanItem = await models.ChallanItems.findOne({
+                            include: [{ model: models.Challan, as: "challan", where: { order_id: orderId, deleted_at: null, is_reversed: false } }],
+                            where: { product_id: pid },
+                            order: [["id", "DESC"]],
+                            transaction: t,
+                        });
+
+                        if (latestChallanItem) {
+                            await ChallanItemSerial.create({
+                                challan_id: latestChallanItem.challan_id,
+                                challan_item_id: latestChallanItem.id,
+                                order_id: orderId,
+                                product_id: pid,
+                                serial_number: sn,
+                                stock_serial_id: ss.id,
+                                source: "installation_force_adjust",
+                                is_active: true,
+                                remarks: forceAdjustReason,
+                            }, { transaction: t });
+                        }
+                    }
+                }
+            }
+        }
+
         const installerId = data.installer_id != null ? data.installer_id : order.installer_id || order.fabricator_installer_id;
         if (installerId != null) data.installer_id = installerId;
 

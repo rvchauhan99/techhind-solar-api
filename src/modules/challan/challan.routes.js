@@ -10,6 +10,7 @@ const router = Router();
 // so challan is accessible from Order, Confirm Orders, and Closed Orders pages without a separate challan module.
 
 router.get("/", controller.list);
+router.get("/serial-scan-required", controller.getSerialScanRequired);
 router.get("/next-challan-number", controller.getNextChallanNumber);
 router.get("/quotation-products", controller.getQuotationProducts);
 router.get("/delivery-status", controller.getDeliveryStatus);

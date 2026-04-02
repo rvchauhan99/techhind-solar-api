@@ -3,6 +3,7 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler.js");
 const responseHandler = require("../../common/utils/responseHandler.js");
 const installationService = require("./installation.service.js");
+const challanService = require("../challan/challan.service.js");
 const orderService = require("../order/order.service.js");
 const { resolveOrderVisibilityContext } = require("../order/orderVisibilityContext.js");
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
@@ -55,13 +56,32 @@ const createOrUpdate = asyncHandler(async (req, res) => {
         allowedManagedWarehouseIds,
     });
     const payload = { ...req.body };
-    const result = await installationService.createOrUpdate(orderId, payload, {
-        transaction: req.transaction,
-    });
-    return responseHandler.sendSuccess(res, result, "Installation saved", 200);
+    try {
+        const result = await installationService.createOrUpdate(orderId, payload, {
+            transaction: req.transaction,
+        });
+        return responseHandler.sendSuccess(res, result, "Installation saved", 200);
+    } catch (error) {
+        if (error.code === "SERIAL_MISMATCH") {
+            return responseHandler.sendError(res, {
+                message: error.message,
+                code: error.code,
+                mismatches: error.mismatches,
+                can_force_adjust: error.can_force_adjust,
+            }, 400);
+        }
+        throw error;
+    }
+});
+
+const getDeliveredSerials = asyncHandler(async (req, res) => {
+    const orderId = req.params.id;
+    const serials = await challanService.getOrderDeliveredSerials(orderId);
+    return responseHandler.sendSuccess(res, serials, "Delivered serials fetched", 200);
 });
 
 module.exports = {
     getByOrderId,
     createOrUpdate,
+    getDeliveredSerials,
 };
