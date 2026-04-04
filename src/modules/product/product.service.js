@@ -3,10 +3,17 @@
 const ExcelJS = require("exceljs");
 const { parse } = require("csv-parse/sync");
 const db = require("../../models/index.js");
-const { Op } = require("sequelize");
+const { Op, fn, col, where: sqlWhere } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
+
+/** Empty string → null for optional DECIMAL columns (PostgreSQL rejects '' for numeric). */
+const optionalDecimal = (v) => {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+};
 
 const buildStringCondition = (field, value, op = "contains") => {
   const val = String(value || "").trim();
@@ -64,6 +71,7 @@ const listProducts = async ({
   min_stock_quantity_to,
   is_active: isActive = null,
   visibility = null,
+  product_type_ci: productTypeCi = null,
 } = {}) => {
   const models = getTenantModels();
   const { Product, ProductType, ProductMake, MeasurementUnit } = models;
@@ -155,12 +163,28 @@ const listProducts = async ({
     where[Op.and].push({ product_make_id: validProductMakeId });
   }
 
+  // product_type_ci: exact case-insensitive match on TRIM(product_types.name); overrides product_type_name on the include.
+  const typeCiRaw = productTypeCi != null && String(productTypeCi).trim() !== "" ? String(productTypeCi).trim().toLowerCase() : "";
+  const typeCiSlug = /^[a-z0-9_\s]+$/.test(typeCiRaw) ? typeCiRaw : "";
+
+  let productTypeRequired = !!productTypeName;
+  let productTypeWhereClause = null;
+  if (typeCiSlug) {
+    productTypeRequired = true;
+    productTypeWhereClause = sqlWhere(
+      fn("LOWER", fn("TRIM", col("productType.name"))),
+      typeCiSlug
+    );
+  } else if (productTypeName) {
+    productTypeWhereClause = { name: { [Op.iLike]: `%${productTypeName}%` } };
+  }
+
   const productTypeInclude = {
     model: ProductType,
     as: "productType",
     attributes: ["id", "name"],
-    required: !!productTypeName,
-    ...(productTypeName && { where: { name: { [Op.iLike]: `%${productTypeName}%` } } }),
+    required: productTypeRequired,
+    ...(productTypeWhereClause && { where: productTypeWhereClause }),
   };
   const productMakeInclude = {
     model: ProductMake,
@@ -298,8 +322,11 @@ const createProduct = async ({ payload, transaction } = {}) => {
     const serialRequired = trackingType === "SERIAL";
     if (serialRequired) {
       const len = payload.serial_number_length;
-      if (len == null || len === "" || Number(len) < 1) {
-        throw new Error("Serial number length is required and must be at least 1 when product is serialized");
+      if (len !== undefined && len !== null && len !== "") {
+        const n = Number(len);
+        if (Number.isNaN(n) || n < 1) {
+          throw new Error("Serial number length must be a positive number when provided");
+        }
       }
     }
 
@@ -316,11 +343,14 @@ const createProduct = async ({ payload, transaction } = {}) => {
       selling_price: payload.selling_price,
       mrp: payload.mrp,
       gst_percent: payload.gst_percent,
-      profit_margin_percent: payload.profit_margin_percent,
+      profit_margin_percent: optionalDecimal(payload.profit_margin_percent),
       min_stock_quantity: payload.min_stock_quantity || 0,
       tracking_type: trackingType,
       serial_required: serialRequired,
-      serial_number_length: payload.serial_number_length !== undefined ? payload.serial_number_length : null,
+      serial_number_length:
+        payload.serial_number_length === undefined || payload.serial_number_length === "" || payload.serial_number_length === null
+          ? null
+          : Number(payload.serial_number_length),
       properties: payload.properties || null,
     };
 
@@ -380,8 +410,11 @@ const updateProduct = async ({ id, payload, transaction } = {}) => {
 
     if (serialRequired && payload.serial_number_length !== undefined) {
       const len = payload.serial_number_length;
-      if (len == null || len === "" || Number(len) < 1) {
-        throw new Error("Serial number length must be at least 1 when product is serialized");
+      if (len !== null && len !== "") {
+        const n = Number(len);
+        if (Number.isNaN(n) || n < 1) {
+          throw new Error("Serial number length must be a positive number when provided");
+        }
       }
     }
 
@@ -390,7 +423,12 @@ const updateProduct = async ({ id, payload, transaction } = {}) => {
         product_type_id: payload.product_type_id ?? product.product_type_id,
         tracking_type: trackingType,
         serial_required: serialRequired,
-        serial_number_length: payload.serial_number_length !== undefined ? payload.serial_number_length : product.serial_number_length,
+        serial_number_length:
+          payload.serial_number_length === undefined
+            ? product.serial_number_length
+            : payload.serial_number_length === "" || payload.serial_number_length === null
+              ? null
+              : Number(payload.serial_number_length),
         product_make_id: payload.product_make_id ?? product.product_make_id,
         product_name: payload.product_name ?? product.product_name,
         product_description: payload.product_description !== undefined ? payload.product_description : product.product_description,
@@ -402,7 +440,10 @@ const updateProduct = async ({ id, payload, transaction } = {}) => {
         selling_price: payload.selling_price ?? product.selling_price,
         mrp: payload.mrp ?? product.mrp,
         gst_percent: payload.gst_percent ?? product.gst_percent,
-        profit_margin_percent: payload.profit_margin_percent !== undefined ? payload.profit_margin_percent : product.profit_margin_percent,
+        profit_margin_percent:
+          payload.profit_margin_percent === undefined
+            ? product.profit_margin_percent
+            : optionalDecimal(payload.profit_margin_percent),
         min_stock_quantity: payload.min_stock_quantity !== undefined ? payload.min_stock_quantity : product.min_stock_quantity,
         properties: payload.properties !== undefined ? payload.properties : product.properties,
       },

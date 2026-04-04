@@ -2,7 +2,7 @@
 
 const ExcelJS = require("exceljs");
 const db = require("../../models/index.js");
-const { Op, QueryTypes } = require("sequelize");
+const { Op, QueryTypes, fn, col, where: sqlWhere } = require("sequelize");
 const { INQUIRY_STATUS, QUOTATION_STATUS } = require("../../common/utils/constants.js");
 const { getBomLineProduct } = require("../../common/utils/bomUtils.js");
 const { getTenantModels } = require("../tenant/tenantModels.js");
@@ -304,6 +304,15 @@ const getTotalPaidLiteral = (models) =>
         WHERE ${PAID_PAYMENT_WHERE}
     )`);
 
+/** Pseudo-status "active": in pipeline but not pending (see /order for pending-only list). */
+const ORDER_ACTIVE_STATUS_NOT_IN = ["completed", "cancelled", "pending"];
+
+const parseOrderProductFk = (v) => {
+    if (v == null || String(v).trim() === "") return null;
+    const n = Number(String(v).trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
+};
+
 const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
     const where = { deleted_at: null };
 
@@ -322,11 +331,23 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         customer_name,
         mobile_number,
         current_stage_key,
+        capacity,
+        capacity_op,
+        capacity_to,
+        cancelled_stage,
+        cancelled_at_stage_key,
+        solar_panel_id,
+        inverter_id,
     } = filters || {};
+
+    const panelFk = parseOrderProductFk(solar_panel_id);
+    if (panelFk != null) where.solar_panel_id = panelFk;
+    const invFk = parseOrderProductFk(inverter_id);
+    if (invFk != null) where.inverter_id = invFk;
 
     if (status && status !== "all") {
         if (status === "active") {
-            where.status = { [Op.notIn]: ["completed", "cancelled"] };
+            where.status = { [Op.notIn]: ORDER_ACTIVE_STATUS_NOT_IN };
         } else if (Array.isArray(status)) {
             where.status = { [Op.in]: status };
         } else {
@@ -392,6 +413,22 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         if (Reflect.ownKeys(where.order_date).length === 0) delete where.order_date;
     }
 
+    if (capacity || capacity_to) {
+        const cap = parseFloat(capacity);
+        const capTo = parseFloat(capacity_to);
+        if (!Number.isNaN(cap) || !Number.isNaN(capTo)) {
+            const cond = {};
+            const opStr = (capacity_op || "").toLowerCase();
+            if (opStr === "between" && !Number.isNaN(cap) && !Number.isNaN(capTo)) cond[Op.between] = [cap, capTo];
+            else if (opStr === "gt" && !Number.isNaN(cap)) cond[Op.gt] = cap;
+            else if (opStr === "lt" && !Number.isNaN(cap)) cond[Op.lt] = cap;
+            else if (opStr === "gte" && !Number.isNaN(cap)) cond[Op.gte] = cap;
+            else if (opStr === "lte" && !Number.isNaN(cap)) cond[Op.lte] = cap;
+            else if (!Number.isNaN(cap)) cond[Op.eq] = cap;
+            if (Reflect.ownKeys(cond).length > 0) where.capacity = cond;
+        }
+    }
+
     if (Array.isArray(enforcedHandledByIds)) {
         if (enforcedHandledByIds.length === 0) {
             where.handled_by = { [Op.in]: [-1] };
@@ -418,7 +455,35 @@ const buildDashboardWhere = (filters = {}, enforcedHandledByIds, models) => {
         where[Op.and].push(literal);
     }
 
+    if (where.status === "cancelled") {
+        if (cancelled_stage) {
+            where.cancelled_stage = cancelled_stage;
+        }
+        if (cancelled_at_stage_key != null && String(cancelled_at_stage_key).trim() !== "") {
+            const ckey = String(cancelled_at_stage_key).trim();
+            if (ckey === "__none__") {
+                where.cancelled_at_stage_key = { [Op.is]: null };
+            } else {
+                where.cancelled_at_stage_key = ckey;
+            }
+        }
+    }
+
     return where;
+};
+
+/** Joins preserved for filters; joined tables contribute no SELECT columns (PostgreSQL disallows ungrouped joined cols with GROUP BY/DISTINCT aggregates). */
+const stripIncludeAttributesForSummary = (includes) => {
+    if (!Array.isArray(includes)) return [];
+    return includes.map((inc) => {
+        const next = { ...inc, attributes: [] };
+        if (Array.isArray(inc.include) && inc.include.length) {
+            next.include = stripIncludeAttributesForSummary(inc.include);
+        } else {
+            delete next.include;
+        }
+        return next;
+    });
 };
 
 const listOrders = async ({
@@ -449,7 +514,10 @@ const listOrders = async ({
     handled_by,
     cancelled_stage,
     cancelled_at_stage_key,
+    solar_panel_id,
+    inverter_id,
     enforced_handled_by_ids: enforcedHandledByIds,
+    include_list_summary = false,
 } = {}) => {
     const models = getTenantModels();
     const {
@@ -461,9 +529,14 @@ const listOrders = async ({
 
     const where = { deleted_at: null };
 
+    const listPanelFk = parseOrderProductFk(solar_panel_id);
+    if (listPanelFk != null) where.solar_panel_id = listPanelFk;
+    const listInvFk = parseOrderProductFk(inverter_id);
+    if (listInvFk != null) where.inverter_id = listInvFk;
+
     if (status && status !== "all") {
         if (status === "active") {
-            where.status = { [Op.notIn]: ["completed", "cancelled"] };
+            where.status = { [Op.notIn]: ORDER_ACTIVE_STATUS_NOT_IN };
         } else {
             where.status = status;
         }
@@ -754,178 +827,264 @@ const listOrders = async ({
         };
     });
 
+    const meta = {
+        page,
+        limit,
+        total: count,
+        pages: limit > 0 ? Math.ceil(count / limit) : 0,
+    };
+
+    if (include_list_summary) {
+        meta.summary = {
+            total_orders: Number(count),
+            total_capacity_kw: 0,
+            total_project_cost: 0,
+            by_stage: [],
+        };
+        try {
+            const summaryFindOptions = {
+                attributes: [
+                    [models.sequelize.col("Order.id"), "id"],
+                    [models.sequelize.col("Order.capacity"), "capacity"],
+                    [models.sequelize.col("Order.project_cost"), "project_cost"],
+                    [models.sequelize.col("Order.current_stage_key"), "current_stage_key"],
+                ],
+                where,
+                include: stripIncludeAttributesForSummary(includeList),
+                distinct: true,
+                raw: true,
+                subQuery: false,
+            };
+            if (searchReplacements) summaryFindOptions.replacements = searchReplacements;
+            const rawRows = await Order.findAll(summaryFindOptions);
+            const seenIds = new Set();
+            const perOrderRows = [];
+            for (const r of rawRows) {
+                const id = r.id;
+                if (id == null || seenIds.has(id)) continue;
+                seenIds.add(id);
+                perOrderRows.push(r);
+            }
+
+            let total_capacity_kw = 0;
+            let total_project_cost = 0;
+            const byStageMap = new Map();
+            for (const r of perOrderRows) {
+                const cap = Number(r.capacity ?? 0);
+                const pc = Number(r.project_cost ?? 0);
+                total_capacity_kw += cap;
+                total_project_cost += pc;
+                const stageKey = r.current_stage_key != null ? String(r.current_stage_key) : "unknown";
+                if (!byStageMap.has(stageKey)) {
+                    byStageMap.set(stageKey, { count: 0, total_capacity_kw: 0 });
+                }
+                const agg = byStageMap.get(stageKey);
+                agg.count += 1;
+                agg.total_capacity_kw += cap;
+            }
+
+            meta.summary = {
+                total_orders: Number(count),
+                total_capacity_kw,
+                total_project_cost,
+                by_stage: Array.from(byStageMap.entries()).map(([current_stage_key, v]) => ({
+                    current_stage_key,
+                    count: v.count,
+                    total_capacity_kw: v.total_capacity_kw,
+                })),
+            };
+        } catch (err) {
+            console.error("listOrders include_list_summary failed:", err);
+            meta.summary = {
+                total_orders: Number(count),
+                by_stage: [],
+            };
+        }
+    }
+
     return {
         data,
-        meta: {
-            page,
-            limit,
-            total: count,
-            pages: limit > 0 ? Math.ceil(count / limit) : 0,
-        },
+        meta,
     };
 };
 
-const getOrdersDashboardKpis = async ({ filters = {}, enforced_handled_by_ids } = {}) => {
+const normalizeDashboardKpiScope = (raw) => {
+    const s = String(raw ?? "all").toLowerCase().trim();
+    if (["pending", "active", "completed", "cancelled", "all"].includes(s)) return s;
+    return "all";
+};
+
+const dashboardKpiAggregateAttributes = (models) => [
+    [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
+    [
+        models.sequelize.fn(
+            "COALESCE",
+            models.sequelize.fn("SUM", models.sequelize.col("capacity")),
+            0
+        ),
+        "total_capacity_kw",
+    ],
+    [
+        models.sequelize.fn(
+            "COALESCE",
+            models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
+            0
+        ),
+        "total_project_cost",
+    ],
+];
+
+const mapDashboardKpiRow = (row) => ({
+    total_orders: Number(row?.total_orders || 0),
+    total_capacity_kw: Number(row?.total_capacity_kw || 0),
+    total_project_cost: Number(row?.total_project_cost || 0),
+});
+
+const emptyDashboardKpiSlice = () => ({
+    total_orders: 0,
+    total_capacity_kw: 0,
+    total_project_cost: 0,
+});
+
+const getOrdersDashboardKpis = async ({
+    filters = {},
+    enforced_handled_by_ids,
+    kpi_scope: kpiScopeRaw,
+} = {}) => {
+    const kpi_scope = normalizeDashboardKpiScope(kpiScopeRaw);
     const models = getTenantModels();
     const { Order } = models;
     const where = buildDashboardWhere(filters, enforced_handled_by_ids, models);
-
-    const [totalsRow] = await Order.findAll({
-        where,
-        attributes: [
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
-            [
-                models.sequelize.fn(
-                    "COALESCE",
-                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
-                    0
-                ),
-                "total_capacity_kw",
-            ],
-            [
-                models.sequelize.fn(
-                    "COALESCE",
-                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
-                    0
-                ),
-                "total_project_cost",
-            ],
-        ],
-        raw: true,
-    });
+    const aggAttrs = dashboardKpiAggregateAttributes(models);
 
     const baseWhere = { ...where };
     delete baseWhere.status;
-    const whereActive = { ...baseWhere, status: { [Op.notIn]: ["completed", "cancelled"] } };
-    const [activeRow] = await Order.findAll({
-        where: whereActive,
-        attributes: [
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
-            [
-                models.sequelize.fn(
-                    "COALESCE",
-                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
-                    0
-                ),
-                "total_capacity_kw",
-            ],
-            [
-                models.sequelize.fn(
-                    "COALESCE",
-                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
-                    0
-                ),
-                "total_project_cost",
-            ],
-        ],
-        raw: true,
-    });
 
-    const whereCompleted = { ...baseWhere, status: "completed" };
-    const [completedRow] = await Order.findAll({
-        where: whereCompleted,
-        attributes: [
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "total_orders"],
-            [
-                models.sequelize.fn(
-                    "COALESCE",
-                    models.sequelize.fn("SUM", models.sequelize.col("capacity")),
-                    0
-                ),
-                "total_capacity_kw",
-            ],
-            [
-                models.sequelize.fn(
-                    "COALESCE",
-                    models.sequelize.fn("SUM", models.sequelize.col("project_cost")),
-                    0
-                ),
-                "total_project_cost",
-            ],
-        ],
-        raw: true,
-    });
+    const fetchSlice = async (whereClause) => {
+        const [row] = await Order.findAll({
+            where: whereClause,
+            attributes: aggAttrs,
+            raw: true,
+        });
+        return mapDashboardKpiRow(row);
+    };
 
-    const redFlagWhere = { ...whereCompleted, current_stage_key: "order_completed" };
-    const redFlagLiteral = getPaymentOutstandingLiteral(models);
-    redFlagWhere[Op.and] = Array.isArray(redFlagWhere[Op.and])
-        ? [...redFlagWhere[Op.and], redFlagLiteral]
-        : [redFlagLiteral];
-    const redFlagCount = await Order.count({ where: redFlagWhere });
+    let totals = emptyDashboardKpiSlice();
+    let active = emptyDashboardKpiSlice();
+    let completed = emptyDashboardKpiSlice();
+    let pending = emptyDashboardKpiSlice();
+    let cancelled = emptyDashboardKpiSlice();
+    let red_flag_payment_outstanding = 0;
+    let by_status = [];
+    let by_branch = [];
+    let by_stage = [];
+    let by_delivery_status = [];
 
-    const byStatus = await Order.findAll({
-        where,
-        attributes: [
-            "status",
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
-        ],
-        group: ["status"],
-        raw: true,
-    });
+    if (kpi_scope === "all") {
+        const [totalsRow] = await Order.findAll({
+            where,
+            attributes: aggAttrs,
+            raw: true,
+        });
+        totals = mapDashboardKpiRow(totalsRow);
 
-    const byBranch = await Order.findAll({
-        where,
-        attributes: [
-            "branch_id",
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
-        ],
-        group: ["branch_id"],
-        raw: true,
-    });
+        active = await fetchSlice({ ...baseWhere, status: "confirmed" });
+        completed = await fetchSlice({ ...baseWhere, current_stage_key: "order_completed" });
+        pending = await fetchSlice({ ...baseWhere, status: "pending" });
+        cancelled = await fetchSlice({ ...baseWhere, status: "cancelled" });
 
-    const byStage = await Order.findAll({
-        where,
-        attributes: [
-            "current_stage_key",
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
-        ],
-        group: ["current_stage_key"],
-        raw: true,
-    });
+        const whereCompleted = { ...baseWhere, current_stage_key: "order_completed" };
+        const redFlagWhere = {
+            ...whereCompleted,
+            status: "completed",
+            current_stage_key: "order_completed",
+        };
+        const redFlagLiteral = getPaymentOutstandingLiteral(models);
+        redFlagWhere[Op.and] = Array.isArray(redFlagWhere[Op.and])
+            ? [...redFlagWhere[Op.and], redFlagLiteral]
+            : [redFlagLiteral];
+        red_flag_payment_outstanding = Number((await Order.count({ where: redFlagWhere })) || 0);
 
-    const byDeliveryStatus = await Order.findAll({
-        where,
-        attributes: [
-            "delivery_status",
-            [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
-        ],
-        group: ["delivery_status"],
-        raw: true,
-    });
+        const [byStatusRows, byBranchRows, byStageRows, byDeliveryRows] = await Promise.all([
+            Order.findAll({
+                where,
+                attributes: [
+                    "status",
+                    [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+                ],
+                group: ["status"],
+                raw: true,
+            }),
+            Order.findAll({
+                where,
+                attributes: [
+                    "branch_id",
+                    [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+                ],
+                group: ["branch_id"],
+                raw: true,
+            }),
+            Order.findAll({
+                where,
+                attributes: [
+                    "current_stage_key",
+                    [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+                ],
+                group: ["current_stage_key"],
+                raw: true,
+            }),
+            Order.findAll({
+                where,
+                attributes: [
+                    "delivery_status",
+                    [models.sequelize.fn("COUNT", models.sequelize.col("id")), "count"],
+                ],
+                group: ["delivery_status"],
+                raw: true,
+            }),
+        ]);
 
-    return {
-        totals: {
-            total_orders: Number(totalsRow?.total_orders || 0),
-            total_capacity_kw: Number(totalsRow?.total_capacity_kw || 0),
-            total_project_cost: Number(totalsRow?.total_project_cost || 0),
-        },
-        active: {
-            total_orders: Number(activeRow?.total_orders || 0),
-            total_capacity_kw: Number(activeRow?.total_capacity_kw || 0),
-            total_project_cost: Number(activeRow?.total_project_cost || 0),
-        },
-        completed: {
-            total_orders: Number(completedRow?.total_orders || 0),
-            total_capacity_kw: Number(completedRow?.total_capacity_kw || 0),
-            total_project_cost: Number(completedRow?.total_project_cost || 0),
-        },
-        red_flag_payment_outstanding: Number(redFlagCount || 0),
-        by_status: byStatus.map((row) => ({
+        by_status = byStatusRows.map((row) => ({
             status: row.status,
             count: Number(row.count || 0),
-        })),
-        by_branch: byBranch.map((row) => ({
+        }));
+        by_branch = byBranchRows.map((row) => ({
             branch_id: row.branch_id,
             count: Number(row.count || 0),
-        })),
-        by_stage: byStage.map((row) => ({
+        }));
+        by_stage = byStageRows.map((row) => ({
             current_stage_key: row.current_stage_key,
             count: Number(row.count || 0),
-        })),
-        by_delivery_status: byDeliveryStatus.map((row) => ({
+        }));
+        by_delivery_status = byDeliveryRows.map((row) => ({
             delivery_status: row.delivery_status,
             count: Number(row.count || 0),
-        })),
+        }));
+    } else if (kpi_scope === "pending") {
+        pending = await fetchSlice({ ...baseWhere, status: "pending" });
+        totals = { ...pending };
+    } else if (kpi_scope === "active") {
+        active = await fetchSlice({ ...baseWhere, status: "confirmed" });
+        totals = { ...active };
+    } else if (kpi_scope === "completed") {
+        completed = await fetchSlice({ ...baseWhere, current_stage_key: "order_completed" });
+        totals = { ...completed };
+    } else if (kpi_scope === "cancelled") {
+        cancelled = await fetchSlice({ ...baseWhere, status: "cancelled" });
+        totals = { ...cancelled };
+    }
+
+    return {
+        totals,
+        active,
+        completed,
+        pending,
+        cancelled,
+        red_flag_payment_outstanding,
+        by_status,
+        by_branch,
+        by_stage,
+        by_delivery_status,
     };
 };
 
@@ -3356,45 +3515,36 @@ const listFabricationInstallationOrders = async ({
     return result;
 };
 
-const getSolarPanels = async () => {
+const listActiveProductsByTypeCi = async (typeCi) => {
     const models = getTenantModels();
-    const { Product } = models;
+    const { Product, ProductType } = models;
+    const slug = String(typeCi || "").trim().toLowerCase();
+    if (!slug || !/^[a-z0-9_\s]+$/.test(slug)) return [];
     const products = await Product.findAll({
-        where: {
-            product_type_id: 10,
-            deleted_at: null,
-            is_active: true
-        },
-        order: [['product_name', 'ASC']]
+        where: { deleted_at: null, is_active: true },
+        include: [
+            {
+                model: ProductType,
+                as: "productType",
+                attributes: [],
+                required: true,
+                where: sqlWhere(fn("LOWER", fn("TRIM", col("productType.name"))), slug),
+            },
+        ],
+        order: [["product_name", "ASC"]],
     });
 
-    return products.map(p => ({
+    return products.map((p) => ({
         id: p.id,
         label: p.product_name,
         value: p.id,
-        ...p.toJSON()
+        ...p.toJSON(),
     }));
 };
 
-const getInverters = async () => {
-    const models = getTenantModels();
-    const { Product } = models;
-    const products = await Product.findAll({
-        where: {
-            product_type_id: 9,
-            deleted_at: null,
-            is_active: true
-        },
-        order: [['product_name', 'ASC']]
-    });
+const getSolarPanels = async () => listActiveProductsByTypeCi("panel");
 
-    return products.map(p => ({
-        id: p.id,
-        label: p.product_name,
-        value: p.id,
-        ...p.toJSON()
-    }));
-};
+const getInverters = async () => listActiveProductsByTypeCi("inverter");
 
 /**
  * Cancel an order.
