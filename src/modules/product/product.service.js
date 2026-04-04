@@ -3,7 +3,7 @@
 const ExcelJS = require("exceljs");
 const { parse } = require("csv-parse/sync");
 const db = require("../../models/index.js");
-const { Op } = require("sequelize");
+const { Op, fn, col, where: sqlWhere } = require("sequelize");
 const { getTenantModels } = require("../tenant/tenantModels.js");
 
 const VALID_STRING_OPS = ["contains", "notContains", "equals", "notEquals", "startsWith", "endsWith"];
@@ -64,6 +64,7 @@ const listProducts = async ({
   min_stock_quantity_to,
   is_active: isActive = null,
   visibility = null,
+  product_type_ci: productTypeCi = null,
 } = {}) => {
   const models = getTenantModels();
   const { Product, ProductType, ProductMake, MeasurementUnit } = models;
@@ -155,12 +156,28 @@ const listProducts = async ({
     where[Op.and].push({ product_make_id: validProductMakeId });
   }
 
+  // product_type_ci: exact case-insensitive match on TRIM(product_types.name); overrides product_type_name on the include.
+  const typeCiRaw = productTypeCi != null && String(productTypeCi).trim() !== "" ? String(productTypeCi).trim().toLowerCase() : "";
+  const typeCiSlug = /^[a-z0-9_\s]+$/.test(typeCiRaw) ? typeCiRaw : "";
+
+  let productTypeRequired = !!productTypeName;
+  let productTypeWhereClause = null;
+  if (typeCiSlug) {
+    productTypeRequired = true;
+    productTypeWhereClause = sqlWhere(
+      fn("LOWER", fn("TRIM", col("productType.name"))),
+      typeCiSlug
+    );
+  } else if (productTypeName) {
+    productTypeWhereClause = { name: { [Op.iLike]: `%${productTypeName}%` } };
+  }
+
   const productTypeInclude = {
     model: ProductType,
     as: "productType",
     attributes: ["id", "name"],
-    required: !!productTypeName,
-    ...(productTypeName && { where: { name: { [Op.iLike]: `%${productTypeName}%` } } }),
+    required: productTypeRequired,
+    ...(productTypeWhereClause && { where: productTypeWhereClause }),
   };
   const productMakeInclude = {
     model: ProductMake,
