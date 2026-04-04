@@ -5,6 +5,37 @@ const responseHandler = require("../../common/utils/responseHandler.js");
 const orderService = require("../order/order.service.js");
 const { resolveHomeVisibilityContext } = require("./homeVisibilityContext.js");
 
+const mergeCapacityDashboardFilters = (query = {}) => {
+    const {
+        capacity_kw_from,
+        capacity_kw_to,
+        capacity_from,
+        capacity_to: capToParam,
+        capacity,
+        capacity_op,
+        capacity_to,
+    } = query || {};
+    let c = capacity;
+    let cop = capacity_op;
+    let cto = capacity_to != null ? capacity_to : capToParam;
+    if (capacity_kw_from != null && String(capacity_kw_from).trim() !== "") {
+        c = String(capacity_kw_from).trim();
+        cto =
+            capacity_kw_to != null && String(capacity_kw_to).trim() !== ""
+                ? String(capacity_kw_to).trim()
+                : c;
+        cop = cop || "between";
+    } else if (capacity_from != null && String(capacity_from).trim() !== "") {
+        c = String(capacity_from).trim();
+        cto =
+            capToParam != null && String(capToParam).trim() !== ""
+                ? String(capToParam).trim()
+                : c;
+        cop = cop || "between";
+    }
+    return { capacity: c, capacity_op: cop, capacity_to: cto };
+};
+
 const normalizeDashboardFilters = (query = {}) => {
     const {
         customer_name = null,
@@ -20,6 +51,10 @@ const normalizeDashboardFilters = (query = {}) => {
         status = null,
         current_stage_key = null,
         project_scheme_id = null,
+        cancelled_stage = null,
+        cancelled_at_stage_key = null,
+        solar_panel_id = null,
+        inverter_id = null,
     } = query;
 
     let from = order_date_from;
@@ -48,6 +83,11 @@ const normalizeDashboardFilters = (query = {}) => {
         status,
         current_stage_key,
         project_scheme_id,
+        cancelled_stage,
+        cancelled_at_stage_key,
+        solar_panel_id,
+        inverter_id,
+        ...mergeCapacityDashboardFilters(query),
     };
 };
 
@@ -57,6 +97,7 @@ const dashboardKpis = asyncHandler(async (req, res) => {
     const result = await orderService.getOrdersDashboardKpis({
         filters,
         enforced_handled_by_ids: enforcedHandledByIds,
+        kpi_scope: req.query?.kpi_scope,
     });
     return responseHandler.sendSuccess(res, result, "Order dashboard KPIs fetched", 200);
 });
@@ -110,6 +151,13 @@ const dashboardOrders = asyncHandler(async (req, res) => {
         reference_from: filters.reference_from,
         current_stage_key: filters.current_stage_key,
         project_scheme_id: filters.project_scheme_id,
+        capacity: filters.capacity,
+        capacity_op: filters.capacity_op,
+        capacity_to: filters.capacity_to,
+        cancelled_stage: filters.cancelled_stage,
+        cancelled_at_stage_key: filters.cancelled_at_stage_key,
+        solar_panel_id: filters.solar_panel_id,
+        inverter_id: filters.inverter_id,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
 
