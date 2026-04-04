@@ -12,6 +12,37 @@ const { getTeamHierarchyUserIds } = require("../../common/utils/teamHierarchyCac
 const { assertRecordVisibleByListingCriteria } = require("../../common/utils/listingCriteriaGuard.js");
 const { resolveOrderVisibilityContext } = require("./orderVisibilityContext.js");
 
+const mergeCapacityDashboardFilters = (query = {}) => {
+    const {
+        capacity_kw_from,
+        capacity_kw_to,
+        capacity_from,
+        capacity_to: capToParam,
+        capacity,
+        capacity_op,
+        capacity_to,
+    } = query || {};
+    let c = capacity;
+    let cop = capacity_op;
+    let cto = capacity_to != null ? capacity_to : capToParam;
+    if (capacity_kw_from != null && String(capacity_kw_from).trim() !== "") {
+        c = String(capacity_kw_from).trim();
+        cto =
+            capacity_kw_to != null && String(capacity_kw_to).trim() !== ""
+                ? String(capacity_kw_to).trim()
+                : c;
+        cop = cop || "between";
+    } else if (capacity_from != null && String(capacity_from).trim() !== "") {
+        c = String(capacity_from).trim();
+        cto =
+            capToParam != null && String(capToParam).trim() !== ""
+                ? String(capToParam).trim()
+                : c;
+        cop = cop || "between";
+    }
+    return { capacity: c, capacity_op: cop, capacity_to: cto };
+};
+
 const ORDER_PAGE_MODULE_ROUTES = ["/order", "/confirm-orders", "/closed-orders", "/cancelled-orders", "/fabrication-installation"];
 
 const resolveFabricationInstallationVisibilityContext = async (req) => {
@@ -49,10 +80,14 @@ const normalizeDashboardFilters = (query = {}) => {
         order_date_to = null,
         status = null,
         current_stage_key = null,
+        cancelled_stage = null,
+        cancelled_at_stage_key = null,
+        solar_panel_id = null,
+        inverter_id = null,
     } = query;
 
     let effectiveStatus = status;
-    if (!effectiveStatus) {
+    if (effectiveStatus === undefined || effectiveStatus === null || effectiveStatus === "") {
         effectiveStatus = "confirmed";
     }
 
@@ -82,6 +117,11 @@ const normalizeDashboardFilters = (query = {}) => {
         order_date_to: to,
         status: effectiveStatus,
         current_stage_key,
+        cancelled_stage,
+        cancelled_at_stage_key,
+        solar_panel_id,
+        inverter_id,
+        ...mergeCapacityDashboardFilters(query),
     };
 };
 
@@ -105,6 +145,8 @@ const list = asyncHandler(async (req, res) => {
         project_cost,
         project_cost_op,
         project_cost_to,
+        solar_panel_id,
+        inverter_id,
     } = req.query;
     const { enforcedHandledByIds } = await resolveOrderVisibilityContext(req);
     const result = await orderService.listOrders({
@@ -126,6 +168,8 @@ const list = asyncHandler(async (req, res) => {
         project_cost,
         project_cost_op,
         project_cost_to,
+        solar_panel_id,
+        inverter_id,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
     return responseHandler.sendSuccess(res, result, "Order list fetched", 200);
@@ -149,6 +193,8 @@ const exportList = asyncHandler(async (req, res) => {
         project_cost,
         project_cost_op,
         project_cost_to,
+        solar_panel_id,
+        inverter_id,
     } = req.query;
     const { enforcedHandledByIds } = await resolveOrderVisibilityContext(req);
     const buffer = await orderService.exportOrders({
@@ -168,6 +214,8 @@ const exportList = asyncHandler(async (req, res) => {
         project_cost,
         project_cost_op,
         project_cost_to,
+        solar_panel_id,
+        inverter_id,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
     const filename = `orders-${new Date().toISOString().split("T")[0]}.xlsx`;
@@ -182,6 +230,7 @@ const dashboardKpis = asyncHandler(async (req, res) => {
     const result = await orderService.getOrdersDashboardKpis({
         filters,
         enforced_handled_by_ids: enforcedHandledByIds,
+        kpi_scope: req.query?.kpi_scope,
     });
     return responseHandler.sendSuccess(res, result, "Order dashboard KPIs fetched", 200);
 });
@@ -235,6 +284,13 @@ const dashboardOrders = asyncHandler(async (req, res) => {
         reference_from: filters.reference_from,
         project_scheme_id: filters.project_scheme_id,
         current_stage_key: filters.current_stage_key,
+        capacity: filters.capacity,
+        capacity_op: filters.capacity_op,
+        capacity_to: filters.capacity_to,
+        cancelled_stage: filters.cancelled_stage,
+        cancelled_at_stage_key: filters.cancelled_at_stage_key,
+        solar_panel_id: filters.solar_panel_id,
+        inverter_id: filters.inverter_id,
         enforced_handled_by_ids: enforcedHandledByIds,
     });
 
